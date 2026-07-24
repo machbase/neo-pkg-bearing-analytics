@@ -1,0 +1,4 @@
+.vhov1:hover { background: rgba(255,255,255,.04); }
+.vhov2:hover { border-color: var(--primary-light); }
+.vhov3:hover { background: rgba(255,255,255,.06); }
+.vhov4:hover { background: rgba(255,255,255,.03); }

@@ -1,0 +1,19 @@
+/* machcode-ds spacing tokens. Compact 2/4/8 rhythm typical of dense consoles. */
+:root {
+  --space-1: 2px;
+  --space-2: 4px;
+  --space-3: 6px;
+  --space-4: 8px;
+  --space-5: 10px;
+  --space-6: 12px;
+  --space-8: 16px;
+  --space-10: 20px;
+  --space-12: 24px;
+  --space-16: 32px;
+
+  /* Control heights */
+  --control-h-sm: 26px;
+  --control-h-md: 36px;
+  --control-h-lg: 50px;
+  --field-h: 32px;
+}

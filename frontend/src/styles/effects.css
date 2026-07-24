@@ -1,0 +1,20 @@
+/* machcode-ds radius, shadow & motion tokens. */
+:root {
+  /* Radius */
+  --radius-sm: 3px;
+  --radius-base: 4px;
+  --radius-md: 8px;
+  --radius-lg: 10px;
+
+  /* Shadows */
+  --shadow-button: 0 4px 4px rgba(0, 0, 0, 0.25);
+  --shadow-menu: 0 4px 12px rgba(0, 0, 0, 0.3);
+  --shadow-modal: 8px 8px 8px rgba(0, 0, 0, 0.6);
+  --focus-ring: 0 0 0 3px rgba(0, 108, 210, 0.5);
+
+  /* Motion */
+  --ease-standard: ease; /* @kind other */
+  --duration-fast: 0.15s; /* @kind other */
+  --duration-base: 0.2s; /* @kind other */
+  --duration-slow: 0.3s; /* @kind other */
+}

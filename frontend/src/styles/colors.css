@@ -1,0 +1,187 @@
+/* machcode-ds color tokens.
+   Values are verbatim from the machbase neo-web source:
+     · src/design-system/tokens/_colors.scss   (modern DS tokens — DARK, canonical)
+     · src/assets/scss/variables.scss           ($d-* dark / $l-* light legacy shell)
+   The product ships DARK by default (`:root`). The legacy app shell also defines a
+   LIGHT theme (home / modals / worksheet / sql), exposed here under
+   [data-theme="light"]. Raw palette first, semantic aliases second. */
+
+:root {
+  /* ---- Surfaces (dark, layered) ---- */
+  --bg-primary: #1e1e1e;          /* app canvas, editor */
+  --bg-secondary: #252525;        /* panels, sidebar, active tab */
+  --bg-elevated: #2c2c2c;         /* raised surfaces, login card */
+  --bg-panel: #252525;
+  --bg-sub-tab-active: #2e2e2e;
+  --bg-input: rgba(255, 255, 255, 0.13);
+  --bg-input-dark: #353535;
+  --bg-user-message: #323233;     /* rgb(50,50,51) */
+  --surface-menu: #2d2d2d;        /* dropdown / menu popover */
+  --surface-menu-hover: #3d3d3d;  /* dropdown option hover */
+
+  /* aliases kept for existing specimen cards / kit */
+  --surface-app: var(--bg-primary);
+  --surface-panel: var(--bg-secondary);
+  --surface-elevated: var(--bg-elevated);
+  --surface-input: var(--bg-input);
+
+  /* ---- Text (cool-tinted to harmonize with the cool #262831 main surface;
+     nudged off neutral gray — imperceptibly close to vendor #f1f1f1 neighbours) ---- */
+  --text-primary: #f0f1f4;
+  --text-secondary: #c3c7cf;
+  --text-tertiary: #9ba0aa;
+  --text-disabled: #74787f;
+  --text-muted: #6c7079;
+  --text-hint: #a4a8b0;
+  --text-row-number: #3b3b3b;
+  --menu-item-text: #e8e8e8;
+  --menu-item-icon: #b0b0b0;
+
+  /* ---- Primary (accent blue) ---- */
+  --primary-base: #005fb8;        /* canonical brand blue, buttons */
+  --primary-hover: #0075e2;
+  --primary-light: #006cd2;        /* rgb(0,108,210) — focus border / active */
+  --primary-dark: #0053a0;         /* rgb(0,83,160) — pressed */
+  --accent-ring: rgba(0, 108, 210, 0.4);
+  /* aliases */
+  --accent: var(--primary-base);
+  --accent-hover: var(--primary-hover);
+
+  /* ---- Semantic (DARK) --------------------------------------------------
+     Refined to natural, non-neon tones that stay legible on dark surfaces.
+     Original verbatim source values are noted in comments for traceability. */
+  --success: #5cc26e;             /* natural leaf green   (src #71e071) */
+  --success-light: #7bd98a;       /*                      (src #9df486) */
+  --danger: #f36b6b;              /* softened red         (src #ff5353) */
+  --danger-light: #f78a8a;        /*                      (src #fa6464) */
+  --danger-border: #e05656;       /* input error border   (src #e53935) */
+  --warning: #f2a63a;             /* warm amber           (src #ff9800) */
+  --warning-event: #f2cd6b;       /* event-match / etc    (src #ffdc72) */
+  --info: #2b7cd3;                /* info blue (tuned to accent family, src #005fb8) */
+
+  /* ---- Status circle (mirror semantic light variants) ---- */
+  --status-true: var(--success-light);   /* src #9df486 */
+  --status-false: var(--danger-light);    /* src #fa6464 */
+  --status-none: #868b94;                 /* cool neutral (src #717171) */
+
+  /* ---- Table-type tags (natural, hue identity preserved) ---- */
+  --tag-table: #2b7cd3;           /* TAG = info   (src #005fb8) */
+  --log-table: #ec5f5f;           /* LOG = danger (src #ff4747) */
+  --kv-table: #1fa896;            /* KV  = teal   (src #009688) */
+  --vol-table: #f2a63a;           /* VOL = warning(src #ff9800) */
+  --etc-table: #f2cd6b;           /* ETC = event  (src #ffdc72) */
+
+  /* ---- Buttons ---- */
+  --btn-create: #005fb8;
+  --btn-delete: #ff4747;
+  --btn-copy: #6f7173;
+  --btn-status: #009688;
+  --btn-send: #5b5b5b;
+  --btn-send-border: #626263;
+
+  /* ---- Chart accents (Tag Analyzer) ---- */
+  --chart-blue: #4199ff;
+  --chart-orange: #fdb532;
+
+  /* ---- Borders ---- */
+  --border-default: rgba(255, 255, 255, 0.13);
+  --border-light: #f1f1f125;      /* ~9% white hairline */
+  --border-medium: #626263;
+  --border-focus: #006cd2;        /* rgb(0,108,210) */
+  --border-active: #005fb8;
+  /* alias */
+  --border-input: var(--border-medium);
+
+  /* ---- Overlay / hover fills ---- */
+  --overlay-hover: rgba(255, 255, 255, 0.08);   /* bg-hover / tab-hover */
+  --overlay-active: rgba(255, 255, 255, 0.13);  /* bg-hover-block */
+  --overlay-hover-solid: #4b4b4b;               /* bg-hover-light rgb(75,75,75) */
+  --overlay-scrim: rgba(0, 0, 0, 0.7);
+  --overlay-shadow: rgba(0, 0, 0, 0.125);       /* #00000020 */
+
+  /* ---- Scrollbar (dark) ---- */
+  --scrollbar-thumb: #5c5c5c;
+  --scrollbar-thumb-hover: #868686;
+  --scrollbar-border: #686868;
+  --scrollbar-track: transparent;
+  --scrollbar-track-bg: #2a2a2a;
+
+  /* ---- Common ---- */
+  --color-black: #000000;
+  --color-white: #ffffff;
+}
+
+/* ============================================================================
+   LIGHT THEME — canonical light palette (refined cool-slate; ink #23262e).
+   A crisp, premium light scheme (GitHub/Linear-light quality): cool neutral
+   surfaces, a rich text hierarchy, and soft low-alpha borders/shadows.
+   Scoped on the .theme-light CLASS (same hook the component overrides in
+   tokens/theme-light.css and the card toggle use — one source of truth).
+   These are the exact values the dark→light component remap resolves to.
+   ============================================================================ */
+.theme-light {
+  /* ---- Surfaces (base white → cool panel → header) ---- */
+  --bg-primary: #ffffff;         /* app / editor / base / cards   (dark #1e1e1e) */
+  --bg-secondary: #f6f7f9;       /* panel / sidebar               (dark #252525) */
+  --bg-elevated: #ffffff;        /* cards / menus / inputs         (dark #2c2c2c/#2d2d2d) */
+  --surface-header: #eef0f3;     /* table header / sub-tab         (dark #2c2c2c th / #2e2e2e) */
+  --bg-shell: #e7e9ee;           /* resize gutters / shell         (dark #1a1a1a) */
+  --bg-modal: #e4e7ec;           /* modal backdrop */
+  --surface-app: var(--bg-primary);
+  --surface-panel: var(--bg-secondary);
+  --surface-elevated: var(--bg-elevated);
+  --surface-menu: var(--bg-elevated);
+  --surface-input: var(--bg-elevated);
+
+  /* ---- Text (cool ink #23262e, stepped) ---- */
+  --text-primary: #23262e;       /* primary   (dark #f1f1f1) */
+  --text-secondary: #545b66;     /* secondary (dark #c4c4c4) */
+  --text-tertiary: #7b828d;      /* tertiary  (dark #a3a3a3) */
+  --text-disabled: #9aa0aa;      /* disabled  (dark #818181) */
+  --text-muted: #6b7280;         /* muted     (dark #727272) */
+  --text-hint: #6b7280;
+  --menu-item-text: #23262e;
+  --menu-item-icon: #7b828d;
+
+  /* ---- Borders (cool slate, soft) ---- */
+  --border-default: rgba(35, 38, 46, 0.12);  /* hairline on white */
+  --border-light: rgba(35, 38, 46, 0.08);
+  --border-medium: rgba(35, 38, 46, 0.24);   /* (dark #626263) */
+  --border-input: rgba(35, 38, 46, 0.16);    /* (dark #3e3e3e/#3a3a3a) */
+  /* --border-focus / --border-active keep accent blue (shared) */
+
+  /* ---- Overlay / hover fills (subtle) ---- */
+  --overlay-hover: rgba(35, 38, 46, 0.055);  /* (dark rgba(255,255,255,.08)) */
+  --overlay-active: rgba(35, 38, 46, 0.09);  /* (dark rgba(255,255,255,.13)) */
+  --overlay-hover-solid: rgba(35, 38, 46, 0.10);
+  --overlay-scrim: rgba(35, 38, 46, 0.32);
+  --overlay-shadow: rgba(35, 38, 46, 0.12);
+
+  /* ---- Scrollbar (light) ---- */
+  --scrollbar-thumb: rgba(35, 38, 46, 0.22);
+  --scrollbar-thumb-hover: rgba(35, 38, 46, 0.36);
+  --scrollbar-track: transparent;
+  --scrollbar-track-bg: rgba(35, 38, 46, 0.04);
+
+  /* ---- Semantic / status / tags (LIGHT) --------------------------------
+     Deepened for contrast on white — the dark-mode tones are too light to read
+     as text/fills on a white surface. Accent blue is shared (see :root). */
+  --success: #1f9d55;
+  --success-light: #2fae63;
+  --danger: #d64545;
+  --danger-light: #e05a5a;
+  --danger-border: #d33636;
+  --warning: #c77d0a;
+  --warning-event: #b8860b;
+  --info: #005fb8;
+  --status-true: #1f9d55;
+  --status-false: #d64545;
+  --status-none: #6b7280;
+  --tag-table: #005fb8;
+  --log-table: #d64545;
+  --kv-table: #0f8a7a;
+  --vol-table: #c77d0a;
+  --etc-table: #b8860b;
+  --chart-blue: #2b7cd3;
+  --chart-orange: #e08a12;
+}

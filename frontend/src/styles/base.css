@@ -1,0 +1,16 @@
+/* 프로토타입 dc.html <helmet> 인라인 스타일 이식 */
+html, body { margin: 0; height: 100%; background: var(--bg-primary); }
+#app { height: 100%; }
+* { box-sizing: border-box; }
+.codicon { font-family: 'codicon'; display: inline-flex; align-items: center; justify-content: center; line-height: 1; }
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-thumb { background: var(--scrollbar-thumb); border-radius: 5px; }
+::-webkit-scrollbar-thumb:hover { background: var(--scrollbar-thumb-hover); }
+::-webkit-scrollbar-track { background: transparent; }
+input, select, button, textarea { font-family: inherit; }
+a { color: var(--primary-hover); text-decoration: none; }
+a:hover { color: var(--primary-light); }
+@keyframes vspin { to { transform: rotate(360deg); } }
+@keyframes vskl { 0% { opacity: .45; } 50% { opacity: .9; } 100% { opacity: .45; } }
+@keyframes vtoast { from { opacity: 0; transform: translate(-50%, 12px); } to { opacity: 1; transform: translate(-50%, 0); } }
+@keyframes vpulse { 0%, 100% { opacity: 1; } 50% { opacity: .3; } }
