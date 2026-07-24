@@ -1,5 +1,5 @@
 SCRIPT({
-function jr(i,e,t,a,n){var r=[],l;if(!i)l={g:e,since:a,cand:e,candSince:a,lastRe:a,b:t},e>0&&r.push({etype:"threshold",gi:e});else if(e===i.g){var g=i.lastRe||i.since||a;if(l={g:i.g,since:i.since||a,cand:i.g,candSince:i.since||a,lastRe:g,b:t},i.g>0){var u=n.reno[i.g]||0;u>0&&a-g>=u&&(r.push({etype:"sustained",gi:i.g}),l.lastRe=a)}}else{var p=e>i.g?n.escHold:n.recHold,v=i.cand===e&&i.candSince||a;a-v>=p?(l={g:e,since:a,cand:e,candSince:a,lastRe:a,b:t},e>i.g?r.push({etype:"threshold",gi:e}):e===0&&r.push({etype:"recovery",gi:0})):l={g:i.g,since:i.since||a,cand:e,candSince:v,lastRe:i.lastRe||i.since||a,b:t}}return t&&!(i&&i.b)&&r.push({etype:"baseline",gi:Math.max(1,e)}),{next:l,events:r}}
+var judgeTick = function jr(i,e,t,a,n){var r=[],l;if(!i)l={g:e,since:a,cand:e,candSince:a,lastRe:a,b:t},e>0&&r.push({etype:"threshold",gi:e});else if(e===i.g){var g=i.lastRe||i.since||a;if(l={g:i.g,since:i.since||a,cand:i.g,candSince:i.since||a,lastRe:g,b:t},i.g>0){var u=n.reno[i.g]||0;u>0&&a-g>=u&&(r.push({etype:"sustained",gi:i.g}),l.lastRe=a)}}else{var p=e>i.g?n.escHold:n.recHold,v=i.cand===e&&i.candSince||a;a-v>=p?(l={g:e,since:a,cand:e,candSince:a,lastRe:a,b:t},e>i.g?r.push({etype:"threshold",gi:e}):e===0&&r.push({etype:"recovery",gi:0})):l={g:i.g,since:i.since||a,cand:e,candSince:v,lastRe:i.lastRe||i.since||a,b:t}}return t&&!(i&&i.b)&&r.push({etype:"baseline",gi:Math.max(1,e)}),{next:l,events:r}};
 function enc(o){return encodeURIComponent(JSON.stringify(o)).replace(/'/g,"%27");}
 function dec(s){try{return JSON.parse(decodeURIComponent(s));}catch(e){return null;}}
 function esc(s){return String(s).replace(/'/g,"''");}
@@ -8,6 +8,7 @@ var db=$.db(), now=Date.now(), nDone=0, roll={};
 function rollupOk(tbl){ if(roll[tbl]===undefined){ var n=0; db.query("select count(*) from M$SYS_TABLES where NAME like '_"+tbl+"_ROLLUP_%'").forEach(function(r){n=r[0];}); roll[tbl]=n>0; } return roll[tbl]; }
 var CFG={"escHold":0,"recHold":300000,"reno":{"1":0,"2":3600000,"3":1800000}};
 var TAGS=[{"tbl":"BEARING","tag":"C1","alias":"c1","unit":"mm/s","zones":[1.12,2.8,7.1],"bl":{"mu":0.9725,"sigma":0.9384,"k":3}},{"tbl":"BEARING","tag":"C2","alias":"c2","unit":"mm/s","zones":[1.12,2.8,7.1],"bl":{"mu":1.0038,"sigma":1.0009,"k":3}},{"tbl":"VIBE_TEST","tag":"SENSOR_FREQ","alias":"1","unit":"mm/s","zones":[1.12,2.8,7.1],"bl":{"mu":2.3243,"sigma":0.4813,"k":3}},{"tbl":"VIBE_TEST","tag":"SENSOR_NORMAL","alias":"2","unit":"mm/s","zones":[1.12,2.8,7.1],"bl":{"mu":1.5818,"sigma":0.0021,"k":3}},{"tbl":"VIBE_TEST","tag":"SENSOR_SPIKE","alias":"3","unit":"mm/s","zones":[1.12,2.8,7.1],"bl":{"mu":1.6855,"sigma":0.031,"k":3}},{"tbl":"VIBE_TEST","tag":"SENSOR_TREND","alias":"4","unit":"mm/s","zones":[1.12,2.8,7.1],"bl":{"mu":3.9516,"sigma":1.3661,"k":3}}];
+var __NF=(function(){
 function a(u){return String(u==null?"":u).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;")}
 function n(u,p){return'<tr><td style="color:#666">'+a(u)+"</td><td><b>"+a(p)+"</b></td></tr>"}
 function t(u){var p=u.timeText||"",v=(u.val==null?"":Number(u.val).toFixed(3))+(u.unit?" "+u.unit:""),x=u.lim==null?"":Number(u.lim).toFixed(3),f="["+(u.gradeKo||"알람")+"] "+(u.alias||u.tag)+" · "+(u.typeKo||""),T=f+`
@@ -17,6 +18,9 @@ function t(u){var p=u.timeText||"",v=(u.val==null?"":Number(u.val).toFixed(3))+(
 발생: `+p,R='<div style="font-family:sans-serif"><h3 style="margin:0 0 8px">'+a(f)+'</h3><table cellpadding="4" style="border-collapse:collapse;font-size:14px">'+n("설비/태그",(u.alias||u.tag)+(u.tag&&u.alias&&u.alias!==u.tag?" ("+u.tag+")":""))+n("등급",u.gradeKo||"-")+n("유형",u.typeKo||"-")+n("측정값",v)+n("기준",x)+n("발생",p)+"</table></div>";return{subject:f,text:T,html:R,event:u}}
 function e(u,p){var v=String(p||"");return/hooks\.slack\.com/i.test(v)?{text:u.text}:/discord(app)?\.com\/api\/webhooks/i.test(v)?{content:u.text}:/webhook\.office\.com|office\.com\/webhookb2|logic\.azure\.com/i.test(v)?{text:u.text}:{text:u.text,content:u.text,subject:u.subject,body:u.html,event:u.event||null}}
 function r(u,p,v,x){x=x||{};var f=(x.channels||{})[v];if(!f||!f.on||!f.to)return!1;var T=x.routes||{},R=function(y){var B=T[y];return!!(B&&B[v]&&B.timing!=="무시")};return p==="recovery"?R("주의")||R("위험")||R("심각"):R(u)}
+return {em:t,pf:e,sn:r};
+})();
+var eventMessage=__NF.em, payloadFor=__NF.pf, shouldNotify=__NF.sn;
 var NOTIFY={"channels":{"webhook":{"on":true,"to":"https://webhook.site/dec08226-efad-4bd3-8538-04453dca5170"}},"routes":{"주의":{"webhook":false,"email":false,"sms":false,"timing":"즉시"},"위험":{"webhook":true,"email":false,"sms":false,"timing":"즉시"},"심각":{"webhook":true,"email":false,"sms":false,"timing":"즉시"}}};
 var TYPEKO={"threshold":"임계 초과","sustained":"상태 지속","recovery":"정상 복귀","baseline":"베이스라인 이탈"};
 function fmtTs(ms){ var d=new Date(ms); function p(n){return (n<10?"0":"")+n;} return d.getFullYear()+"-"+p(d.getMonth()+1)+"-"+p(d.getDate())+" "+p(d.getHours())+":"+p(d.getMinutes())+":"+p(d.getSeconds()); }

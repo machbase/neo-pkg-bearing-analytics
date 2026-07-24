@@ -71,10 +71,17 @@
   }
 
   // 서버(타이머 TQL)에 인라인할 소스 — 앱이 쓰는 바로 그 함수를 그대로 심는다(규칙 드리프트 0).
-  // esc·row는 eventMessage의 의존이라 함께 넣어야 한다(toString은 모듈 스코프를 포함하지 않으므로).
+  //  · esc·row는 eventMessage의 의존이라 함께 넣는다(toString은 모듈 스코프를 포함하지 않으므로).
+  //  · IIFE로 감싸는 이유: 내부 esc가 호출측(monitor의 SQL용 esc)과 이름이 겹쳐 덮어쓰는 사고를 막는다.
+  //  · f.name으로 재노출하는 이유: 빌드 시 미니파이로 함수명이 바뀌어도(judgeTick→ie 등)
+  //    호출측이 쓰는 고정 이름에 바인딩되도록 — 실제로 이걸 안 해서 서버 모드가 죽었었다.
   function serverSrc() {
-    return [esc, row, eventMessage, payloadFor, shouldNotify]
+    var decls = [esc, row, eventMessage, payloadFor, shouldNotify]
       .map(function (f) { return f.toString(); }).join('\n');
+    return 'var __NF=(function(){\n' + decls + '\n'
+      + 'return {em:' + eventMessage.name + ',pf:' + payloadFor.name + ',sn:' + shouldNotify.name + '};\n'
+      + '})();\n'
+      + 'var eventMessage=__NF.em, payloadFor=__NF.pf, shouldNotify=__NF.sn;';
   }
 
   return {

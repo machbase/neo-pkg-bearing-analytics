@@ -23,7 +23,8 @@
 
     var body = [
       'SCRIPT({',
-      judgeSrc, // 순수 judgeTick(prev,rg,breach,now,cfg) — 앱과 동일 소스
+      // var에 대입해 두는 이유: 빌드 미니파이로 함수명이 바뀌어도(judgeTick→ie) 호출측 이름이 유지된다
+      'var judgeTick = ' + judgeSrc + ';', // 순수 judgeTick(prev,rg,breach,now,cfg) — 앱과 동일 소스
       'function enc(o){return encodeURIComponent(JSON.stringify(o)).replace(/\'/g,"%27");}',
       'function dec(s){try{return JSON.parse(decodeURIComponent(s));}catch(e){return null;}}',
       'function esc(s){return String(s).replace(/\'/g,"\'\'");}',
