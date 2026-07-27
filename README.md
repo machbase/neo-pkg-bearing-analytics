@@ -1,4 +1,4 @@
-# neo-pkg-vibe-analytics v0.1.0 (beta)
+# neo-pkg-vibe-analytics v0.1.0
 
 A vibration analysis package for monitoring rotating-machinery health from time-series data stored in Machbase Neo.
 

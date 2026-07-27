@@ -29,6 +29,7 @@ Object.assign(app.state, {
   ready: true, srcSel: app.liveTables.slice(), selTag: eq0.id, diagTag: eq0.id,
   events: d.events.slice(), reports: d.reports.slice(),
   genTags: sorted.slice(0, 3).map(e => e.id),
+  genPeriod: 'all', genFrom: E.fmtDT(d.now - 86400000), genTo: E.fmtDT(d.now),
   from: E.fmtDT(d.now - 7 * 86400000).slice(0, 10), to: E.fmtDT(d.now).slice(0, 10),
 });
 const cases = [
@@ -42,6 +43,8 @@ const cases = [
   ['detail AI 폴백+커스텀기간', { tab: 'detail', dxOpen: true, dxAiText: '__fallback__', period: 'custom' }],
   ['report 기본', { tab: 'report' }],
   ['report 생성중+미리보기모달', { tab: 'report', genRunning: true, genStep: 2, viewReport: { rec: {}, url: 'report.html?x=1', fname: 'RPT_TEST.html' } }],
+  ['report 커스텀 기간', { tab: 'report', genPeriod: 'custom' }],
+  ['report 대상 태그 미선택(기간 없음)', { tab: 'report', genTags: [], genPeriod: '', genFrom: '', genTo: '' }],
   ['report 빈 소스', { tab: 'report', srcSel: [] }],
   ['settings source+dirty+이동확인모달', { tab: 'settings', setSection: 'source', dirty: true, pendingNav: 'monitor' }],
   ['settings equip+펼침+커스텀베어링', { tab: 'settings', setSection: 'equip', equipAdv: { [eq0.id]: true }, equipBearing: { [eq0.id]: '직접 입력' } }],

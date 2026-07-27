@@ -3,7 +3,7 @@ import { html } from './html.js';
 
 export function view(v) {
   const {
-    activeCount, aliasRows, blEmpty, blK, blRows, blWin, cardSize, cards, cepNote, csvFrom, csvTo, dateStyle, detBearing, detSpec, detailEmptyShow, detailShow, dlFmt, dlOpen, dxActions, dxAiFallback, dxAiIdle, dxAiLoading, dxAiSections, dxAiText, dxEvidence, dxLlmModel, dxOpen, dxStamp, dxToggleLabel, dxVerdict, envHint, envMarkers, equipRows, equipUnsetDot, escHold, escHoldOptions, evalAgg, evalAggOptions, evalBasisText, evalWindow, evalWindowOptions, evtCapped, evtCount, evtEmpty, evtEmptyText, evtRows, evtScopeChips, evtTagFilter, evtTagOptions, evtTypeFilter, evtTypeOptions, fftMarkers, filterNotice, genBtnLabel, genBtnStyle, genKnobStyle, genLLMNotice, genRunning, genSelAllLabel, genSteps, genTagsCount, genToggleStyle, goSettings, gridCols, indicsDesc, indicsTitle, isMonitor, isOllama, isSettings, kpiCells, lastEventText, llmApiKey, llmModel, llmModelPh, llmProvOptions, llmProviderSel, llmProviders, llmProvsAvail, llmStatusColor, llmStatusText, llmTestColor, llmTestIcon, llmTestMsg, llmTestShow, llmTesting, logoFilter, mcDescBody, mcDescTitle, mcOptions, mcZones, monBlNotice, monBlUnlearned, monEmpty, monEventsShow, monKnobStyle, monModeBadgeShow, monModeBadgeStyle, monModeBadgeText, monModeOptions, monPillTitle, monToggleStyle, monitorDotColor, monitorDotRing, monitorInterval, monitorText, navTabs, notReady, notifChannels, ollamaUrl, onBlK, onBlLearnAll, onBlWin, onCardSize, onClearFilter, onCloseDownload, onCloseRv, onConfirmCancel, onConfirmDiscard, onConfirmSave, onCsvFrom, onCsvTo, onDlFmt, onDoDownload, onDxExplain, onEscHold, onEvalAgg, onEvalWindow, onEvtTag, onEvtType, onFormChange, onFromChange, onGenReport, onGenSelectAll, onGoSource, onLlmKey, onLlmModel, onLlmProvPick, onMonToggle, onMonitorInterval, onOllamaUrl, onOpenDownload, onRecHold, onRefresh, onResetThresh, onRouteSelectAll, onRpNext, onRpPrev, onSaveSettings, onSrcDismiss, onSrcReload, onSrcSelectAll, onTagChange, onTestLLM, onToChange, onToggleDx, onToggleGenLLM, onToggleMonitor, onTotalClick, pendingNavOpen, periodFrom, periodPresets, periodTo, recHold, recHoldOptions, renotifyOptions, renotifyRows, reportEmpty, reportEmptyShow, reportRows, reportShow, reportTags, rootClass, routeNoneWarn, routeRows, routeSelAllLabel, routeTimings, rpBtnStyle, rpPageText, rpPagerShow, rvFname, rvOpen, rvUrl, secCriteria, secEquip, secLlm, secMonitor, secSource, selTag, serverMon, setNav, settingsActiveStyle, settingsDirty, sevCards, sevColor, sevGradeKo, sevMachine, sevReco, sevZones, showAdvanced, specIndics, srcNotice, srcSelAllLabel, srcSelCount, srcTables, srcTotal, statRows, stopClick, sumTotal, tagOptions, themeIcon, threshRows, toast, toastIcon, toastMsg, toastStyle, toggleTheme, totalStyle, unitOptions
+    activeCount, aliasRows, blEmpty, blK, blRows, blWin, cardSize, cards, cepNote, csvFrom, csvTo, dateStyle, detBearing, detSpec, detailEmptyShow, detailShow, dlFmt, dlOpen, dxActions, dxAiFallback, dxAiIdle, dxAiLoading, dxAiSections, dxAiText, dxEvidence, dxLlmModel, dxOpen, dxStamp, dxToggleLabel, dxVerdict, envHint, envMarkers, equipRows, equipUnsetDot, escHold, escHoldOptions, evalAgg, evalAggOptions, evalBasisText, evalWindow, evalWindowOptions, evtCapped, evtCount, evtEmpty, evtEmptyText, evtRows, evtScopeChips, evtTagFilter, evtTagOptions, evtTypeFilter, evtTypeOptions, fftMarkers, fftRangeChips, fftRangeShow, filterNotice, genBtnLabel, genBtnStyle, genCancelLabel, genCancelStyle, genDateStyle, genKnobStyle, genLLMNotice, genPeriodCustomShow, genPeriodFrom, genPeriodNone, genPeriodPresetShow, genPeriodPresets, genPeriodShow, genPeriodSummary, genPeriodTo, genRunning, genSelAllLabel, genSteps, genTagsCount, genToggleStyle, goSettings, gridCols, indicsDesc, indicsTitle, isMonitor, isOllama, isSettings, kpiCells, kurtWarn, kurtWarnShow, kurtogramHint, kurtogramShow, lastEventText, llmApiKey, llmModel, llmModelPh, llmProvOptions, llmProviderSel, llmProviders, llmProvsAvail, llmStatusColor, llmStatusText, llmTestColor, llmTestIcon, llmTestMsg, llmTestShow, llmTesting, logoFilter, mcDescBody, mcDescTitle, mcOptions, mcZones, monBlNotice, monBlUnlearned, monEmpty, monEventsShow, monKnobStyle, monModeBadgeShow, monModeBadgeStyle, monModeBadgeText, monModeOptions, monPillTitle, monToggleStyle, monitorDotColor, monitorDotRing, monitorInterval, monitorText, navTabs, notReady, notifChannels, ollamaUrl, onBlK, onBlLearnAll, onBlWin, onCancelGen, onCardSize, onClearFilter, onCloseDownload, onCloseRv, onConfirmCancel, onConfirmDiscard, onConfirmSave, onCsvFrom, onCsvTo, onDlFmt, onDoDownload, onDxExplain, onEscHold, onEvalAgg, onEvalWindow, onEvtTag, onEvtType, onFormChange, onFromChange, onGenFromChange, onGenReport, onGenSelectAll, onGenToChange, onGoSource, onLlmKey, onLlmModel, onLlmProvPick, onMonToggle, onMonitorInterval, onOllamaUrl, onOpenDownload, onRecHold, onRefresh, onResetThresh, onRouteSelectAll, onRpNext, onRpPrev, onSaveSettings, onSrcDismiss, onSrcReload, onSrcSelectAll, onTagChange, onTestLLM, onToChange, onToggleDx, onToggleGenLLM, onToggleMonitor, onTotalClick, pendingNavOpen, periodFrom, periodPresets, periodTo, qualityShow, qualityText, recHold, recHoldOptions, renotifyOptions, renotifyRows, reportEmpty, reportEmptyShow, reportRows, reportShow, reportTags, rootClass, routeNoneWarn, routeRows, routeSelAllLabel, routeTimings, rpBtnStyle, rpPageText, rpPagerShow, rvFname, rvOpen, rvUrl, secCriteria, secEquip, secLlm, secMonitor, secSource, selTag, serverMon, setNav, settingsActiveStyle, settingsDirty, sevCards, sevColor, sevGradeKo, sevMachine, sevReco, sevZones, showAdvanced, specIndics, srcNotice, srcSelAllLabel, srcSelCount, srcTables, srcTotal, statRows, stopClick, sumTotal, tagOptions, themeIcon, threshRows, toast, toastIcon, toastMsg, toastStyle, toggleTheme, totalStyle, unitChips, unitOptions
   } = v;
   return html`
 <div class=${rootClass} style="height: 100vh; display: flex; flex-direction: column; background: var(--bg-primary); color: var(--text-primary); font-family: var(--font-sans); font-size: 13px; overflow: hidden;">
@@ -149,6 +149,12 @@ export function view(v) {
           <button onClick=${onRefresh} style="margin-left: auto; display: inline-flex; align-items: center; gap: 6px; height: 34px; padding: 0 14px; border-radius: 6px; border: 1px solid var(--border-default); background: var(--bg-elevated); color: var(--text-secondary); font-size: 12px; font-weight: 500; cursor: pointer;"><span class="codicon codicon-refresh" style="font-size: 14px;"></span>새로고침</button>
         </div>
 
+        ${(qualityShow) ? html`
+          <div style="display: flex; align-items: flex-start; gap: 10px; padding: 12px 14px; margin-bottom: 14px; border-radius: 8px; background: rgba(199,125,10,.1); border: 1px solid rgba(199,125,10,.4);">
+            <span class="codicon codicon-warning" style="font-size: 16px; color: var(--warning); margin-top: 1px; flex-shrink: 0;"></span>
+            <div style="font-size: 12px; line-height: 1.55;"><b style="color: var(--warning);">신호 이상 — 센서 점검 필요</b><div style="color: var(--text-secondary); margin-top: 3px;">${qualityText}</div><div style="color: var(--text-muted); margin-top: 3px;">아래 분석·판정 결과를 신뢰하기 전에 센서·케이블 연결을 확인하세요.</div></div>
+          </div>
+        ` : null}
         <div style="display: flex; flex-wrap: wrap; background: var(--bg-secondary); border: 1px solid var(--border-default); border-radius: 8px; overflow: hidden; margin-bottom: 14px;">
           ${(detSpec || []).map((s) => html`
             <div style="flex: 1 1 0; min-width: 160px; padding: 14px 18px; border-right: 1px solid var(--border-default);">
@@ -285,6 +291,7 @@ export function view(v) {
               <canvas id="vc-kurt" style="width: 100%; height: 220px; display: block;"></canvas>
               <div id="vt-kurt" style="position: absolute; display: none; pointer-events: none; z-index: 10; background: var(--surface-menu); color: var(--text-primary); border: 1px solid var(--border-medium); border-radius: 4px; padding: 6px 9px; font-size: 12px; line-height: 1.55; white-space: nowrap; box-shadow: 0 4px 12px rgba(0,0,0,.3); font-family: var(--font-mono);"></div>
             </div>
+            ${(kurtWarnShow) ? html`<div style="display: flex; align-items: flex-start; gap: 8px; margin-top: 10px; padding: 9px 11px; border-radius: 6px; background: rgba(199,125,10,.1); border: 1px solid rgba(199,125,10,.35); font-size: 11px; color: var(--text-secondary); line-height: 1.55;"><span class="codicon codicon-warning" style="font-size: 13px; color: var(--warning); flex-shrink: 0; margin-top: 1px;"></span><span>${kurtWarn}</span></div>` : null}
           </div>
           <div style="background: var(--bg-primary); border: 1px solid var(--border-default); border-radius: 8px; padding: 16px 18px;">
             <div style="display: flex; align-items: center; gap: 9px; font-size: 15px; font-weight: 600; color: var(--text-primary); margin-bottom: 12px;"><span style="width: 3px; height: 15px; border-radius: 2px; background: var(--primary-base);"></span>결함 대역 에너지 추이 <span style="font-weight: 500; color: var(--text-muted); font-size: 13px;">Band Energy</span></div>
@@ -301,11 +308,15 @@ export function view(v) {
           ` : null}
         </div>
 
-        <div id="sec-spec" style="display: flex; align-items: center; gap: 10px; margin: 24px 0 12px;">
+        <div id="sec-spec" style="display: flex; align-items: center; gap: 10px; margin: 24px 0 12px; flex-wrap: wrap;">
           <span class="codicon codicon-pulse" style="font-size: 14px; color: var(--primary-light);"></span>
           <span style="font-size: 13px; font-weight: 700; letter-spacing: .6px; color: var(--text-primary);">스펙트럼 분석</span>
           <span style="font-size: 11px; color: var(--text-muted);">주파수 성분 분해 · 결함 원인 지목</span>
-          <div style="flex: 1 1 0; height: 1px; background: var(--border-light);"></div>
+          <div style="flex: 1 1 0; min-width: 20px; height: 1px; background: var(--border-light);"></div>
+          <span style="font-size: 11px; color: var(--text-muted);">표시 물리량</span>
+          <div style="display: flex; background: var(--bg-elevated); border: 1px solid var(--border-default); border-radius: 6px; overflow: hidden;" title="아래 파형·FFT·포락선·스펙트로그램의 표시 물리량 — 가속도↔속도↔변위 변환. 변위=저주파(불균형)·가속도=고주파(베어링) 강조. 추세·등급 판정에는 영향 없음">
+            ${(unitChips || []).map((uc) => html`<button onClick=${uc.onClick} title=${uc.title} style=${uc.style}>${uc.label}</button>`)}
+          </div>
         </div>
 
         <div style="background: var(--bg-primary); border: 1px solid var(--border-default); border-radius: 8px; padding: 16px 18px; margin-bottom: 14px;">
@@ -319,7 +330,7 @@ export function view(v) {
         </div>
 
         <div style="background: var(--bg-primary); border: 1px solid var(--border-default); border-radius: 8px; padding: 16px 18px; margin-bottom: 14px;">
-          <div style="display: flex; align-items: center; gap: 9px; font-size: 15px; font-weight: 600; color: var(--text-primary); margin-bottom: 12px;"><span style="width: 3px; height: 15px; border-radius: 2px; background: var(--primary-base);"></span>FFT 주파수 스펙트럼 <span style="margin-left: auto; font-size: 11px; color: var(--text-muted); font-weight: 400;">${detBearing}</span></div>
+          <div style="display: flex; align-items: center; gap: 9px; font-size: 15px; font-weight: 600; color: var(--text-primary); margin-bottom: 12px;"><span style="width: 3px; height: 15px; border-radius: 2px; background: var(--primary-base);"></span>FFT 주파수 스펙트럼 <span style="font-size: 11px; color: var(--text-muted); font-weight: 400;">${detBearing}</span>${(fftRangeShow) ? html`<span style="margin-left: auto; display: inline-flex; align-items: center; gap: 7px;"><span style="font-size: 11px; color: var(--text-muted); font-weight: 400;">범위</span><span style="display: inline-flex; border: 1px solid var(--border-medium); border-radius: 5px; overflow: hidden;">${(fftRangeChips || []).map((rc) => html`<button onClick=${rc.onClick} style=${rc.style}>${rc.label}</button>`)}</span></span>` : null}</div>
           <div style="font-size: 12px; color: var(--text-muted); margin: -4px 0 12px;">진동을 주파수별 성분으로 분해 · 결함 주파수와 맞춰 원인 지목</div>
           <div style="position: relative;">
             <canvas id="vc-fft" style="width: 100%; height: 280px; display: block;"></canvas>
@@ -334,12 +345,20 @@ export function view(v) {
 
         ${(showAdvanced) ? html`
         <div style="background: var(--bg-primary); border: 1px solid var(--border-default); border-radius: 8px; padding: 16px 18px; margin-bottom: 14px;">
-          <div style="display: flex; align-items: center; gap: 9px; font-size: 15px; font-weight: 600; color: var(--text-primary); margin-bottom: 12px;"><span style="width: 3px; height: 15px; border-radius: 2px; background: var(--primary-base);"></span>스펙트로그램 <span style="font-weight: 500; color: var(--text-muted); font-size: 13px;">Spectrogram · 시간×주파수</span></div>
+          <div style="display: flex; align-items: center; gap: 9px; font-size: 15px; font-weight: 600; color: var(--text-primary); margin-bottom: 12px;"><span style="width: 3px; height: 15px; border-radius: 2px; background: var(--primary-base);"></span>스펙트로그램 <span style="font-weight: 500; color: var(--text-muted); font-size: 13px;">Spectrogram · 시간×주파수</span>${(fftRangeShow) ? html`<span style="margin-left: auto; display: inline-flex; align-items: center; gap: 7px;"><span style="font-size: 11px; color: var(--text-muted); font-weight: 400;">범위</span><span style="display: inline-flex; border: 1px solid var(--border-medium); border-radius: 5px; overflow: hidden;">${(fftRangeChips || []).map((rc) => html`<button onClick=${rc.onClick} style=${rc.style}>${rc.label}</button>`)}</span></span>` : null}</div>
           <div style="font-size: 12px; color: var(--text-muted); margin: -4px 0 12px;">스펙트럼의 시간 변화 · 밝을수록 강한 성분 — 결함 대역이 언제부터 자랐는지 확인</div>
           <div style="position: relative;">
             <canvas id="vc-spec" style="width: 100%; height: 200px; display: block;"></canvas>
           </div>
         </div>
+
+        ${(kurtogramShow) ? html`
+        <div style="background: var(--bg-primary); border: 1px solid var(--border-default); border-radius: 8px; padding: 16px 18px; margin-bottom: 14px;">
+          <div style="display: flex; align-items: center; gap: 9px; font-size: 15px; font-weight: 600; color: var(--text-primary); margin-bottom: 4px;"><span style="width: 3px; height: 15px; border-radius: 2px; background: var(--primary-base);"></span>결함 대역 탐색 <span style="font-weight: 500; color: var(--text-muted); font-size: 13px;">Kurtogram · Spectral Kurtosis</span></div>
+          <div style="font-size: 12px; color: var(--text-muted); margin-bottom: 12px;">${kurtogramHint}</div>
+          <div style="position: relative;"><canvas id="vc-kurtogram" style="width: 100%; height: 180px; display: block;"></canvas></div>
+        </div>
+        ` : null}
 
         <div style="background: var(--bg-primary); border: 1px solid var(--border-default); border-radius: 8px; padding: 16px 18px; margin-bottom: 14px;">
           <div style="display: flex; align-items: center; gap: 9px; font-size: 15px; font-weight: 600; color: var(--text-primary); margin-bottom: 4px;"><span style="width: 3px; height: 15px; border-radius: 2px; background: var(--primary-base);"></span>포락선 분석 <span style="font-weight: 500; color: var(--text-muted); font-size: 13px;">Envelope · 베어링 결함 복조</span></div>
@@ -448,14 +467,26 @@ export function view(v) {
               `)}
             </div>
             <div style="font-size: 12px; font-weight: 600; color: var(--text-tertiary); margin-bottom: 8px;">기간</div>
-            <div style="display: flex; background: var(--bg-elevated); border: 1px solid var(--border-default); border-radius: 6px; overflow: hidden; margin-bottom: 10px; width: fit-content;">
-              ${(periodPresets || []).map((p) => html`<button onClick=${p.onClick} title=${p.title} style=${p.style}>${p.label}</button>`)}
-            </div>
-            <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 16px;">
-              <input type="datetime-local" value=${periodFrom} onChange=${onFromChange} style=${dateStyle} />
-              <span style="color: var(--text-muted);">~</span>
-              <input type="datetime-local" value=${periodTo} onChange=${onToChange} style=${dateStyle} />
-            </div>
+            ${(genPeriodNone) ? html`
+              <div style="display: flex; align-items: center; gap: 5px; margin-bottom: 16px; font-size: 11px; color: var(--text-muted);"><span class="codicon codicon-info" style="font-size: 12px;"></span>대상 태그를 선택하면 기간을 정할 수 있습니다</div>
+            ` : null}
+            ${(genPeriodShow) ? html`
+              <div style="display: flex; background: var(--bg-elevated); border: 1px solid var(--border-default); border-radius: 6px; overflow: hidden; margin-bottom: 10px; width: fit-content;">
+                ${(genPeriodPresets || []).map((p) => html`<button onClick=${p.onClick} title=${p.title} style=${p.style}>${p.label}</button>`)}
+              </div>
+            ` : null}
+            ${(genPeriodCustomShow) ? html`
+              <div style="display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: 6px 8px; margin-bottom: 8px;">
+                <span style="font-size: 11px; color: var(--text-muted);">시작</span>
+                <input type="datetime-local" value=${genPeriodFrom} onChange=${onGenFromChange} style=${genDateStyle} />
+                <span style="font-size: 11px; color: var(--text-muted);">종료</span>
+                <input type="datetime-local" value=${genPeriodTo} onChange=${onGenToChange} style=${genDateStyle} />
+              </div>
+              <div style="display: flex; align-items: center; gap: 5px; margin-bottom: 16px; font-size: 11px; color: var(--text-muted);"><span class="codicon codicon-info" style="font-size: 12px;"></span>선택한 태그 전부에 이 구간이 그대로 적용됩니다</div>
+            ` : null}
+            ${(genPeriodPresetShow) ? html`
+              <div style="display: flex; align-items: center; gap: 5px; margin-bottom: 16px; font-size: 11px; color: var(--text-muted);"><span class="codicon codicon-calendar" style="font-size: 12px;"></span>${genPeriodSummary}</div>
+            ` : null}
             <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 6px;">
               <div style=${genToggleStyle} onClick=${onToggleGenLLM}><div style=${genKnobStyle}></div></div>
               <span style="font-size: 13px; color: var(--text-secondary);">LLM 소견 포함</span>
@@ -468,6 +499,7 @@ export function view(v) {
               <div style="margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--border-light); display: flex; flex-direction: column; gap: 12px;">
                 ${(genSteps || []).map((s) => html`<div style="display: flex; align-items: center; gap: 10px;"><span style=${s.dotStyle}>${s.num}</span><span style=${s.labelStyle}>${s.label}</span></div>`)}
               </div>
+              <button onClick=${onCancelGen} style=${genCancelStyle}><span class="codicon codicon-stop-circle" style="font-size: 13px; vertical-align: -2px; margin-right: 5px;"></span>${genCancelLabel}</button>
             ` : null}
           </div>
 

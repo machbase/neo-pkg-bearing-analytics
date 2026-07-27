@@ -103,15 +103,34 @@
     ctx.strokeStyle = o.color; ctx.lineWidth = o.lw || 1.8; ctx.stroke();
     ctx.restore();
     // x labels
-    ctx.fillStyle = CC.axis; ctx.font = '9px ' + MONO; ctx.textAlign = 'center';
-    var ls = Math.max(1, Math.floor(n / 7)), last = '', rEdge = W - pad.r;
-    for (var q = 0; q < n; q += ls) {
-      if (o.xLabels[q] === last) continue;
-      var lx = X(q), lt = o.xLabels[q], hw = ctx.measureText(lt).width / 2;
-      if (lx - hw < pad.l) { ctx.textAlign = 'left'; ctx.fillText(lt, pad.l, H - pad.b + 16); }
-      else if (lx + hw > rEdge) { ctx.textAlign = 'right'; ctx.fillText(lt, rEdge, H - pad.b + 16); }
-      else { ctx.textAlign = 'center'; ctx.fillText(lt, lx, H - pad.b + 16); }
-      last = lt;
+    ctx.fillStyle = CC.axis; ctx.font = '9px ' + MONO;
+    if (tAxis) {
+      // 시간축: 데이터 위치가 아니라 xFrom~xTo를 균등 분할한 눈금에 라벨 → 데이터가 한쪽에 몰려도 안 겹침
+      var span = o.xTo - o.xFrom, TICKS = Math.max(2, Math.min(6, Math.floor(cw / 96)));
+      var tf = function (ms) {
+        var d = new Date(ms);
+        if (span < 20 * 60000) return z2(d.getHours()) + ':' + z2(d.getMinutes()) + ':' + z2(d.getSeconds());
+        if (span < 86400000) return z2(d.getHours()) + ':' + z2(d.getMinutes());
+        if (span < 3 * 86400000) return (d.getMonth() + 1) + '/' + d.getDate() + ' ' + z2(d.getHours()) + ':' + z2(d.getMinutes());
+        return (d.getMonth() + 1) + '/' + d.getDate();
+      };
+      for (var k = 0; k <= TICKS; k++) {
+        var lt = tf(o.xFrom + span * (k / TICKS));
+        if (k === 0) { ctx.textAlign = 'left'; ctx.fillText(lt, pad.l, H - pad.b + 16); }
+        else if (k === TICKS) { ctx.textAlign = 'right'; ctx.fillText(lt, W - pad.r, H - pad.b + 16); }
+        else { ctx.textAlign = 'center'; ctx.fillText(lt, pad.l + cw * (k / TICKS), H - pad.b + 16); }
+      }
+    } else {
+      ctx.textAlign = 'center';
+      var ls = Math.max(1, Math.floor(n / 7)), last = '', rEdge = W - pad.r;
+      for (var q = 0; q < n; q += ls) {
+        if (o.xLabels[q] === last) continue;
+        var lx = X(q), ltl = o.xLabels[q], hw = ctx.measureText(ltl).width / 2;
+        if (lx - hw < pad.l) { ctx.textAlign = 'left'; ctx.fillText(ltl, pad.l, H - pad.b + 16); }
+        else if (lx + hw > rEdge) { ctx.textAlign = 'right'; ctx.fillText(ltl, rEdge, H - pad.b + 16); }
+        else { ctx.textAlign = 'center'; ctx.fillText(ltl, lx, H - pad.b + 16); }
+        last = ltl;
+      }
     }
     ctx.strokeStyle = CC.axisLine; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(pad.l, pad.t + ch); ctx.lineTo(W - pad.r, pad.t + ch); ctx.stroke();
     var pts = vals.map(function (v, i) { var dv = sv[i]; return { x: X(i), y: pad.t + ch - (dv - mn) / range * ch, label: '<b>' + (o.tipLabels ? o.tipLabels[i] : o.xLabels[i]) + '</b><br>' + fmt(dv) + (o.unit ? ' ' + o.unit : '') }; });
@@ -158,15 +177,34 @@
       ctx.strokeStyle = s.color; ctx.lineWidth = 1.6; ctx.stroke();
     });
     ctx.restore();
-    ctx.fillStyle = CC.axis; ctx.font = '9px ' + MONO; ctx.textAlign = 'center';
-    var ls = Math.max(1, Math.floor(n / 7)), last = '', rEdge = W - pad.r;
-    for (var q = 0; q < n; q += ls) {
-      if (o.xLabels[q] === last) continue;
-      var lx = X(q), lt = o.xLabels[q], hw = ctx.measureText(lt).width / 2;
-      if (lx - hw < pad.l) { ctx.textAlign = 'left'; ctx.fillText(lt, pad.l, H - pad.b + 16); }
-      else if (lx + hw > rEdge) { ctx.textAlign = 'right'; ctx.fillText(lt, rEdge, H - pad.b + 16); }
-      else { ctx.textAlign = 'center'; ctx.fillText(lt, lx, H - pad.b + 16); }
-      last = lt;
+    ctx.fillStyle = CC.axis; ctx.font = '9px ' + MONO;
+    if (tAxis) {
+      // 시간축: xFrom~xTo 균등 분할 눈금 (데이터가 몰려도 안 겹침) — drawLine과 동일
+      var span = o.xTo - o.xFrom, TICKS = Math.max(2, Math.min(6, Math.floor(cw / 96)));
+      var tf = function (ms) {
+        var d = new Date(ms);
+        if (span < 20 * 60000) return z2(d.getHours()) + ':' + z2(d.getMinutes()) + ':' + z2(d.getSeconds());
+        if (span < 86400000) return z2(d.getHours()) + ':' + z2(d.getMinutes());
+        if (span < 3 * 86400000) return (d.getMonth() + 1) + '/' + d.getDate() + ' ' + z2(d.getHours()) + ':' + z2(d.getMinutes());
+        return (d.getMonth() + 1) + '/' + d.getDate();
+      };
+      for (var k = 0; k <= TICKS; k++) {
+        var lt = tf(o.xFrom + span * (k / TICKS));
+        if (k === 0) { ctx.textAlign = 'left'; ctx.fillText(lt, pad.l, H - pad.b + 16); }
+        else if (k === TICKS) { ctx.textAlign = 'right'; ctx.fillText(lt, W - pad.r, H - pad.b + 16); }
+        else { ctx.textAlign = 'center'; ctx.fillText(lt, pad.l + cw * (k / TICKS), H - pad.b + 16); }
+      }
+    } else {
+      ctx.textAlign = 'center';
+      var ls = Math.max(1, Math.floor(n / 7)), last = '', rEdge = W - pad.r;
+      for (var q = 0; q < n; q += ls) {
+        if (o.xLabels[q] === last) continue;
+        var lx = X(q), ltl = o.xLabels[q], hw = ctx.measureText(ltl).width / 2;
+        if (lx - hw < pad.l) { ctx.textAlign = 'left'; ctx.fillText(ltl, pad.l, H - pad.b + 16); }
+        else if (lx + hw > rEdge) { ctx.textAlign = 'right'; ctx.fillText(ltl, rEdge, H - pad.b + 16); }
+        else { ctx.textAlign = 'center'; ctx.fillText(ltl, lx, H - pad.b + 16); }
+        last = ltl;
+      }
     }
     ctx.strokeStyle = CC.axisLine; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(pad.l, pad.t + ch); ctx.lineTo(W - pad.r, pad.t + ch); ctx.stroke();
   }

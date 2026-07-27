@@ -9,13 +9,15 @@
   var BASE_URL = 'https://api.openai.com';
   var DEFAULT_MODEL = 'gpt-4o';
 
-  function complete(cfg, prompt) {
+  function complete(cfg, prompt, opts) {
+    opts = opts || {}; // signal: 호출자가 중단할 수 있게 (리포트 생성 중단)
     var body = JSON.stringify({
       model: cfg.model || DEFAULT_MODEL,
       messages: [{ role: 'user', content: prompt }],
     });
     return fetch(BASE_URL + '/v1/chat/completions', {
       method: 'POST',
+      signal: opts.signal,
       headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + (cfg.apiKey || '') },
       body: body,
     }).then(function (r) {

@@ -8,11 +8,13 @@
   var BASE_URL = 'https://generativelanguage.googleapis.com';
   var DEFAULT_MODEL = 'gemini-2.5-flash';
 
-  function complete(cfg, prompt) {
+  function complete(cfg, prompt, opts) {
+    opts = opts || {}; // signal: 호출자가 중단할 수 있게 (리포트 생성 중단)
     var model = cfg.model || DEFAULT_MODEL;
     var body = JSON.stringify({ contents: [{ role: 'user', parts: [{ text: prompt }] }] });
     return fetch(BASE_URL + '/v1beta/models/' + encodeURIComponent(model) + ':generateContent?key=' + encodeURIComponent(cfg.apiKey || ''), {
       method: 'POST',
+      signal: opts.signal,
       headers: { 'Content-Type': 'application/json' },
       body: body,
     }).then(function (r) {

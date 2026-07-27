@@ -18,7 +18,7 @@
     if (cfg.provider !== 'ollama' && !cfg.apiKey) return null; // ollama는 키 불필요
     return {
       provider: cfg.provider,
-      complete: function (prompt) { return p.complete(cfg, prompt); },
+      complete: function (prompt, opts) { return p.complete(cfg, prompt, opts); }, // opts.signal로 중단 가능
     };
   }
 

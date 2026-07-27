@@ -89,6 +89,7 @@
     " if(R.wave)line('cWave','tWave',{values:R.wave.v,xLabels:R.wave.t,color:CH.SERIES.wave,height:240,lw:1.1},'xWave');",
     " if(R.fft)fftc('cFft','tFft',{freqs:R.fft.freqs,mags:R.fft.mags,markers:R.fft.markers,res:R.fft.res,height:280,hideMarkerLabels:true});",
     " if(R.spec){var cs=el('cSpec');if(cs)CH.drawHeat(cs,{grid:R.spec.grid,rows:R.spec.rows,cols:R.spec.cols,fmax:R.spec.fmax,height:200},cc());}",
+    " if(R.kurtogram)fftc('cKurtogram',null,{freqs:R.kurtogram.freqs,mags:R.kurtogram.mags,markers:R.kurtogram.markers,res:R.kurtogram.res,height:180,hideMarkerLabels:false});",
     " if(R.env)fftc('cEnv',null,{freqs:R.env.freqs,mags:R.env.mags,markers:R.env.markers,res:1,height:210,hideMarkerLabels:true});",
     " if(R.cep)fftc('cCep',null,{freqs:R.cep.freqs,mags:R.cep.mags,markers:R.cep.markers,res:1,height:200,hideMarkerLabels:true});",
     "}",
@@ -163,7 +164,7 @@
     // ── 심각도 평가 ──
     sectionOpen(h, '진동 심각도 평가', null, '<span class="mono">' + esc(p.sevMachine) + '</span>');
     h.push('<div class="sev-box">');
-    h.push('<div style="font-size:11px;color:var(--text-muted);margin-bottom:3px;">종합 위험도</div>');
+    h.push('<div style="font-size:11px;color:var(--text-muted);margin-bottom:3px;">종합 위험도 <span style="color:var(--text-tertiary);">· ISO 10816 최신 순간 RMS(1초 롤업) 존 기준 — 평균이 낮아도 순간·상승 추세로 등급이 오릅니다</span></div>');
     h.push('<span style="font-size:38px;font-weight:800;line-height:1;letter-spacing:-.5px;color:' + esc(p.gradeColor) + '">' + esc(p.gradeKo) + '</span>');
     var Z = p.zones || ['-', '-', '-'];
     var zoneDefs = [
@@ -190,6 +191,31 @@
     });
     h.push('</div></div>');
 
+    // ── 종합 진동 레벨 (물리량별 RMS) — 에너지가 어느 도메인에 있나. 단위가 달라 값 크기 직접 비교는 불가(막대 없음) ──
+    if (d.levels) {
+      var _lu = [{ u: 'g', l: '가속도', d: '고주파(베어링·기어)' }, { u: 'mm/s', l: '속도', d: 'ISO 10816 판정 기준' }, { u: 'μm', l: '변위', d: '저주파(불균형·정렬)' }];
+      var fmtL = function (v) { return (v >= 100 ? v.toFixed(0) : v >= 1 ? v.toFixed(2) : v.toFixed(3)); };
+      sectionOpen(h, '종합 진동 레벨');
+      h.push('<div style="font-size:11px;color:var(--text-muted);margin:-4px 0 10px;">같은 신호를 세 물리량으로 본 RMS · 어느 대역에 에너지가 있는지 방향 파악용 (단위가 달라 값끼리 크기 비교는 하지 않음)</div>');
+      h.push('<table><thead><tr><th>물리량</th><th class="num" style="width:150px;">RMS</th><th>관점</th></tr></thead><tbody>');
+      _lu.forEach(function (x) {
+        if (d.levels[x.u] == null) return;
+        var iso = (x.u === (d.natUnit || d.isoUnit));
+        h.push('<tr><td>' + x.l + (iso ? ' <span style="font-size:10px;color:var(--primary-light);">(센서 원본)</span>' : '') + '</td>'
+          + '<td class="num mono">' + fmtL(d.levels[x.u]) + ' <span style="color:var(--text-muted);">' + x.u + '</span></td>'
+          + '<td style="color:var(--text-muted);font-size:12px;">' + x.d + '</td></tr>');
+      });
+      h.push('</tbody></table></div>');
+    }
+
+    // ── 측정 신뢰도·해석 경고 (신호 품질 이상·첨도 포화) ──
+    if (d.quality && d.quality.issues && d.quality.issues.length) {
+      h.push('<div style="display:flex;gap:9px;padding:11px 13px;margin-bottom:10px;border-radius:8px;background:rgba(199,125,10,.1);border:1px solid rgba(199,125,10,.4);font-size:12px;line-height:1.55;"><b style="color:#c77d0a;">⚠ 신호 품질 경고</b>&nbsp; ' + esc(d.quality.issues.map(function (x) { return x.label + ': ' + x.detail; }).join(' · ')) + ' — 측정 신뢰도 저하, 아래 판정은 센서 점검 전 잠정입니다.</div>');
+    }
+    if (d.kurtWarn) {
+      h.push('<div style="display:flex;gap:9px;padding:11px 13px;margin-bottom:10px;border-radius:8px;background:rgba(199,125,10,.1);border:1px solid rgba(199,125,10,.35);font-size:12px;line-height:1.55;"><b style="color:#c77d0a;">⚠ 첨도 포화 주의</b>&nbsp; ' + esc(d.kurtWarn) + '</div>');
+    }
+
     // ── 통계 요약 ──
     sectionOpen(h, '통계 요약');
     h.push('<div class="stat-grid">');
@@ -211,7 +237,8 @@
     }
 
     // ── 스펙트럼 분석 ──
-    h.push('<div class="group-hd"><span style="font-size:13px;font-weight:700;letter-spacing:.6px;">스펙트럼 분석</span><span style="font-size:11px;color:var(--text-muted);">주파수 성분 분해 · 결함 원인 지목</span><span class="hr"></span></div>');
+    var _duTag = (d.dispUnit && d.natUnit && d.dispUnit !== d.natUnit) ? '<span style="font-size:11px;font-weight:700;color:var(--primary-light);background:rgba(0,108,210,.14);padding:1px 7px;border-radius:4px;">표시 물리량: ' + esc(d.dispUnit) + ' (' + esc(d.natUnit) + '에서 변환)</span>' : (d.dispUnit ? '<span style="font-size:11px;color:var(--text-muted);">표시 물리량: ' + esc(d.dispUnit) + '</span>' : '');
+    h.push('<div class="group-hd"><span style="font-size:13px;font-weight:700;letter-spacing:.6px;">스펙트럼 분석</span><span style="font-size:11px;color:var(--text-muted);">주파수 성분 분해 · 결함 원인 지목</span><span class="hr"></span>' + _duTag + '</div>');
     if (d.wave) chartSection(h, { title: '원시 파형', sub: 'Raw Waveform', hint: ZOOM_HINT, desc: p.waveDesc, canvasId: 'cWave', h: 240, tipId: 'tWave', xlineId: 'xWave' });
     if (d.fft) chartSection(h, {
       title: 'FFT 주파수 스펙트럼', hint: '<span class="mono">' + esc(p.fftHint || '') + '</span>', desc: '주파수별 성분 분해 · 결함 주파수와 대조해 원인 지목',
@@ -219,6 +246,7 @@
       legend: (d.fft.markers || []).filter(function (m) { return m.kind !== 'h'; }).map(function (m) { return { label: m.label + ' ' + m.freq.toFixed(1) + ' Hz', color: m.kind === 'f' ? '#e5646a' : '#8a8f99' }; }),
     });
     if (d.spec) chartSection(h, { title: '스펙트로그램', sub: '시간×주파수', desc: '결함 대역이 언제부터 자랐는지 확인 · 밝을수록 강한 성분', canvasId: 'cSpec', h: 200 });
+    if (d.kurtogram) chartSection(h, { title: '결함 대역 탐색', sub: 'Kurtogram · Spectral Kurtosis', desc: (d.kurtogram.best ? '충격성 최대 대역 ' + (d.kurtogram.best.loHz / 1000).toFixed(1) + '–' + (d.kurtogram.best.hiHz / 1000).toFixed(1) + ' kHz (SK ' + d.kurtogram.best.sk.toFixed(1) + ') → 포락선을 이 대역으로 복조' : '충격성이 가장 강한 대역 자동 탐색'), canvasId: 'cKurtogram', h: 180 });
     if (d.env) chartSection(h, { title: '포락선 스펙트럼', sub: 'Envelope', desc: p.envDesc, canvasId: 'cEnv', h: 210 });
     if (d.cep) chartSection(h, { title: '켑스트럼', sub: 'Cepstrum', desc: p.cepDesc, canvasId: 'cCep', h: 200 });
 
@@ -230,15 +258,42 @@
     });
     h.push('</tbody></table></div>');
 
+    // ── 결함 근거 강도 (Evidence) — 규칙 기반 자동 산출. LLM 소견 위에 배치해 "근거→해석" 순서 ──
+    if (d.evidence && d.evidence.length) {
+      var starOf = function (s) { s = Math.max(0, Math.min(5, Math.round(s))); return '★★★★★'.slice(0, s) + '☆☆☆☆☆'.slice(0, 5 - s); };
+      sectionOpen(h, '결함 근거 강도', '측정 지표 기반 자동 산출 · ★ 높은 순 = 우선순위');
+      h.push('<div style="font-size:11px;color:var(--text-muted);margin:-4px 0 10px;">동기/비동기 피크·충격성·대역 에너지 등 실제 지표에서 규칙으로 산출한 후보별 근거 강도입니다(임의 확률 아님).</div>');
+      h.push('<table><thead><tr><th>결함 후보</th><th style="width:120px;">근거 강도</th><th class="num" style="width:56px;">점수</th><th>근거</th></tr></thead><tbody>');
+      d.evidence.forEach(function (c, i) {
+        var sc = c.score != null ? c.score : c.s * 20;
+        h.push('<tr><td>' + (i === 0 ? '<b>' + esc(c.f) + '</b>' : esc(c.f)) + '</td>'
+          + '<td class="mono" style="color:' + (c.s >= 4 ? '#e07b39' : c.s >= 3 ? '#d99a2b' : 'var(--text-muted)') + ';letter-spacing:1px;">' + starOf(c.s) + '</td>'
+          + '<td class="num mono" style="color:' + (sc >= 70 ? '#e07b39' : sc >= 40 ? '#d99a2b' : 'var(--text-muted)') + ';">' + sc + '</td>'
+          + '<td style="font-size:12px;color:var(--text-muted);">' + esc(c.why) + '</td></tr>');
+      });
+      h.push('</tbody></table></div>');
+    }
+
     // ── 심층 분석 (LLM 소견) ──
     if (p.opinion) {
       sectionOpen(h, '심층 분석', 'LLM 소견' + (p.opinionModel ? ' · ' + p.opinionModel : ''));
       h.push('<div class="analysis-content">');
-      // "## 소제목" → 소제목, 그 외 비어있지 않은 줄 → 문단
+      // 인라인 마크다운 변환: **굵게** → <strong>, `코드` → <code> (먼저 esc 후 마커만 치환)
+      var inlineMd = function (s) {
+        return esc(s).replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>').replace(/`([^`]+)`/g, '<code>$1</code>');
+      };
+      // 줄 단위: ## 소제목 / -·•·* 불릿 / → 결론 / 1. 우선순위 / 그 외 문단 (모두 인라인 마크다운 적용)
       String(p.opinion).split('\n').forEach(function (ln) {
-        var m = ln.match(/^\s*#{1,3}\s+(.*)/);
-        if (m) h.push('<h4 style="font-size:15px;font-weight:700;margin:18px 0 6px;color:var(--text-primary)">' + esc(m[1].trim()) + '</h4>');
-        else if (ln.trim()) h.push('<p>' + esc(ln.trim()) + '</p>');
+        var t = ln.trim();
+        if (!t) return;
+        var mh = t.match(/^#{1,3}\s+(.*)/);
+        if (mh) { h.push('<h4 style="font-size:15px;font-weight:700;margin:18px 0 6px;color:var(--text-primary)">' + inlineMd(mh[1].trim()) + '</h4>'); return; }
+        var mb = t.match(/^[-*•]\s+(.*)/);
+        if (mb) { h.push('<div style="display:flex;gap:7px;margin:2px 0 2px 6px;line-height:1.6;"><span style="color:var(--text-muted);flex-shrink:0;">•</span><span>' + inlineMd(mb[1]) + '</span></div>'); return; }
+        if (/^→/.test(t)) { h.push('<div style="margin:4px 0 8px 6px;padding-left:8px;border-left:2px solid var(--primary-light);color:var(--text-primary);font-weight:600;line-height:1.6;">' + inlineMd(t) + '</div>'); return; }
+        var mn = t.match(/^(\d+)\.\s+(.*)/);
+        if (mn) { h.push('<div style="margin:8px 0 3px;font-weight:700;line-height:1.6;">' + inlineMd(t) + '</div>'); return; }
+        h.push('<p>' + inlineMd(t) + '</p>');
       });
       h.push('</div></div>');
     }

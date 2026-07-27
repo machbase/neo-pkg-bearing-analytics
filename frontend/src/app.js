@@ -83,6 +83,9 @@ export class App extends Component {
       configured: true, monitorOn: true,
       selTag: null, period: '1h', from: '', to: '', // 기본 1시간 — 진동은 짧은 창이라야 초 단위 해상도가 잡힌다
       diagTag: null, evtTag: 'all', evtType: 'all', evtScope: 'today', // 이벤트 목록 기간: today | 7d | all
+      detailAnchor: null, // 스펙트럼 분석 기준 시각 — 이벤트 클릭 시 그 시각, 아니면 선택 기간 끝
+      fftFull: false, // FFT·스펙트로그램 주파수 범위: false=기본(dispHz) · true=전대역(Nyquist)
+      viewUnit: null, // 상세분석 표시 물리량: null=센서 원단위 · 'g'/'mm/s'/'μm'로 적분/미분 변환
       events: [], reports: [],
       setSection: 'source', machineClass: '', gradeFilter: null, // 선택 UI는 저장 전 미선택 (판정 폴백은 Class II)
       equipBearing: {}, equipRpm: {}, equipAdv: {}, equipGeo: {}, equipUnit: {},
@@ -90,6 +93,8 @@ export class App extends Component {
       llmProvider: '', llmConfigured: false, llmTesting: false, llmTest: null,
       llmKeys: {}, llmModels: {}, ollamaUrl: 'http://127.0.0.1:11434',
       genRunning: false, genStep: 0, genTags: [], genLLM: false,
+      // 리포트 탭 조회 기간 — 상세분석(period/from/to)과 분리. 대상 태그가 없으면 기간도 없다('')
+      genPeriod: '', genFrom: '', genTo: '',
       dirty: false, toast: null, pendingNav: null, monitorInterval: '10s', cardSize: 232,
       notifCh: { webhook: false, email: false, sms: false }, // 알람 채널 기본 전부 비활성
       notifTo: { webhook: '', email: '', sms: '' }, // 채널별 대상(웹훅 URL·수신 주소·번호)
@@ -155,7 +160,7 @@ export class App extends Component {
     var initR = worst ? this._periodRange(worst, initP) : { from: this._dtVal(anchor - 3600000), to: this._dtVal(anchor) };
     var patch = {
       ready: true, srcSel: sel, selTag: worst ? worst.id : null, diagTag: worst ? worst.id : null, events: [], reports: [],
-      genTags: [], // 리포트 대상 태그는 기본 미선택 (사용자가 직접 선택)
+      genTags: [], genPeriod: '', genFrom: '', genTo: '', // 리포트 대상 태그는 기본 미선택 → 기간도 아직 없음
       period: initP, from: initR.from, to: initR.to,
     };
     // 저장된 설정 복원 (state 키와 1:1)
@@ -191,7 +196,9 @@ export class App extends Component {
       self.data = data; // 빈 선택도 그대로 반영 (모니터링 빈 상태 표시)
       var sorted = self.data.equipment.slice().sort(function (a, b) { return b.grade - a.grade; });
       sorted.forEach(function (e, i) { e.order = i; });
-      self.setState({ ready: true, selTag: sorted.length ? sorted[0].id : null });
+      // 사용자가 고른 태그가 아직 있으면 유지, 없어졌으면 worst로 — 재적재 때마다 선택이 튕기지 않게
+      var keep = self.state.selTag && sorted.some(function (e) { return e.id === self.state.selTag; });
+      self.setState({ ready: true, selTag: keep ? self.state.selTag : (sorted.length ? sorted[0].id : null) });
       self._loadEventsLive();
       self._live = setInterval(self._tickLive.bind(self), 5000);
     }).catch(function (e) { self.setState({ ready: true }); self._toast('재적재 실패: ' + e.message, 'err'); });
@@ -367,10 +374,13 @@ export class App extends Component {
   _loadEventsLive() {
     var self = this, S = this.state;
     if (!this.live) return;
-    var now = (this.data && this.data.now) || Date.now();
+    // 이벤트 TS는 판정 시각(벽시계)이라 스코프도 벽시계 기준 — data.now(데이터 최신 시각)로 자르면
+    // 데이터가 과거인 소스에서 '오늘'이 데이터 날짜로 밀리고, 데이터 시각 이후 발생한 이벤트는 '전체'에서도 사라진다
+    var now = Date.now();
     var scope = S.evtScope || 'today';
     var d = new Date(now); d.setHours(0, 0, 0, 0); // 오늘 00:00(로컬)
     var from = scope === 'today' ? d.getTime() : scope === '7d' ? now - 7 * 86400000 : 0;
+    var to = now + 300000; // 서버 타이머가 찍은 이벤트의 시계 오차(+5분)까지 포함
     var cap = 200; // 목록은 최근 200건만 렌더(성능) — 개수는 아래 countEvents로 정확히
     var typeF = (S.evtType && S.evtType !== 'all') ? S.evtType : null;
     var tagF = null;
@@ -378,9 +388,9 @@ export class App extends Component {
       var feq = ((this.data && this.data.equipment) || []).filter(function (e) { return e.id === S.evtTag; })[0];
       if (feq) tagF = { tbl: feq.table, tag: feq.name };
     }
-    countEvents(from, now + 1000, typeF, tagF ? tagF.tbl : null, tagF ? tagF.tag : null)
+    countEvents(from, to, typeF, tagF ? tagF.tbl : null, tagF ? tagF.tag : null)
       .then(function (n) { self._evtTotal = n; self.forceUpdate(); }).catch(function () { self._evtTotal = null; });
-    loadEventsRange(from, now + 1000, cap).then(function (rows) {
+    loadEventsRange(from, to, cap).then(function (rows) {
       var byKey = {};
       ((self.data && self.data.equipment) || []).forEach(function (e) { byKey[e.table + ':' + e.name] = e; });
 
@@ -397,9 +407,9 @@ export class App extends Component {
       self.setState({ events: evs });
     }).catch(function () {});
   }
-  // 이벤트 내보내기 모달 — 기본 기간 최근 30일
+  // 이벤트 내보내기 모달 — 기본 기간 최근 30일 (이벤트 TS와 같은 벽시계 기준)
   _openDownload() {
-    var to = (this.data && this.data.now) ? this.data.now : Date.now();
+    var to = Date.now();
     this.setState({ dlOpen: true, dlFmt: 'csv', csvFrom: this.E.fmtDT(to - 30 * 86400000).slice(0, 10), csvTo: this.E.fmtDT(to).slice(0, 10) });
   }
   // 기간 이벤트를 CSV/JSON으로 브라우저 다운로드
@@ -489,6 +499,7 @@ export class App extends Component {
     this.data = { now: now, equipment: [], events: [], reports: [] };
     this.setState({
       ready: true, srcSel: [], selTag: null, diagTag: null, events: [], reports: [], genTags: [],
+      genPeriod: '', genFrom: '', genTo: '',
       from: this._dtVal(now - PERIOD_H['1h'] * 3600000), to: this._dtVal(now),
     });
     if (msg) this._toast(msg, 'warn');
@@ -499,13 +510,25 @@ export class App extends Component {
   _num(n) { return Math.round(n).toLocaleString('en-US'); }
   _eq(id) { if (!this.data) return null; for (var i = 0; i < this.data.equipment.length; i++) if (this.data.equipment[i].id === id) return this.data.equipment[i]; return null; }
   _activeEq(id) { var a = this._activeEqs(); if (!a.length) return null; for (var i = 0; i < a.length; i++) if (a[i].id === id) return a[i]; return a.slice().sort(function (x, y) { return (x.order || 0) - (y.order || 0); })[0]; }
+  // 스펙트럼 분석 기준 시각 — 이벤트 클릭 시 그 시각, 아니면 선택 기간의 끝. 데이터 범위로 클램프.
+  _detailAnchorMs(eq) {
+    var S = this.state, a = S.detailAnchor;
+    if (a == null) { var t = Date.parse(S.to); if (isFinite(t)) a = t; } // 선택 기간의 끝
+    if (a == null) a = eq.lastSeen || (this.data && this.data.now); // 최후 폴백(안정값 — Date.now() 금지: 매 렌더 재캡처 유발)
+    if (eq.lastSeen && a > eq.lastSeen) a = eq.lastSeen; // 미래 데이터 없음
+    var mn = eq.stat && eq.stat.minMs;
+    if (mn && a < mn) a = mn;
+    return a;
+  }
   _detail(eq) {
     if (this.live) {
-      var c = this._detailCache[eq.id], self = this;
+      var anchor = this._detailAnchorMs(eq), vu = this.state.viewUnit || null, self = this;
+      var c = this._detailCache[eq.id];
+      if (c && (c.anchor !== anchor || c.viewUnit !== vu)) { delete this._detailCache[eq.id]; c = null; } // 기준 시각·표시 물리량 바뀌면 재캡처
       if (!c) {
-        // 순수 스냅샷: 캡처 시점의 등급·RMS·데이터시각을 함께 고정 → 새로고침 전까지 상세분석 전체가 불변
-        c = this._detailCache[eq.id] = { state: 'loading', det: emptyDet(eq), eqSnap: Object.assign({}, eq), snapNow: (this.data && this.data.now) || Date.now() };
-        liveDetail(this.E, eq).then(function (det) {
+        // 순수 스냅샷: 캡처 시점의 등급·RMS·기준시각을 함께 고정 → 재캡처 전까지 상세분석 전체가 불변
+        c = this._detailCache[eq.id] = { state: 'loading', det: emptyDet(eq), eqSnap: Object.assign({}, eq), snapNow: (this.data && this.data.now) || Date.now(), anchor: anchor, viewUnit: vu };
+        liveDetail(this.E, eq, anchor, vu).then(function (det) {
           c.det = det; c.state = 'ready'; self.forceUpdate();
         }).catch(function (e) { c.state = 'error'; console.warn('[vibe] detail load failed', e); });
       }
@@ -532,14 +555,15 @@ export class App extends Component {
     return { kurt: [], bands: [], xLabels: [] };
   }
   // 조회 기간 → 롤업 창(시작·종료·단위) 계산. 구간 길이에 맞춰 버킷 단위를 골라 과다 버킷을 막는다.
-  _rollWindow(now, st) {
-    var p = this.state.period, S = this.state;
+  _rollWindow(now, st, scope) {
+    var S = this.state, rep = scope === 'report'; // 상세분석과 리포트는 조회 기간이 서로 독립
+    var p = (rep ? S.genPeriod : S.period) || '1h';
     var fromMs, toMs = now;
     if (p === 'all') {
       fromMs = (st && st.minMs) ? st.minMs : now - PERIOD_H['7d'] * 3600000; // 데이터 전 구간
     } else if (p === 'custom') {
       // 직접 입력은 날짜+시각(datetime) — 짧은 창을 정확히 지정해 초 단위 해상도까지 볼 수 있다
-      var cf = Date.parse(S.from), ct = Date.parse(S.to);
+      var cf = Date.parse(rep ? S.genFrom : S.from), ct = Date.parse(rep ? S.genTo : S.to);
       fromMs = !isNaN(cf) ? cf : now - PERIOD_H['7d'] * 3600000;
       if (!isNaN(ct)) toMs = ct;
     } else fromMs = now - (PERIOD_H[p] || 1) * 3600000;
@@ -556,12 +580,12 @@ export class App extends Component {
       label: { sec: '초별 (1s)', min: '분별 (1m)', hour: '시간별 (1h)', day: '일별 (1d)', month: '월별 (1M)' }[unit] };
   }
   // 선택 기간의 롤업을 DB에서 fresh 조회 (기준점=그 태그의 현재 최신 데이터 시각)
-  _rollForAsync(eq) {
+  _rollForAsync(eq, scope) {
     var self = this;
     return tagStats(eq.table).then(function (stats) {
       var st = stats[eq.name];
       var now = (st && st.maxMs) || eq.lastSeen || self.data.now;
-      var w = self._rollWindow(now, st);
+      var w = self._rollWindow(now, st, scope);
       return rollupTrend(eq.table, eq.name, w.unit, w.fromMs, w.toMs).then(function (buckets) {
         return { roll: buckets || [], label: w.label, stepSec: w.stepSec, clock: w.clock, fromMs: w.fromMs, toMs: w.toMs };
       });
@@ -576,7 +600,7 @@ export class App extends Component {
     var c = this._rfCache[key];
     if (!c) {
       c = this._rfCache[key] = { roll: [], label: '조회 중…', stepSec: 3600, clock: false, state: 'loading', fromMs: null, toMs: null };
-      this._rollForAsync(eq).then(function (rf) {
+      this._rollForAsync(eq, 'detail').then(function (rf) {
         Object.assign(c, rf, { state: 'ready' }); self.forceUpdate();
       }).catch(function (e) { c.state = 'error'; c.label = '조회 실패'; console.warn('[vibe] rollFor failed', e); });
     }
@@ -600,8 +624,19 @@ export class App extends Component {
     var crestIn = det.indics[3];
     if (crestIn) ev.push({ src: '지표', txt: 'Crest Factor ' + crestIn.v + (crestIn.hint ? ' · ' + crestIn.hint : '') });
     if (!ev.length) ev.push({ src: '지표', txt: '표시 구간 데이터 없음 — 조회 기간을 확인하세요' });
+    // 규칙 패턴(동기 하모닉)으로 원인이 안 잡혀도 "원인 미상"으로 끝내지 않고 근거 강도 1순위를 채택 — 상단 판정과 아래 근거표의 정합성
+    if (!cause && det.fft.freqs.length) {
+      var evx = this._evidence(eq, det), t = evx.top;
+      if (t && t.score >= 55) {
+        if (/베어링/.test(t.f)) cause = '베어링 충격성 의심' + (evx.hasBearing ? '' : ' (베어링 형식 미지정 — 확정 불가)');
+        else if (/벨트|Sub-sync/.test(t.f)) cause = '비동기·sub-synchronous 성분 의심 (벨트·오일훨 등)';
+        else if (/풀림/.test(t.f)) cause = '기계적 풀림 의심';
+        else if (/정렬/.test(t.f)) cause = '축 정렬 불량 의심';
+        else if (/불평형/.test(t.f)) cause = '질량 불평형 의심';
+      }
+    }
     if (eq.grade === 0) verdict = '뚜렷한 결함 징후 없음 — 정상 운전';
-    else verdict = (cause || '이상 진동 — 원인 미상 (스펙트럼 확인 권장)') + ' — ' + (eq.grade >= 3 ? '심각 단계' : eq.grade === 2 ? '진행 단계' : '초기 징후');
+    else verdict = (cause || '이상 진동 — 다축 정밀 측정 권장') + ' — ' + (eq.grade >= 3 ? '심각 단계' : eq.grade === 2 ? '진행 단계' : '초기 징후');
     var acts = this._buildActions(eq, det, dom, cause);
     return {
       verdict: verdict,
@@ -624,7 +659,7 @@ export class App extends Component {
     var a = [];
     // 시급성 (등급)
     a.push(eq.grade >= 3 ? '즉시 정지 검토 · 안전 확보 후 정밀 점검 (심각 존)'
-      : eq.grade === 2 ? '24시간 내 점검 계획 수립 (위험 존 진입)'
+      : eq.grade === 2 ? '조기 점검 권장 · 측정 주기 단축으로 추세 감시 (위험 존 진입)'
       : eq.grade === 1 ? '모니터링 강화 · 다음 정기 점검 시 확인 (주의 존)'
       : '정상 운전 유지 · 예방관리 지속');
     // 원인별 (지배 주파수 + 하모닉/측대역 패턴)
@@ -637,8 +672,11 @@ export class App extends Component {
     if (/전동체|볼/.test(cause)) a.push('베어링 전동체 결함(BSF 하모닉) — 교체 검토');
     // 증상별 (충격성 — 밴드 커토시스 우선)
     if (impulsive) a.push('충격성 신호(' + (bk != null ? '밴드 커토시스 ' + bk.toFixed(1) : '커토시스 ' + kurt.toFixed(1)) + '·Crest ' + crest.toFixed(1) + ') — 베어링·기어 손상 정밀 점검(포락선·고주파)');
-    // 추세
-    if (tr && tr.pct > 10) a.push('RMS 상승 추세(+' + tr.pct.toFixed(0) + '%) — 측정 주기 단축, 추세 추적으로 진행 여부 확인');
+    // 추세 (관측이 짧으면 "단기 상승"으로 — 장기 추세 단정 회피)
+    if (tr && tr.pct > 10) {
+      var _rl = eq.rollup || [], _durMin = _rl.length > 1 ? (_rl[_rl.length - 1].ms - _rl[0].ms) / 60000 : 0;
+      a.push((_durMin < 60 ? '단기 RMS 상승(+' + tr.pct.toFixed(0) + '% · 관측 ' + Math.round(_durMin) + '분, 장기 추세 판단 불가)' : 'RMS 상승 추세(+' + tr.pct.toFixed(0) + '%)') + ' — 측정 주기 단축, 추세 추적으로 진행 여부 확인');
+    }
     // 베어링 미등록 (충격성 정황이 있는데 대조할 스펙 없음)
     if (!hasBearing && impulsive && eq.grade >= 1) a.push('베어링 사양 미등록 — 설비 정보 등록 시 BPFO/BPFI 대조로 결함 위치 특정 가능');
     // 지배 주파수 불일치 (패턴도 못 잡은 경우만)
@@ -650,8 +688,8 @@ export class App extends Component {
     if (!id) return; // 감시 대상에서 빠진 태그의 이벤트 등 — 이동 불가
     var E = this.E, eq = this._eq(id);
     delete this._detailCache[id]; this._rfCache = {}; // 열 때 그 순간의 신선한 스냅샷(파형·추세 모두)을 잡도록 캐시 무효화
-    var patch = { tab: 'detail', selTag: id, dxAiText: null, dxOpen: false };
-    if (atMs) { // 이벤트 시점 보기 — 그 시각 앞뒤 30분을 직접 입력 구간으로(초 단위 해상도)
+    var patch = { tab: 'detail', selTag: id, dxAiText: null, dxOpen: false, detailAnchor: atMs || null };
+    if (atMs) { // 이벤트 시점 보기 — 그 시각 앞뒤 30분을 직접 입력 구간으로(초 단위 해상도), 스펙트럼은 그 시각에 고정
       patch.period = 'custom';
       patch.from = this._dtVal(atMs - 1800000); patch.to = this._dtVal(atMs + 1800000);
     } else if (eq && eq.lastSeen) {
@@ -730,39 +768,120 @@ export class App extends Component {
     return { dir: pct > 10 ? '상승' : pct < -10 ? '하락' : '안정', pct: pct, first: first, last: last };
   }
   // 상세분석 전 차트/지표의 실측값을 한 덩어리 텍스트로 (LLM 근거용)
-  _opinionPack(eq, det) {
+  // 구조화 근거(Evidence) — LLM이 숫자를 직접 해석하는 대신 "이미 분류·정리된 feature"를 받게 한다.
+  // 동기/비동기 분류 + 라벨된 지표 + 규칙 기반 결함별 근거 강도(★, 임의 % 방지). 반환 { block, conf }
+  _evidence(eq, det) {
+    var self = this, E = this.E, fr = eq.rpm / 60, u = eq.unit;
+    var star = function (s) { s = Math.max(0, Math.min(5, Math.round(s))); return '★★★★★'.slice(0, s) + '☆☆☆☆☆'.slice(0, 5 - s); };
+    // 1) 피크 동기/비동기 분류
+    var peaks = (det.fft && det.fft.freqs.length) ? this._topPeaks(det.fft.freqs, det.fft.mags, 6) : [];
+    var cls = function (f) { if (!(fr > 0)) return { o: 0, sync: false, r: 0 }; var o = f / fr, r = Math.round(o); return { o: o, sync: r >= 1 && Math.abs(o - r) < 0.06, r: r }; };
+    var syncP = [], asyncP = [];
+    peaks.forEach(function (p) { var c = cls(p.f); (c.sync ? syncP : asyncP).push({ f: p.f, o: c.o, r: c.r, m: p.m }); });
+    var domO = peaks.length && fr > 0 ? peaks[0].f / fr : 0, domSync = peaks.length ? cls(peaks[0].f).sync : false;
+    var domSub = domO > 0.4 && domO < 0.9, subAny = asyncP.some(function (p) { return p.o > 0.4 && p.o < 0.9; });
+    var pk = function (a) { return a.map(function (p) { return p.f.toFixed(1) + 'Hz(' + p.o.toFixed(2) + '×)'; }).join(', ') || '없음'; };
+    // 지배 피크가 아니어도 1×·2× 성분이 스펙트럼에 존재하는지 — "동기 피크 없음" 오해 방지("30Hz 있는데?")
+    var peakMag = 0, i0; for (i0 = 0; i0 < (det.fft ? det.fft.mags.length : 0); i0++) if (det.fft.mags[i0] > peakMag) peakMag = det.fft.mags[i0];
+    var magNear = function (f) { if (!(f > 0) || !det.fft) return 0; var tol = Math.max(1.5, f * 0.03), b = 0, i; for (i = 0; i < det.fft.freqs.length; i++) if (Math.abs(det.fft.freqs[i] - f) <= tol && det.fft.mags[i] > b) b = det.fft.mags[i]; return b; };
+    var has1x = magNear(fr) > peakMag * 0.05, has2xE = magNear(2 * fr) > peakMag * 0.05;
+    // 동기 피크 표기: 지배 피크에 정수배가 없더라도 1×·2× 성분이 있으면 "존재하나 비지배"로 (관측되지 않음과 구분)
+    var syncTxt = syncP.length ? pk(syncP) : ((has1x || has2xE) ? '지배 피크 중 없음 · 1×' + (has2xE ? '·2×' : '') + ' 성분은 존재하나 지배적이지 않음' : '관측되지 않음');
+    // 2) 대역 에너지
+    var be = [0, 0, 0]; try { be = VC.bandEnergies(det.fft, fr, eq.fs || 0); } catch (e) { }
+    var beT = (be[0] + be[1] + be[2]) || 1, frac = function (i) { return be[i] / beT; };
+    // 3) 충격성 지표 (라벨 구분)
+    var kurtW = 0, crestW = 0; (det.indics || []).forEach(function (x) { if (/Kurtosis|커토시스/.test(x.k)) kurtW = parseFloat(x.v) || 0; if (/Crest/.test(x.k)) crestW = parseFloat(x.v) || 0; });
+    var bk = det.bandKurt || 0, sk = (det.kurtogram && det.kurtogram.best) ? det.kurtogram.best.sk : 0;
+    var crestR = 0; (eq.rollup || []).forEach(function (r) { if (r.crest > crestR) crestR = r.crest; });
+    var impulsive = kurtW > 4.5 || bk > 4.5 || sk > 8;
+    // 4) 포락선 베어링 매칭
+    var bf = eq.bearing && eq.bearing.n > 0 ? VC.bearingFreqs(eq.rpm, eq.bearing) : null;
+    var envHit = det.envelope && det.envelope.fault && /BPFO|BPFI|BSF|FTF/.test(det.envelope.hint || '');
+    var envLine = bf ? (envHit ? '포락선 지배가 베어링 결함주파수와 일치' : '포락선 지배가 BPFO/BPFI/BSF/FTF와 불일치') : 'BPFO/BPFI/BSF/FTF 미상 (베어링 미지정 — 대조 불가)';
+    // 5) 결함별 근거 강도 (규칙 기반) — 각 근거의 가점(0~100)을 누적해 투명 점수화. tags=점수를 만든 근거, s=★(0~5)
+    var has2x = syncP.some(function (p) { return Math.abs(p.o - 2) < 0.1; });
+    var mk = function (f, parts, caveat) { // parts: [[조건, 점수, 태그]…]
+      var sc = 0, tags = []; parts.forEach(function (p) { if (p[0]) { sc += p[1]; tags.push(p[2]); } });
+      sc = Math.max(0, Math.min(100, sc));
+      // 0점은 "가능성 전무"로 오해됨 — 실제는 근거 부족. 태그 없으면 그 취지를 명시.
+      return { f: f, score: sc, s: Math.round(sc / 20), tags: tags, why: (tags.length ? tags.join('·') : '현재 근거 부족') + (caveat ? ' · ' + caveat : '') };
+    };
+    var conf = [
+      mk('불평형(Imbalance)', [[domSync && Math.abs(domO - 1) < 0.1, 55, '1× 동기 지배'], [Math.abs(domO - 1) < 0.1 && frac(0) > 0.5, 30, '1× 대역 우세'], [has1x && !(domSync && Math.abs(domO - 1) < 0.1) && frac(0) > 0.15, 8, '1× 성분 존재(비지배)']]),
+      mk('정렬불량(Misalignment)', [[has2x, 40, '2× 동기 성분'], [has2x && frac(1) > 0.4, 30, '결함대역 우세'], [!has2x && (has2xE || frac(1) > 0.3), 12, '결함대역 에너지(2× 미확정)']]),
+      mk('기계적 풀림(Looseness)', [[domSync && syncP.length >= 3, 55, '정수배 하모닉 다수'], [domSync && syncP.length === 2, 25, '하모닉 일부'], [domSync && subAny, 15, 'subharmonic'], [!domSync && subAny, 5, 'subharmonic 존재(비지배)']], domSync ? '' : '비동기 지배 — 하모닉 근거 약함'),
+      mk('베어링(Bearing)', [[sk > 20, 40, '고SK ' + sk.toFixed(0)], [sk > 8 && sk <= 20, 22, '중SK ' + sk.toFixed(0)], [kurtW > 4.5, 18, '고Kurtosis'], [crestW > 6 || crestR > 8, 14, '고Crest'], [!domSync, 20, '비동기 지배'], [!!(bf && envHit), 30, 'BPFO/BPFI 일치']], bf ? '' : '베어링 형식 미지정 — 확정 불가'),
+      mk('벨트·비1×(Belt/Sub-sync)', [[domSub, 55, 'sub-sync ' + domO.toFixed(2) + '× 지배'], [!domSub && subAny, 25, 'sub-sync 성분 존재']]),
+    ].sort(function (a, b) { return b.score - a.score; });
+    // 6) 텍스트 블록
+    var B = [];
+    B.push('■ 회전수 ' + eq.rpm + ' RPM · 1× = ' + fr.toFixed(1) + ' Hz');
+    B.push('■ 동기 피크(정수배): ' + syncTxt);
+    B.push('■ 비동기 피크(비정수배): ' + pk(asyncP));
+    B.push('■ 지배 성분: ' + (domSync ? '동기(정수배)' : '비동기') + ' ' + domO.toFixed(2) + '× · 상위 ' + peaks.length + '개 중 동기 ' + syncP.length + '/비동기 ' + asyncP.length + (domSub ? ' · sub-synchronous 지배' : '') + ((has1x || has2xE) && !syncP.length ? ' (1×·2×는 존재하나 비지배)' : ''));
+    B.push('■ 측대역: ' + ((det.spectral && /측대역|sideband/i.test((det.spectral.notes || []).join(' '))) ? '있음' : '뚜렷하지 않음') + ' · subharmonic(0.5×류): ' + (subAny ? '있음' : '없음'));
+    B.push('■ 포락선 매칭: ' + envLine);
+    B.push('■ Spectral Kurtosis(커토그램): ' + sk.toFixed(1) + (det.kurtogram && det.kurtogram.best ? ' @ ' + (det.kurtogram.best.loHz / 1000).toFixed(1) + '–' + (det.kurtogram.best.hiHz / 1000).toFixed(1) + 'kHz' : ''));
+    B.push('■ 대역 에너지: 1× ' + E.fmt(be[0]) + '(' + (frac(0) * 100).toFixed(0) + '%) · 결함(2~10×) ' + E.fmt(be[1]) + '(' + (frac(1) * 100).toFixed(0) + '%) · 고주파 ' + E.fmt(be[2]) + '(' + (frac(2) * 100).toFixed(0) + '%)');
+    B.push('■ 충격성: 파형 Kurtosis ' + kurtW.toFixed(1) + ' · Band Kurtosis ' + bk.toFixed(1) + ' · Spectral Kurtosis ' + sk.toFixed(1) + ' · 파형 Crest ' + crestW.toFixed(1) + ' · 롤업 최대 Crest ' + crestR.toFixed(1));
+    var confLines = conf.map(function (c) { return '■ ' + c.f + ' ' + star(c.s) + ' · ' + c.score + '점 — ' + c.why; });
+    return { block: B.join('\n'), confLines: confLines.join('\n'), conf: conf, top: conf[0], impulsive: impulsive, hasBearing: !!bf, domSync: domSync };
+  }
+  // 첨도 포화 판정(첨도 추이+RMS 추이) — 화면 경고·LLM 소견·리포트 공용
+  _kurtSat(eq) {
+    var rf = this._rollFor(eq), tr = this._trends(eq, rf.roll);
+    if (!tr || !tr.kurt || tr.kurt.length < 6) return { flag: false };
+    return VC.kurtosisSaturation(tr.kurt, rf.roll.map(function (r) { return r.rms; }));
+  }
+  _opinionPack(eq, det, sat) {
     var self = this, E = this.E, fr = eq.rpm / 60, u = eq.unit, L = [];
     L.push('[설비] ' + (eq.alias || eq.name) + ' (' + eq.name + ') · ' + eq.rpm + ' RPM (1×=' + fr.toFixed(1) + ' Hz, 2×=' + (2 * fr).toFixed(1) + ' Hz) · ISO Class ' + eq.cls + ' · 단위 ' + u);
     var bf = eq.bearing && eq.bearing.n > 0 ? VC.bearingFreqs(eq.rpm, eq.bearing) : null;
     L.push('[베어링] ' + (bf ? eq.bearing.model + ' · BPFO ' + bf.BPFO.toFixed(1) + ' / BPFI ' + bf.BPFI.toFixed(1) + ' / BSF ' + bf.BSF.toFixed(1) + ' / FTF ' + bf.FTF.toFixed(1) + ' Hz' : '미지정 (결함 주파수 대조 불가)'));
-    L.push('[현재 심각도] RMS ' + E.fmt(eq.rms) + ' ' + u + ' · ISO 존 경계 A/B ' + E.fmt(eq.zones[0]) + ', B/C ' + E.fmt(eq.zones[1]) + ', C/D ' + E.fmt(eq.zones[2]) + ' ' + u + ' · 등급 ' + E.STATUS[eq.grade].ko);
-    if (det.indics && det.indics.length) L.push('[시간영역 지표(파형 구간)] ' + det.indics.map(function (x) { return x.k + ' ' + x.v + (x.hint ? '(' + x.hint + ')' : ''); }).join(' · '));
-    if (det.bandKurt != null) L.push('[밴드 커토시스(고주파 임펄스성)] ' + det.bandKurt.toFixed(2) + (det.bandKurt > 4.5 ? ' (충격성 경계 초과 — 베어링·기어 결함 정황)' : ' (정상 범위)'));
-    if (det.fft && det.fft.freqs.length) {
-      L.push('[FFT 상위 피크] 분해능 ' + det.fft.res.toFixed(2) + ' Hz · ' + this._topPeaks(det.fft.freqs, det.fft.mags, 5).map(function (p, i) {
-        var mk = self._matchMarker(p.f, det.fft.markers); return (i + 1) + ') ' + p.f.toFixed(1) + ' Hz @ ' + E.fmt(p.m) + (mk ? ' [' + mk + ']' : '');
-      }).join(' · '));
-      try { var be = VC.bandEnergies(det.fft, fr, eq.fs || 0); L.push('[대역 에너지] 1× 대역 ' + E.fmt(be[0]) + ' · 결함 대역(2~10×) ' + E.fmt(be[1]) + ' · 고주파 ' + E.fmt(be[2])); } catch (e) {}
-    }
+    L.push('[현재 심각도] 심각도 판정 RMS = 최신 1초 RMS(현재 시점, 롤업 마지막 버킷) ' + E.fmt(eq.rms) + ' ' + u + ' — 등급을 정하는 값(평균/최대와 별개). ISO 존 경계 A/B ' + E.fmt(eq.zones[0]) + ', B/C ' + E.fmt(eq.zones[1]) + ', C/D ' + E.fmt(eq.zones[2]) + ' ' + u + ' · 등급 ' + E.STATUS[eq.grade].ko);
+    if (det.levels) L.push('[종합 레벨(물리량별 RMS)] 가속도 ' + E.fmt(det.levels['g']) + ' g · 속도 ' + E.fmt(det.levels['mm/s']) + ' mm/s(ISO 기준) · 변위 ' + E.fmt(det.levels['μm']) + ' μm — 단위가 달라 값 크기 비교 아닌, 아래 [대역 에너지]로 에너지가 저·중·고 어느 주파수에 몰렸는지 판단');
+    var ev = this._evidence(eq, det);
+    L.push('[EVIDENCE — 구조화 근거 (아래 분류를 그대로 근거로 사용하세요)]\n' + ev.block);
+    L.push('[결함 근거 강도 — 규칙 기반 자동 산출 (★ 높은 순 = 우선순위. 임의 %를 만들지 말고 이 순위를 근거로 설명하세요)]\n' + ev.confLines);
+    if (sat && sat.flag) L.push('[⚠첨도 포화 주의] ' + sat.msg);
     if (det.spectral && det.spectral.notes.length) L.push('[스펙트럼 패턴(하모닉·측대역)] ' + det.spectral.notes.join(' · '));
     if (det.envelope && (det.envelope.hint || det.envelope.fault)) L.push('[포락선] ' + (det.envelope.fault ? '결함 의심 — ' : '') + (det.envelope.hint || ''));
     if (det.cepstrum && det.cepstrum.note) L.push('[켑스트럼] ' + det.cepstrum.note);
     var tr = this._trendDir(eq.rollup);
-    if (tr) L.push('[RMS 추세] ' + tr.dir + ' (' + (tr.pct >= 0 ? '+' : '') + tr.pct.toFixed(0) + '% · ' + E.fmt(tr.first) + '→' + E.fmt(tr.last) + ' ' + u + ')');
+    if (tr) {
+      var _rl = eq.rollup || [], _durMin = _rl.length > 1 ? Math.round((_rl[_rl.length - 1].ms - _rl[0].ms) / 60000) : 0;
+      var _rlv = _rl.map(function (r) { return r.rms; }), _avg = _rlv.length ? _rlv.reduce(function (a, b) { return a + b; }, 0) / _rlv.length : 0, _mx = _rlv.length ? Math.max.apply(null, _rlv) : 0;
+      L.push('[RMS 추세] ' + tr.dir + ' (' + (tr.pct >= 0 ? '+' : '') + tr.pct.toFixed(0) + '% · ' + E.fmt(tr.first) + '→' + E.fmt(tr.last) + ' ' + u + ') · 평균 RMS(롤업) ' + E.fmt(_avg) + ' · 최대 RMS ' + E.fmt(_mx) + ' ' + u + ' · 관측 ' + _durMin + '분' + (_durMin < 60 ? ' (짧아 장기 추세 단정 불가)' : ''));
+    }
+    if (det.quality && !det.quality.ok) L.push('[⚠신호 품질] ' + det.quality.issues.map(function (x) { return x.label; }).join(', ') + ' 감지 — 측정 신뢰도 저하, 아래 판정은 신중히 해석할 것');
     return L.join('\n');
   }
   // 소제목 있는 상세 리포트형 프롬프트 (6섹션 고정)
-  _opinionPrompt(eq, det, dx) {
-    return '당신은 설비 진동 분석 전문가입니다. 아래 측정 데이터를 근거로 상세 진단 리포트를 한국어로 작성하세요.\n'
-      + '반드시 각 섹션을 "## 소제목" 한 줄로 시작하고 본문을 이어 쓰며, 다음 6개 섹션을 순서대로 모두 포함하세요:\n'
-      + '## 진동 상태 요약\n## 시간영역 지표 해석\n## 주파수 분석\n## 결함 메커니즘 추정\n## 추세 및 예후\n## 권장 조치\n'
-      + '각 섹션 본문은 아래 측정 데이터의 실제 수치를 인용해 근거를 제시하고, 데이터에 없는 사실은 지어내지 마세요. '
-      + '소제목("## ") 외의 마크다운 기호(굵게, 목록기호 등)는 쓰지 마세요.\n'
-      + '측정 제약: 이 데이터는 단일 채널·단일 방향이며 위상(phase) 정보가 없고 회전속도는 명판값 기준입니다. '
-      + '따라서 결함 메커니즘(불평형/정렬불량/풀림 등)은 위상·다축 정보 없이는 서로 구분이 어렵습니다. '
-      + '메커니즘은 반드시 "가설/의심"으로 서술하고 확정 표현("~이다", "확진")을 쓰지 마세요. '
-      + '확정 진단에는 다축·위상 측정이 필요함을 결함 메커니즘 섹션에 명시하세요.\n\n'
-      + '규칙 기반 1차 판정: ' + dx.verdict + '\n\n[측정 데이터]\n' + this._opinionPack(eq, det);
+  _opinionPrompt(eq, det, dx, sat) {
+    return '당신은 설비 진동 분석 전문가입니다. 아래 측정 데이터만 근거로 진단 리포트를 한국어로 작성하세요.\n'
+      + '다음 6개 섹션을 순서대로, 각각 "## 소제목" 한 줄로 시작해 작성하세요:\n'
+      + '## 진동 상태 요약\n## 시간영역 지표 해석\n## 주파수 분석\n## 결함 메커니즘 추정\n## 추세 및 예후\n## 권장 조치\n\n'
+      + '[작성 형식]\n'
+      + '· 문장은 짧게. 긴 서술 대신 "• 항목: 값" 불릿과 "→ 결론" 화살표로 정리하세요. 한 문단을 5~6줄로 늘리지 마세요.\n'
+      + '  (예시)\n  • 최대 SK 53.9 · 대역 6.4~8.0kHz\n  → 고주파 충격성 매우 큼 → 베어링 결함 가능성↑\n'
+      + '· 데이터에 있는 실제 수치만 인용하고, 없는 값·사실은 지어내지 마세요.\n\n'
+      + '[분석 원칙 — 반드시 준수]\n'
+      + '1) 결함 메커니즘의 "우선순위"는 지어내지 말고 데이터의 [결함 근거 강도] ★·점수(0~100)를 그대로 사용하세요. 확률(%)·"65%·25%" 같은 숫자는 금지입니다(점수는 데이터에 주어진 값만 인용). ★는 데이터의 별 개수를 "그대로" 복사하세요(임의로 ★ 하나 붙이지 말 것 — 0~9점=☆☆☆☆☆, 10~29=★, 30~49=★★, 50~69=★★★). 모든 후보를 점수와 함께 나열하되(0점 후보도 "가능성 없음"이 아니라 "현재 근거 부족"으로 서술) ★가 높은 순으로 1·2·3… "각 순위를 반드시 별도 줄로" 쓰고(한 줄 몰아쓰기·" / " 구분 금지), 각 줄에 [근거 강도]의 근거와 [EVIDENCE]의 관련 지표를 붙이세요. 예:\n'
+      + '   1. 베어링 (92점, ★★★★★) — 고충격성(SK 53.9)·비동기 지배, 단 베어링 미지정으로 확정 불가\n   2. 벨트·비1× (55점, ★★★) — sub-sync 0.60× 지배\n   3. 정렬불량 (12점, ★) — 결함대역 에너지는 있으나 2× 미확정\n   4. 불평형 (8점, ☆☆☆☆☆) — 1× 성분은 있으나 비지배, 현재 근거 부족\n'
+      + '2) FFT는 개별 Hz를 나열하지 말고 [EVIDENCE]의 동기/비동기 분류를 그대로 차수 "패턴"으로 요약하세요. 예: "1× 동기 존재(비지배) · 6.17× 비동기 지배 · 측대역 없음". ★주의: 1×·2×가 스펙트럼에 있으면(데이터가 "존재하나 비지배"라 하면) "동기 피크 없음"이라고 쓰지 말고 "동기 성분은 존재하나 지배적이지 않음"으로 정확히 쓰세요.\n'
+      + '3) ★동기/비동기 규칙(가장 중요, 반드시 준수):\n'
+      + '   · [EVIDENCE]의 "지배 성분"이 동기(정수배)면 → 불평형·정렬불량·풀림을 우선 평가.\n'
+      + '   · 지배 성분이 비동기(비정수배, 예 0.6×·1.43×·6.17×)면 → "하모닉을 근거로 풀림을 진단하지 말 것". 대신 베어링 / 벨트 / 기어 메시 / 공진 / 슬립을 평가하세요.\n'
+      + '4) 패턴→원인으로 연결하세요: 1× 우세(동기)→불평형 / 2× 우세(동기)→정렬불량 / 정수배 하모닉 다수→풀림·마모 / 0.5× subharmonic→기계적 풀림 / 포락선이 BPFO·BPFI·BSF·FTF와 일치→베어링 / 등간격 정수배 하모닉 열→기어 / 비동기 지배+고SK→베어링 계열. 근거 패턴 없이 원인을 적지 마세요.\n'
+      + '5) 베어링으로 귀속하려면 포락선 지배 주파수가 BPFO/BPFI/BSF/FTF 중 하나와 일치해야 합니다. 데이터의 [포락선]·[베어링]을 대조해 일치가 없으면 "충격성은 있으나 베어링·기어 확정 불가"로 쓰세요(SK·커토그램만으로 베어링 단정 금지).\n'
+      + '6) RMS·Crest·Kurtosis는 종류를 구분해 부르세요: RMS는 "심각도 판정 RMS = 최신 1초 RMS(현재 시점, 등급 결정값)/원시파형 RMS(표시 구간)/평균·최대 RMS(추세)/종합 레벨 RMS", Crest·Kurtosis도 "롤업 기준/원시파형/밴드"를 명시. 값이 다른 게 정상이며(예: 등급은 최신 1초 RMS로 정해져 평균보다 높을 수 있음), 어떤 값인지 밝히고 혼용하지 마세요.\n'
+      + '7) 관측 기간이 짧으면(데이터에 "관측 N분") 증가율이 커도 "악화 추세"로 단정하지 말고 "관측 기간이 짧아 장기 추세 판단 불가"를 [추세 및 예후]에서 우선 강조하세요.\n'
+      + '8) "단일 채널·위상 없음이라 메커니즘 확정 불가" 취지는 [진동 상태 요약]에서 1회, [권장 조치] 결론에서 1회, 총 2번만 쓰고 다른 섹션에서는 절대 반복하지 마세요. 메커니즘은 "가설/의심"으로 서술하되 이 제약 문구를 매 문단 붙이지 마세요.\n'
+      + '9) 데이터에 [⚠첨도 포화 주의]가 있으면 첨도 하락을 회복으로 단정하지 말고 결함 확산(말기) 가능성을 경고하세요. [⚠신호 품질]이 있으면 요약 첫 줄에서 측정 신뢰도 저하를 먼저 경고하세요.\n'
+      + '10) 조치 시급성은 등급에 맞추세요: "심각(Danger 초과)"에만 "즉시 정지 검토·긴급"을 쓰고, "위험" 등급은 "조기 점검 권장 / 우선순위 높은 점검"으로 쓰세요(위험 등급에 "즉시 정지"는 과합니다). "긴급 진단 필요" 같은 과한 표현은 심각 등급이 아니면 피하세요.\n'
+      + '11) [권장 조치] 맨 끝에 "핵심 요약"으로 3~4문장 한 문단을 쓰세요: (가장 근거 강도 높은 결함 후보 + 그 근거) + (단일 채널 한계로 확정 불가) + (권장 다음 단계). 처음 보는 사람이 이 한 문단만 읽어도 핵심을 알도록. 예: "고주파 충격성과 비동기 성분이 동시에 관찰되어 베어링 계열 결함 가능성이 가장 높습니다. 다만 단일 채널 측정만으로는 메커니즘을 확정할 수 없어, 다축 측정과 베어링 형식(BPFO/BPFI) 정보를 포함한 추가 진단을 권장합니다."\n\n'
+      + '규칙 기반 1차 판정: ' + dx.verdict + '\n\n[측정 데이터]\n' + this._opinionPack(eq, det, sat);
   }
   // "## 소제목" 기준으로 섹션 분리 → [{heading, body}]
   _parseOpinion(text) {
@@ -782,7 +901,7 @@ export class App extends Component {
     var llm = LLM.createLLM(this._llmCfg());
     if (!llm) { setTimeout(function () { self.setState({ dxAiText: '__fallback__' }); }, 300); return; }
     var det = this._detail(eq), dx = this._dx(eq);
-    var p = this._opinionPrompt(eq, det, dx);
+    var p = this._opinionPrompt(eq, det, dx, this._kurtSat(eq));
     llm.complete(p).then(function (txt) { self.setState({ dxAiText: txt || '__fallback__' }); })
       .catch(function (e) { console.warn('[vibe] llm opinion failed', e); self.setState({ dxAiText: '__fallback__' }); self._toast('LLM 소견 생성 실패: ' + (e.message || e), 'err'); });
   }
@@ -811,7 +930,7 @@ export class App extends Component {
     var wave = C('vc-wave');
     if (wave && det.raw.values.length) {
       var wl = det.raw.times_ms.map(function (m) { return m.toFixed(0); }), wt = det.raw.times_ms.map(function (m) { return m.toFixed(1) + ' ms'; });
-      var dw = function (s, e) { var r = E.drawLine(wave, { values: det.raw.values.slice(s, e), xLabels: wl.slice(s, e), tipLabels: wt.slice(s, e), color: E.SERIES.wave, height: 240, lw: 1.1 }, CC); if (r) E.addTip(wave, C('vt-wave'), C('vx-wave'), r.pts); };
+      var dw = function (s, e) { var r = E.drawLine(wave, { values: det.raw.values.slice(s, e), xLabels: wl.slice(s, e), tipLabels: wt.slice(s, e), color: E.SERIES.wave, height: 240, lw: 1.1, unit: det.dispUnit }, CC); if (r) E.addTip(wave, C('vt-wave'), C('vx-wave'), r.pts); };
       dw(0, det.raw.values.length); E.addZoom(wave, det.raw.values.length, dw);
     }
     var rms = C('vc-rms');
@@ -833,15 +952,25 @@ export class App extends Component {
     }
     var fft = C('vc-fft');
     if (fft && det.fft.freqs.length) {
+      // 전대역 토글: 기본은 dispHz까지만 표시, 켜면 전대역(Nyquist)까지. 데이터는 이미 전대역이라 재조회 없음.
+      var fLen = det.fft.freqs.length, dispEnd = fLen;
+      if (!this.state.fftFull && det.fft.dispHz > 0) {
+        for (var _i = 0; _i < fLen; _i++) { if (det.fft.freqs[_i] > det.fft.dispHz) { dispEnd = _i; break; } }
+      }
       var df = function (s, e) { var r = E.drawFFT(fft, { freqs: det.fft.freqs.slice(s, e), mags: det.fft.mags.slice(s, e), markers: det.fft.markers, res: det.fft.res, height: 280, hideMarkerLabels: true }, CC); if (r) E.addTip(fft, C('vt-fft'), null, r.pts); };
-      df(0, det.fft.freqs.length); E.addZoom(fft, det.fft.freqs.length, df);
+      df(0, dispEnd); E.addZoom(fft, dispEnd, df);
+    }
+    var kgc = C('vc-kurtogram');
+    if (kgc && det.kurtogram && det.kurtogram.freqs.length) {
+      E.drawFFT(kgc, { freqs: det.kurtogram.freqs, mags: det.kurtogram.mags, markers: det.kurtogram.markers, res: det.kurtogram.res, height: 180, hideMarkerLabels: false }, CC);
     }
     var env = C('vc-env');
     if (env && det.envelope.freqs.length) { var de = function (s, e) { E.drawFFT(env, { freqs: det.envelope.freqs.slice(s, e), mags: det.envelope.mags.slice(s, e), markers: det.envelope.markers, res: 1, height: 210, hideMarkerLabels: true }, CC); }; de(0, det.envelope.freqs.length); E.addZoom(env, det.envelope.freqs.length, de); }
     var cep = C('vc-cep');
     if (cep && det.cepstrum.freqs.length) { var dcp = function (s, e) { E.drawFFT(cep, { freqs: det.cepstrum.freqs.slice(s, e), mags: det.cepstrum.mags.slice(s, e), markers: det.cepstrum.markers, res: 1, height: 200, hideMarkerLabels: true }, CC); }; dcp(0, det.cepstrum.freqs.length); E.addZoom(cep, det.cepstrum.freqs.length, dcp); }
     var spec = C('vc-spec');
-    if (spec && det.spectro.rows) E.drawHeat(spec, { grid: det.spectro.grid, rows: det.spectro.rows, cols: det.spectro.cols, fmax: det.spectro.fmax, height: 200 }, CC);
+    var sg = (this.state.fftFull && det.spectroFull) ? det.spectroFull : det.spectro; // FFT 범위 토글과 연동
+    if (spec && sg.rows) E.drawHeat(spec, { grid: sg.grid, rows: sg.rows, cols: sg.cols, fmax: sg.fmax, height: 200 }, CC);
     var kurtC = C('vc-kurt'), bandC = C('vc-band');
     var tr = (kurtC || bandC) ? this._trends(eq, roll) : null;
     // 라이브 트렌드는 청크 샘플 시각축(tr.xLabels), mock은 롤업 시각축(xL)
@@ -929,51 +1058,141 @@ export class App extends Component {
     var from = (p === 'all') ? (minMs || to - 3600000) : to - (PERIOD_H[p] || 1) * 3600000;
     return { from: this._dtVal(Math.max(minMs, from)), to: this._dtVal(to) };
   }
-  _toggleGenTag(id) { var g = this.state.genTags.slice(), i = g.indexOf(id); if (i >= 0) g.splice(i, 1); else g.push(id); this.setState({ genTags: g }); }
+  // 앵커 태그(들)의 데이터 범위 — 여러 태그면 합집합(가장 이른 시작 ~ 가장 늦은 끝, 최장 스팬)
+  // 스팬을 아는 태그가 하나도 없으면 Infinity = 프리셋을 막지 않는다
+  _presetSpan(eqs) {
+    var spanH = 0, toMs = 0, minMs = 0, known = false;
+    (eqs || []).forEach(function (e) {
+      if (!e) return;
+      var st = e.stat;
+      if (st && st.maxMs > st.minMs) { spanH = Math.max(spanH, (st.maxMs - st.minMs) / 3600000); known = true; }
+      if (st && st.minMs) minMs = minMs ? Math.min(minMs, st.minMs) : st.minMs;
+      var last = e.lastSeen || (st && st.maxMs) || 0;
+      if (last > toMs) toMs = last;
+    });
+    return { spanH: known ? spanH : Infinity, toMs: toMs, minMs: minMs };
+  }
+  // 기간 프리셋 칩 — 데이터 구간보다 긴 것은 비활성(레이아웃은 고정, 데이터가 쌓이면 버튼이 켜질 뿐).
+  // who = 비활성 툴팁에서 어느 태그 기준인지 밝히는 말 · scope = 'report'면 리포트 탭 기간 상태를 쓴다
+  _presetChips(eqs, who, scope) {
+    var self = this, S = this.state, sp = this._presetSpan(eqs), rep = scope === 'report';
+    var cur = rep ? S.genPeriod : S.period;
+    var put = function (p, fromV, toV) {
+      self.setState(rep ? { genPeriod: p, genFrom: fromV, genTo: toV } : { period: p, from: fromV, to: toV });
+    };
+    var spanTxt = sp.spanH === Infinity ? '알 수 없음'
+      : sp.spanH < 1 ? Math.max(1, Math.round(sp.spanH * 60)) + '분'
+        : sp.spanH < 48 ? sp.spanH.toFixed(1) + '시간' : (sp.spanH / 24).toFixed(1) + '일';
+    return [['1h', '1시간'], ['6h', '6시간'], ['24h', '24시간'], ['all', '전체'], ['custom', '직접 입력']].map(function (p) {
+      var a = cur === p[0];
+      var need = PERIOD_H[p[0]];
+      var dis = need != null && sp.spanH < need; // 데이터가 그 길이에 못 미치면 선택 불가
+      return {
+        label: p[1],
+        title: dis ? who + '의 데이터는 ' + spanTxt + '뿐이라 선택할 수 없습니다' : '',
+        onClick: function () {
+          if (dis) { self._toast('데이터가 부족합니다', 'warn'); return; }
+          if (p[0] === 'custom' && cur === 'custom') return; // 이미 직접 입력 — 사용자가 넣은 값 보존
+          var s2 = self._presetSpan(eqs); // 클릭 시점 기준으로 다시 (라이브로 lastSeen이 전진한다)
+          var toMs = s2.toMs || self.data.now;
+          // 직접 입력으로 들어갈 땐 직전 프리셋이 뜻하던 구간을 그대로 구체화해 채운다
+          var len = p[0] === 'custom' ? cur : p[0];
+          var fromMs = (PERIOD_H[len] == null)
+            ? (s2.minMs || toMs - PERIOD_H['24h'] * 3600000) // all
+            : toMs - PERIOD_H[len] * 3600000;
+          put(p[0], self._dtVal(fromMs), self._dtVal(toMs));
+        },
+        style: 'padding: 6px 13px; background: ' + (a ? 'var(--primary-base)' : 'transparent') + '; color: ' + (a ? '#fff' : 'var(--text-secondary)') + '; border: none; border-right: 1px solid var(--border-default); font-size: 12px; font-weight: ' + (a ? '600' : '500') + ';' + (dis ? ' opacity: .35; cursor: default;' : ' cursor: pointer;')
+      };
+    });
+  }
+  // 대상 태그가 바뀌면 리포트 기간도 그 태그(들)에 맞춰 다시 잡는다.
+  // 하나도 없으면 기간 자체를 비운다 — 기준이 없는데 구간만 떠 있으면 그게 오해의 출발점이었다
+  _setGenTags(ids) {
+    var self = this, S = this.state;
+    var eqs = (ids || []).map(function (id) { return self._eq(id); }).filter(Boolean);
+    if (!eqs.length) { this.setState({ genTags: ids || [], genPeriod: '', genFrom: '', genTo: '' }); return; }
+    if (S.genPeriod === 'custom') { this.setState({ genTags: ids }); return; } // 직접 입력 값은 사용자 것
+    var sp = this._presetSpan(eqs);
+    var want = S.genPeriod || '1h';
+    var need = PERIOD_H[want];
+    if (need != null && sp.spanH < need) want = 'all'; // 데이터보다 긴 프리셋이 선택돼 있던 모순 상태 방지
+    var toMs = sp.toMs || this.data.now;
+    var fromMs = (PERIOD_H[want] == null) ? (sp.minMs || toMs - PERIOD_H['24h'] * 3600000) : toMs - PERIOD_H[want] * 3600000;
+    this.setState({ genTags: ids, genPeriod: want, genFrom: this._dtVal(fromMs), genTo: this._dtVal(toMs) });
+  }
+  _toggleGenTag(id) { var g = this.state.genTags.slice(), i = g.indexOf(id); if (i >= 0) g.splice(i, 1); else g.push(id); this._setGenTags(g); }
   // 리포트 생성 — 선택 태그별로: 데이터 조회(0) → 지표 계산(1) → 소견 생성(2, 옵션) → 저장(3)
   // 저장: <워크스페이스 루트>/vibration-reports/RPT_<태그>_<기간>_<생성일시>[_LLM].html (파일 API)
+  // 생성 중단 — 누르는 즉시 끝난다: 화면은 바로 대기 상태로 돌아가고, LLM 요청은 실제로 끊고(AbortController),
+  // 실행 토큰(_genRun)을 올려 그 뒤로는 어떤 파일도 저장되지 않게 한다. 이미 저장된 리포트만 남는다
+  _cancelGen() {
+    if (!this.state.genRunning) return;
+    this._genRun = (this._genRun || 0) + 1; // 진행 중이던 체인은 이 시점부터 전부 무효
+    if (this._genAC) { try { this._genAC.abort(); } catch (e) { /* 이미 끝난 요청 */ } this._genAC = null; }
+    this.setState({ genRunning: false, genStep: 0 });
+    this._toast('생성 중단 · ' + (this._genSaved || 0) + '건 저장됨', 'warn');
+    this._loadReports();
+  }
   _genReport() {
     var self = this, S = this.state;
     if (!S.genTags.length) { this._toast('태그를 1개 이상 선택하세요', 'warn'); return; }
     if (S.genRunning) return;
+    var run = this._genRun = (this._genRun || 0) + 1;
+    this._genSaved = 0;
+    this._genAC = (typeof AbortController !== 'undefined') ? new AbortController() : null;
     this.setState({ genRunning: true, genStep: 0 });
-    var ids = S.genTags.slice(), saved = 0;
+    var ids = S.genTags.slice();
     ensureDir(REPORT_DIR)
       .then(function () {
         return ids.reduce(function (chain, id) {
           return chain.then(function () {
+            if (self._genRun !== run) return null; // 중단됨 — 남은 태그는 시작하지 않는다
             var eq = self._eq(id);
             if (!eq) return null;
-            return self._genOne(eq).then(function () { saved++; });
+            return self._genOne(eq, run).then(function () { self._genSaved++; })
+              .catch(function (e) { if (e && e.__abort) return null; throw e; });
           });
         }, Promise.resolve());
       })
       .then(function () {
+        if (self._genRun !== run) return; // 중단 처리는 _cancelGen이 이미 끝냈다
+        self._genAC = null;
         self.setState({ genRunning: false, genStep: 0 });
-        self._toast('리포트 ' + saved + '건 저장 · vibration-reports/');
+        self._toast('리포트 ' + self._genSaved + '건 저장 · vibration-reports/');
         self._loadReports();
       })
       .catch(function (e) {
+        if (self._genRun !== run) return;
+        self._genAC = null;
         self.setState({ genRunning: false, genStep: 0 });
         self._toast('리포트 생성 실패: ' + (e && e.message || e), 'err');
         self._loadReports();
       });
   }
-  _genOne(eq) {
+  _genOne(eq, run) {
     var self = this, S = this.state, E = this.E;
+    var live = function () { if (self._genRun !== run) throw { __abort: true }; }; // 중단된 실행이면 여기서 끝
     this.setState({ genStep: 0 });
-    var c = this._detailCache[eq.id];
-    var detP = (c && c.state === 'ready') ? Promise.resolve(c.det) : liveDetail(E, eq);
     // 리포트도 선택 기간의 롤업을 직접 조회(렌더용 비동기 캐시에 의존하지 않음)
-    return this._rollForAsync(eq).then(function (rf) {
+    return this._rollForAsync(eq, 'report').then(function (rf) {
+    live();
     var roll = rf.roll;
+    var anchor = rf.toMs || eq.lastSeen; // 리포트 스펙트럼도 리포트 기간의 끝에 맞춘다
+    var vu = self.state.viewUnit || null; // 리포트도 현재 표시 물리량(가속도/속도/변위)으로 생성
+    var c = self._detailCache[eq.id];
+    var detP = (c && c.state === 'ready' && c.anchor === anchor && c.viewUnit === vu) ? Promise.resolve(c.det) : liveDetail(E, eq, anchor, vu);
+    // 이 태그에 실제로 적용된 구간 — 프리셋은 태그마다 창을 다시 잡으므로 리포트 탭의 genFrom/genTo(앵커 값)를 그대로 쓰면 안 된다
+    var winFrom = rf.fromMs ? E.fmtDT(rf.fromMs) : S.genFrom;
+    var winTo = rf.toMs ? E.fmtDT(rf.toMs) : S.genTo;
     var trP = loadTrendChunks(E, eq, roll).catch(function () { return { kurt: [], bands: [], xLabels: [] }; });
     return Promise.all([detP, trP, self._logoDataURL(), self._chartLibSrc()]).then(function (rr) {
+      live();
       var det = rr[0], tr = rr[1], logo = rr[2], chartSrc = rr[3];
       // 진단이 같은 상세를 보도록 캐시 시드 — 기존 스냅샷 프리즈(eqSnap/snapNow)는 보존
       self._detailCache[eq.id] = Object.assign(
         self._detailCache[eq.id] || { eqSnap: Object.assign({}, eq), snapNow: (self.data && self.data.now) || Date.now() },
-        { state: 'ready', det: det });
+        { state: 'ready', det: det, anchor: anchor, viewUnit: vu });
       self.setState({ genStep: 1 });
       var dx = self._dx(eq);
 
@@ -996,9 +1215,9 @@ export class App extends Component {
           thr: '기준 < ' + (prefix || '') + E.fmt(thr), over: over, arrow: over ? '▲' : '▼', delta: E.fmt(Math.abs(value - thr)) };
       }
       var sevCards = [
-        sev('평균 RMS', wAvg, eq.unit, eq.zones[1], VC.gradeFor(wAvg, eq.zones)),
-        sev('순간 RMS 최댓값', wMax, eq.unit, eq.zones[2], VC.gradeFor(wMax, eq.zones)),
-        sev('Crest Factor', wCrest, '', 3.0, wCrest < 3 ? 0 : wCrest < 6 ? 2 : 3),
+        sev('평균 RMS · 1초 롤업', wAvg, eq.unit, eq.zones[1], VC.gradeFor(wAvg, eq.zones)),
+        sev('순간 RMS 최대 · 1초 롤업', wMax, eq.unit, eq.zones[2], VC.gradeFor(wMax, eq.zones)),
+        sev('Crest · 롤업 최대', wCrest, '', 3.0, wCrest < 3 ? 0 : wCrest < 6 ? 2 : 3),
         sev('변화율', wTrend, '', 2.0, wTrend < 1.3 ? 0 : wTrend < 2 ? 1 : 3, '×'),
       ];
       var stats = [
@@ -1009,19 +1228,21 @@ export class App extends Component {
       ];
       var specs = [
         { k: '데이터 건수', v: self._num(cnt), unit: '건' },
-        { k: '표시 구간', v: self._rangeText(roll, S.from + ' ~ ' + S.to, rf) },
+        { k: '표시 구간', v: self._rangeText(roll, winFrom + ' ~ ' + winTo, rf) },
         { k: '샘플레이트', v: (det.raw.fs / 1000).toFixed(2), unit: 'kHz' },
         { k: '롤업 단위', v: rf.label },
       ];
 
       self.setState({ genStep: 2 });
       var llm = S.genLLM ? LLM.createLLM(self._llmCfg()) : null;
+      var _rptSat = self._kurtSat(eq); // 첨도 포화 판정을 소견·리포트에 함께
       var opP = llm
-        ? llm.complete(self._opinionPrompt(eq, det, dx) + '\n[조회 기간] ' + S.from + ' ~ ' + S.to)
+        ? llm.complete(self._opinionPrompt(eq, det, dx, _rptSat) + '\n[조회 기간] ' + winFrom + ' ~ ' + winTo, { signal: self._genAC && self._genAC.signal })
           .catch(function (e2) { console.warn('[vibe] report opinion failed', e2); return null; })
         : Promise.resolve(null);
 
       return opP.then(function (opinion) {
+        live(); // 소견까지 받았어도 중단됐으면 버린다
         self.setState({ genStep: 3 });
         // 차트는 PNG가 아니라 데이터+엔진을 내장 — 저장된 문서에서 캔버스 실시간 렌더(줌/툴팁/테마)
         var useClock = rf.clock;
@@ -1034,7 +1255,7 @@ export class App extends Component {
         ];
         var kxl = (tr.xLabels && tr.xLabels.length) ? tr.xLabels : xL;
         var data = {
-          unit: eq.unit, refs: refs, xL: xL, xT: xT, kxl: kxl,
+          unit: eq.unit, dispUnit: det.dispUnit, natUnit: det.natUnit, refs: refs, xL: xL, xT: xT, kxl: kxl,
           rms: rms.length ? rms : null,
           p2p: rms.length ? p2pV : null,
           crest: rms.length ? crestA : null,
@@ -1043,8 +1264,13 @@ export class App extends Component {
           wave: det.raw.values.length ? { t: det.raw.times_ms.map(function (m) { return m.toFixed(0); }), v: det.raw.values } : null,
           fft: det.fft.freqs.length ? { freqs: det.fft.freqs, mags: det.fft.mags, markers: det.fft.markers, res: det.fft.res } : null,
           spec: det.spectro.rows ? det.spectro : null,
-          env: det.envelope.freqs.length ? { freqs: det.envelope.freqs, mags: det.envelope.mags, markers: det.envelope.markers } : null,
+          env: det.envelope.freqs.length ? { freqs: det.envelope.freqs, mags: det.envelope.mags, markers: det.envelope.markers, hint: det.envelope.hint } : null,
           cep: det.cepstrum.freqs.length ? { freqs: det.cepstrum.freqs, mags: det.cepstrum.mags, markers: det.cepstrum.markers } : null,
+          kurtogram: (det.kurtogram && det.kurtogram.freqs.length) ? { freqs: det.kurtogram.freqs, mags: det.kurtogram.mags, markers: det.kurtogram.markers, res: det.kurtogram.res, best: det.kurtogram.best } : null,
+          quality: (det.quality && !det.quality.ok) ? det.quality : null,
+          kurtWarn: _rptSat && _rptSat.flag ? _rptSat.msg : null,
+          levels: det.levels, isoUnit: eq.unit, isoZoneBC: E.fmt(eq.zones[1]),
+          evidence: self._evidence(eq, det).conf,
         };
 
         var genMs = Date.now();
@@ -1069,9 +1295,10 @@ export class App extends Component {
         });
         // 파일명은 짧게(태그_생성일시) — 기간·별칭·LLM 여부는 .index.json에 기록해 보관함 컬럼 유지
         var fname = eq.name.replace(/[^A-Za-z0-9._-]/g, '-') + '_' + ts + '.html';
+        live(); // 쓰기 직전 마지막 확인 — 중단 후에는 파일이 생기지 않는다
         return saveFile(REPORT_DIR + '/' + fname, html, 'text/html').then(function () {
           return self._updateReportIndex(function (idx) {
-            idx[fname] = { tag: eq.alias || eq.name, from: S.from, to: S.to, llm: !!opinion, ms: genMs };
+            idx[fname] = { tag: eq.alias || eq.name, from: winFrom, to: winTo, llm: !!opinion, ms: genMs };
           });
         });
       });
@@ -1278,7 +1505,7 @@ export class App extends Component {
     base.diagShow = base.isDiag && !base.monEmpty; base.diagEmptyShow = base.isDiag && base.monEmpty;
     base.reportShow = base.isReport && !base.monEmpty; base.reportEmptyShow = base.isReport && base.monEmpty;
     base.onGoSource = function () { self.setState({ tab: 'settings', setSection: 'source' }); };
-    base.lastEventText = S.events.length ? E.ago(S.events[0].ms, this.data.now) + ' · ' + S.events[0].tagAlias : '없음';
+    base.lastEventText = S.events.length ? E.ago(S.events[0].ms, Date.now()) + ' · ' + S.events[0].tagAlias : '없음'; // 이벤트는 벽시계 기준
     base.srcNotice = S.srcNotice;
     base.onSrcReload = function () {
       self._noticeMuted = false;
@@ -1316,32 +1543,8 @@ export class App extends Component {
       }
       self.setState(patch);
     };
-    // 프리셋: 데이터 구간보다 긴 것은 비활성(레이아웃은 고정 — 실시간으로 데이터가 쌓이면 버튼이 켜질 뿐)
-    var _pEq = this._activeEq(S.selTag);
-    var _spanH = (_pEq && _pEq.stat && _pEq.stat.maxMs > _pEq.stat.minMs) ? (_pEq.stat.maxMs - _pEq.stat.minMs) / 3600000 : Infinity;
-    var _spanTxt = _spanH === Infinity ? '알 수 없음'
-      : _spanH < 1 ? Math.max(1, Math.round(_spanH * 60)) + '분'
-        : _spanH < 48 ? _spanH.toFixed(1) + '시간' : (_spanH / 24).toFixed(1) + '일';
-    base.periodPresets = [['1h', '1시간'], ['6h', '6시간'], ['24h', '24시간'], ['all', '전체'], ['custom', '직접 입력']].map(function (p) {
-      var a = S.period === p[0];
-      var need = PERIOD_H[p[0]];
-      var dis = need != null && _spanH < need; // 데이터가 그 길이에 못 미치면 선택 불가
-      return {
-        label: p[1],
-        title: dis ? '이 태그의 데이터는 ' + _spanTxt + '뿐이라 선택할 수 없습니다' : '',
-        onClick: function () {
-          if (dis) { self._toast('데이터가 부족합니다', 'warn'); return; }
-          if (p[0] === 'custom') { self.setState({ period: 'custom' }); return; }
-          var eqc = self._activeEq(self.state.selTag);
-          var toMs = (eqc && eqc.lastSeen) || self.data.now;
-          var fromMs = p[0] === 'all'
-            ? ((eqc && eqc.stat && eqc.stat.minMs) ? eqc.stat.minMs : toMs - PERIOD_H['24h'] * 3600000)
-            : toMs - PERIOD_H[p[0]] * 3600000;
-          self.setState({ period: p[0], from: self._dtVal(fromMs), to: self._dtVal(toMs) });
-        },
-        style: 'padding: 6px 13px; background: ' + (a ? 'var(--primary-base)' : 'transparent') + '; color: ' + (a ? '#fff' : 'var(--text-secondary)') + '; border: none; border-right: 1px solid var(--border-default); font-size: 12px; font-weight: ' + (a ? '600' : '500') + ';' + (dis ? ' opacity: .35; cursor: default;' : ' cursor: pointer;')
-      };
-    });
+    // 상세분석 기간 — 앵커는 선택 태그 1개
+    base.periodPresets = this._presetChips([this._activeEq(S.selTag)], '이 태그', 'detail');
     base.periodFrom = S.from; base.periodTo = S.to;
     var custom = S.period === 'custom';
     var _fD = Date.parse(S.from), _tD = Date.parse(S.to);
@@ -1368,6 +1571,9 @@ export class App extends Component {
     var _dc = this._detailCache[eq.id];
     if (_dc && _dc.eqSnap) eq = _dc.eqSnap; // 이후 게이지·판정·진단·추세는 캡처 스냅샷 값 사용(실시간 미반영)
     var _rf = this._rollFor(eq), _roll = _rf.roll; var _rms = _roll.map(function (r) { return r.rms; }), _peak = _roll.map(function (r) { return r.rms * r.crest; }), _crestA = _roll.map(function (r) { return r.crest; }); var _mean = function (a) { return a.reduce(function (x, y) { return x + y; }, 0) / (a.length || 1); }; var _q = Math.max(1, Math.floor(_rms.length / 4)); var _prevQ = _mean(_rms.slice(-2 * _q, -_q)); var _wTrend = _prevQ > 0 ? _mean(_rms.slice(-_q)) / _prevQ : 1; var _wCount = _roll.reduce(function (a2, r2) { return a2 + (r2.cnt || _rf.stepSec); }, 0), _wAvg = _mean(_rms), _wMin = Math.min.apply(null, _rms), _wMax = Math.max.apply(null, _rms), _wPeak = Math.max.apply(null, _peak), _wCrest = Math.max.apply(null, _crestA); var _wind = { avg_rms: { value: _wAvg, thr: eq.zones[1], grade: VC.gradeFor(_wAvg, eq.zones) }, peak_rms: { value: _wMax, thr: eq.zones[2], grade: VC.gradeFor(_wMax, eq.zones) }, crest: { value: _wCrest, thr: 3.0, grade: _wCrest < 3 ? 0 : _wCrest < 6 ? 2 : 3 }, trend: { value: _wTrend, thr: 2.0, grade: _wTrend < 1.3 ? 0 : _wTrend < 2 ? 1 : 3 } };
+    // 첨도 포화 경고 — 첨도 추이가 고점 대비 하락하나 RMS는 유지/상승이면 "회복 아님(말기)" 주의
+    var _sat = this._kurtSat(eq);
+    base.kurtWarnShow = !!_sat.flag; base.kurtWarn = _sat.msg || '';
     base.detTitle = eq.alias || eq.name; base.detName = eq.name; base.detUnit = eq.unit;
     base.detSpec = [
       { k: '데이터 건수', v: this._num(_wCount) + ' 건' },
@@ -1377,7 +1583,7 @@ export class App extends Component {
     ];
     var g = E.STATUS[eq.grade];
     base.sevGradeKo = g.ko; base.sevColor = g.color; base.sevSoft = g.soft;
-    base.sevReco = { 0: '정상 운전 유지 · 예방관리 지속', 1: '모니터링 강화 권고', 2: '점검 권고 · 24시간 내', 3: '즉시 정지 검토' }[eq.grade];
+    base.sevReco = { 0: '정상 운전 유지 · 예방관리 지속', 1: '모니터링 강화 권고', 2: '조기 점검 권고 · 측정 주기 단축', 3: '즉시 정지 검토' }[eq.grade];
     base.sevMachine = eq.name + ' · Class ' + eq.cls + ' · ' + eq.rpm + ' RPM';
     base.sevZones = [
       { ko: '양호', color: '#3aa76d', range: '< ' + E.fmt(eq.zones[0]) },
@@ -1390,6 +1596,48 @@ export class App extends Component {
     base.sevCards = [card('평균 RMS', ind.avg_rms, eq.unit), card('순간 RMS 최댓값', ind.peak_rms, eq.unit), card('Crest Factor', ind.crest, ''), card('변화율', ind.trend, '', '×')];
     base.statRows = [{ k: '건수 (COUNT)', v: this._num(_wCount) }, { k: '평균 (AVG)', v: E.fmt(_wAvg) + ' ' + eq.unit }, { k: '최솟값 (MIN)', v: E.fmt(_wMin) + ' ' + eq.unit }, { k: '최댓값 (MAX)', v: E.fmt(_wMax) + ' ' + eq.unit }];
     base.fftMarkers = det.fft.markers.filter(function (m) { return m.kind !== 'h'; }).map(function (m) { return { label: m.label, freq: m.freq.toFixed(1) + ' Hz', color: m.kind === 'f' ? '#e5646a' : (m.kind === 'x' ? 'var(--text-tertiary)' : 'var(--text-muted)') }; });
+    // FFT·스펙트로그램 주파수 범위 토글 (연동) — 전대역으로 펼칠 여지가 있을 때만 노출
+    base.fftRangeShow = det.fft.nyqHz > det.fft.dispHz * 1.05;
+    var _rlabel = function (hz) { return hz >= 1000 ? (Math.round(hz / 100) / 10) + 'kHz' : Math.round(hz) + 'Hz'; };
+    base.fftRangeChips = [
+      { v: false, l: '기본 0–' + _rlabel(det.fft.dispHz || 1000) },
+      { v: true, l: '전대역 0–' + _rlabel(det.fft.nyqHz || 0) },
+    ].map(function (o, i) {
+      var a = !!S.fftFull === o.v;
+      return {
+        label: o.l, onClick: function () { self.setState({ fftFull: o.v }); },
+        style: 'height: 24px; padding: 0 10px; border: none; font-size: 11px; font-weight: 600; cursor: pointer;'
+          + (i === 0 ? ' border-right: 1px solid var(--border-medium);' : '')
+          + ' background: ' + (a ? 'var(--primary-base)' : 'transparent') + '; color: ' + (a ? '#fff' : 'var(--text-tertiary)') + ';',
+      };
+    });
+    // 커토그램 — 결함 대역 자동 탐색 (포락선 앞단). 결과가 있을 때만 카드 노출
+    base.kurtogramShow = !!(det.kurtogram && det.kurtogram.freqs.length);
+    if (det.kurtogram && det.kurtogram.best) {
+      var _khz = function (h) { return h >= 1000 ? (h / 1000).toFixed(1) + 'kHz' : Math.round(h) + 'Hz'; };
+      var _kb = det.kurtogram.best;
+      base.kurtogramHint = '가장 충격성이 강한 대역 ' + _khz(_kb.loHz) + '–' + _khz(_kb.hiHz) + ' · SK ' + _kb.sk.toFixed(1) + ' → 포락선을 이 대역으로 복조 (SK 클수록 결함 충격성↑)';
+    } else base.kurtogramHint = '';
+    // 표시 물리량 토글 — 가속도(g)/속도(mm/s)/변위(μm). 센서 원단위가 기본, 나머지는 적분/미분 변환.
+    var _natU = det.natUnit || (this._activeEq(S.selTag) || {}).unit || 'mm/s';
+    base.unitChips = [{ u: 'g', l: '가속도' }, { u: 'mm/s', l: '속도' }, { u: 'μm', l: '변위' }].map(function (o) {
+      var active = (S.viewUnit || _natU) === o.u;
+      return {
+        label: o.l + (o.u === _natU ? '(원본)' : '') + ' ' + o.u,
+        title: o.u === _natU ? '센서가 직접 측정한 원본' : (o.u + '로 변환 — ' + (o.u === 'g' ? '고주파(베어링) 강조' : o.u === 'μm' ? '저주파(불균형) 강조' : '중간 대역')),
+        onClick: function () { self.setState({ viewUnit: o.u === _natU ? null : o.u }); },
+        style: 'height: 34px; padding: 0 11px; border: none; font-size: 12px; font-weight: 600; cursor: pointer; white-space: nowrap; background: ' + (active ? 'var(--primary-base)' : 'transparent') + '; color: ' + (active ? '#fff' : 'var(--text-tertiary)') + ';',
+      };
+    });
+    // 차트 헤더에 붙일 현재 물리량 태그 — 변환 중이면 눈에 띄게 표시
+    var _du = det.dispUnit || _natU;
+    base.dispUnitTag = _du === _natU ? _du : (_du + ' · 변환');
+    base.dispUnitConverted = _du !== _natU;
+    // 신호 품질 배너 — 센서 이상(플랫라인·클리핑·드리프트) 감지 시 최상단 경고. 정상이면 숨김.
+    var _q = det.quality || { ok: true, issues: [] };
+    base.qualityShow = !_q.ok && _q.issues.length > 0;
+    base.qualitySevere = !!_q.severe;
+    base.qualityText = _q.issues.map(function (x) { return x.label + ': ' + x.detail; }).join(' · ');
     base.envHint = det.envelope.hint; base.envFault = det.envelope.fault;
     base.envMarkers = det.envelope.markers.map(function (m) { return { label: m.label, freq: m.freq.toFixed(1) + ' Hz', color: m.kind === 'f' ? '#e5646a' : 'var(--text-muted)' }; });
     base.cepNote = det.cepstrum.note;
@@ -1421,7 +1669,8 @@ export class App extends Component {
     var _actIds = eqs.map(function (e) { return e.id; });
     var evs = S.events.filter(function (e) { return _actIds.indexOf(e.tagId) >= 0; });
     var fEvs = evs.filter(function (e) { return (S.evtTag === 'all' || e.tagId === S.evtTag) && (S.evtType === 'all' || e.type === S.evtType); });
-    base.diag24Count = evs.filter(function (e) { return (self.data.now - e.ms) <= 86400000; }).length;
+    var _wallNow = Date.now(); // 이벤트 TS는 벽시계 — 경과시간·24h 집계도 벽시계로 센다
+    base.diag24Count = evs.filter(function (e) { return (_wallNow - e.ms) <= 86400000; }).length;
     var eta = null;
     eqs.forEach(function (e) { if (e.grade >= 1) { var f = self._forecast(e); if (f.crossMs && (!eta || f.crossMs < eta.ms)) eta = { ms: f.crossMs, alias: e.alias || e.name }; } });
     base.diagEta = eta ? E.fmtMD(eta.ms) + '경' : '해당 없음';
@@ -1460,12 +1709,12 @@ export class App extends Component {
     function _jump(id) { return function () { var el = document.getElementById(id); if (!el) return; var c = _scroller(el); c.scrollTo({ top: c.scrollTop + el.getBoundingClientRect().top - c.getBoundingClientRect().top - 66, behavior: 'smooth' }); }; }
     base.dxOpen = !!S.dxOpen;
     var _snap = this._detailCache[S.selTag];
-    base.dxStamp = this.live ? (E.fmtDT((_snap && _snap.snapNow) || this.data.now) + ' 데이터 스냅샷 기준 · 새로고침 시 갱신') : (E.fmtDT(this.data.now).slice(0, 10) + ' 측정 스냅샷 (0.4 s 캡처) 기준 자동 판정');
+    base.dxStamp = this.live ? (E.fmtDT((_snap && _snap.anchor) || (_snap && _snap.snapNow) || this.data.now) + ' 시점 스냅샷 · 새로고침 시 갱신') : (E.fmtDT(this.data.now).slice(0, 10) + ' 측정 스냅샷 (0.4 s 캡처) 기준 자동 판정');
     base.dxToggleLabel = S.dxOpen ? '종합 분석 접기' : '종합 분석 펼치기';
     base.onToggleDx = function () { self.setState({ dxOpen: !self.state.dxOpen }); };
     base.evtRows = fEvs.map(function (e) {
       var g = E.STATUS[e.grade];
-      return { id: e.id, timeText: E.fmtDT(e.ms), agoText: E.ago(e.ms, self.data.now), tagAlias: e.tagAlias, tagName: e.tagName, typeKo: e.typeKo, metricText: E.fmt(e.value) + ' ' + e.unit, baseText: '기준 ' + E.fmt(e.base), gradeKo: g.ko, gradeColor: g.color, gradeSoft: g.soft, onGo: function () { self._gotoDetail(e.tagId, e.ms); }, onExplain: function () { self._explain(e); } };
+      return { id: e.id, timeText: E.fmtDT(e.ms), agoText: E.ago(e.ms, _wallNow), tagAlias: e.tagAlias, tagName: e.tagName, typeKo: e.typeKo, metricText: E.fmt(e.value) + ' ' + e.unit, baseText: '기준 ' + E.fmt(e.base), gradeKo: g.ko, gradeColor: g.color, gradeSoft: g.soft, onGo: function () { self._gotoDetail(e.tagId, e.ms); }, onExplain: function () { self._explain(e); } };
     });
     var deq = this._activeEq(S.diagTag);
 
@@ -1479,7 +1728,36 @@ export class App extends Component {
     base.reportTags = eqs.map(function (e) { var ck = S.genTags.indexOf(e.id) >= 0; return { id: e.id, alias: e.alias || e.name, nameSub: (e.alias && e.alias !== e.name) ? '(' + e.name + ')' : '', checked: ck, onToggle: function () { self._toggleGenTag(e.id); }, rowStyle: 'display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 6px; cursor: pointer; background: ' + (ck ? 'rgba(0,108,210,.08)' : 'transparent') + ';', boxStyle: 'width: 16px; height: 16px; border-radius: 4px; flex-shrink: 0; display: flex; align-items: center; justify-content: center; border: 1px solid ' + (ck ? 'var(--primary-base)' : 'var(--border-medium)') + '; background: ' + (ck ? 'var(--primary-base)' : 'transparent') + '; color: #fff;' }; });
     base.genTagsCount = S.genTags.length;
     base.genSelAllLabel = S.genTags.length === eqs.length ? '전체 해제' : '전체 선택';
-    base.onGenSelectAll = function () { self.setState({ genTags: S.genTags.length === eqs.length ? [] : eqs.map(function (e) { return e.id; }) }); };
+    base.onGenSelectAll = function () { self._setGenTags(S.genTags.length === eqs.length ? [] : eqs.map(function (e) { return e.id; })); };
+    // 리포트 기간 — 앵커는 '대상 태그'. 하나도 없으면 기준이 없으니 기간 UI 자체를 내린다
+    var _genEqs = S.genTags.map(function (id) { return self._eq(id); }).filter(Boolean);
+    var _genCustom = S.genPeriod === 'custom';
+    base.genPeriodNone = !_genEqs.length;
+    base.genPeriodShow = !!_genEqs.length;
+    base.genPeriodCustomShow = !!_genEqs.length && _genCustom;
+    base.genPeriodPresetShow = !!_genEqs.length && !_genCustom;
+    base.genPeriodPresets = this._presetChips(_genEqs, '대상 태그', 'report');
+    // 프리셋은 태그마다 그 태그의 최신 데이터 기준으로 창을 다시 잡으므로(_rollForAsync) 절대 시각 대신 상대 표현으로 쓴다
+    base.genPeriodSummary = S.genPeriod === 'all' ? '각 태그의 데이터 전체 구간'
+      : PERIOD_H[S.genPeriod] ? '각 태그의 최신 데이터 기준 · 최근 ' + ({ '1h': '1시간', '6h': '6시간', '24h': '24시간' }[S.genPeriod] || S.genPeriod)
+        : '기간을 선택하세요';
+    base.genPeriodFrom = S.genFrom; base.genPeriodTo = S.genTo;
+    var _gfD = Date.parse(S.genFrom), _gtD = Date.parse(S.genTo);
+    var genDateInvalid = _genCustom && !isNaN(_gfD) && !isNaN(_gtD) && _gtD < _gfD;
+    // 좁은 사이드 칼럼용 — datetime-local은 내재 최소폭이 커서 그냥 두면 카드를 넘친다
+    base.genDateStyle = 'height: 34px; padding: 0 10px; border-radius: 6px; border: 1px solid ' + (genDateInvalid ? '#e5484d' : 'var(--border-medium)') + '; background: var(--bg-elevated); color: var(--text-primary); font-size: 12px; font-family: var(--font-mono); color-scheme: dark; width: 100%; min-width: 0; box-sizing: border-box;';
+    base.onGenFromChange = function (ev) {
+      var v = ev.target.value;
+      if (S.genTo && Date.parse(v) > Date.parse(S.genTo)) self._toast('시작 시각이 종료보다 늦습니다', 'warn');
+      else self._toast('리포트 기간 적용됨 · ' + _dtTxt(v) + ' ~ ' + _dtTxt(S.genTo));
+      self.setState({ genFrom: v });
+    };
+    base.onGenToChange = function (ev) {
+      var v = ev.target.value;
+      if (S.genFrom && Date.parse(S.genFrom) > Date.parse(v)) self._toast('종료 시각이 시작보다 빠릅니다', 'warn');
+      else self._toast('리포트 기간 적용됨 · ' + _dtTxt(S.genFrom) + ' ~ ' + _dtTxt(v));
+      self.setState({ genTo: v });
+    };
     // LLM 기능 게이트 = "설정 존재"(ollama 또는 API 키) — 연결 테스트는 검증용일 뿐 게이트 아님
     // (테스트 성공 여부는 세션 한정이라 새로고침 후 토글이 잠기는 문제가 있었다)
     var llmReady = !!LLM.createLLM(this._llmCfg());
@@ -1492,6 +1770,10 @@ export class App extends Component {
     base.genSteps = ['데이터 조회', '지표 계산', '소견 생성', '저장'].map(function (l, i) { var st = i < S.genStep ? 'done' : (i === S.genStep ? 'active' : 'pending'); return { label: l, num: st === 'done' ? '✓' : (i + 1), dotStyle: 'width: 22px; height: 22px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 700; flex-shrink: 0; ' + (st === 'done' ? 'background: #2e7d5b; color: #fff;' : st === 'active' ? 'background: var(--primary-base); color: #fff;' : 'background: var(--bg-elevated); color: var(--text-muted); border: 1px solid var(--border-default);'), labelStyle: 'font-size: 13px; color: ' + (st === 'pending' ? 'var(--text-muted)' : 'var(--text-primary)') + '; font-weight: ' + (st === 'active' ? '600' : '500') + ';' }; });
     base.onGenReport = function () { self._genReport(); };
     base.genBtnLabel = S.genRunning ? '생성 중…' : '리포트 생성';
+    // 생성 중단 — 단계 목록 아래. 누르면 즉시 끝나므로 대기 라벨이 따로 없다
+    base.genCancelLabel = '생성 중단';
+    base.genCancelStyle = 'width: 100%; height: 34px; margin-top: 14px; border-radius: 6px; border: 1px solid var(--border-medium); background: transparent; color: var(--text-secondary); font-size: 12px; font-weight: 600; cursor: pointer;';
+    base.onCancelGen = function () { self._cancelGen(); };
     base.genBtnStyle = 'width: 100%; height: 40px; border-radius: 6px; border: none; font-size: 13px; font-weight: 600; color: #fff; background: var(--primary-base); cursor: ' + ((S.genTags.length === 0 || S.genRunning) ? 'not-allowed' : 'pointer') + '; opacity: ' + ((S.genTags.length === 0 || S.genRunning) ? '.5' : '1') + ';';
     var RPP = 10, rpTotal = Math.max(1, Math.ceil(S.reports.length / RPP)), rpPg = Math.min(S.rpPage || 0, rpTotal - 1);
     base.rpPagerShow = S.reports.length > RPP;

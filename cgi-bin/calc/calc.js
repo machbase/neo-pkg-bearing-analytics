@@ -86,10 +86,10 @@
     var crest = rms > 0 ? peak / rms : 0;
     var kurt = kurtosis(values);
     return [
-      { k: 'RMS (파형 구간)', v: fmt(rms), hint: unit, desc: '표시 구간 원시 파형의 실효값' },
-      { k: '커토시스 (Kurtosis)', v: kurt.toFixed(2), hint: kurt > 4.5 ? '충격성 경계 초과' : '', desc: '3=정규분포 · 클수록 충격성 결함 신호' },
-      { k: 'Peak', v: fmt(peak), hint: unit, desc: '구간 내 최대 순간 진폭' },
-      { k: 'Crest Factor', v: crest.toFixed(2), hint: crest > 6 ? '높음' : '', desc: 'Peak/RMS · 충격성 지표' }
+      { k: 'RMS (원시파형·표시구간)', v: fmt(rms), hint: unit, desc: '표시 구간 원시 파형의 실효값 (롤업 RMS와 별개)' },
+      { k: '커토시스 (Kurtosis·원시파형)', v: kurt.toFixed(2), hint: kurt > 4.5 ? '충격성 경계 초과' : '', desc: '3=정규분포 · 클수록 충격성 결함 신호' },
+      { k: 'Peak (원시파형)', v: fmt(peak), hint: unit, desc: '구간 내 최대 순간 진폭' },
+      { k: 'Crest Factor (원시파형)', v: crest.toFixed(2), hint: crest > 6 ? '높음' : '', desc: 'Peak/RMS · 충격성 지표 (롤업 Crest와 별개)' }
     ];
   }
 
@@ -142,6 +142,150 @@
     return kurtosis(out);
   }
 
+  // 신호 품질 체크 — 분석 전에 "이 데이터를 믿어도 되나"를 본다(garbage-in 방어).
+  //  · flatline: 값이 거의 안 변함 → 센서 정지/케이블 탈락 (진동 있어도 0으로 "정상" 오판)
+  //  · clip: 최대·최소값이 과도하게 반복 → 포화(측정범위 초과) → 진폭 과소·가짜 고주파
+  //  · dc: 평균이 진폭 대비 큼 → DC 드리프트(가짜 RMS 상승)
+  //  반환 { ok, issues:[{key,label,detail}], severe(판정 신뢰 불가 수준) }
+  function signalQuality(values, fs) {
+    var n = values.length, issues = [];
+    if (n < 32) return { ok: false, issues: [{ key: 'sparse', label: '데이터 부족', detail: '샘플이 너무 적어 분석 신뢰도가 낮습니다' }], severe: true };
+    var mn = Infinity, mx = -Infinity, sum = 0, i;
+    for (i = 0; i < n; i++) { var v = values[i]; if (v < mn) mn = v; if (v > mx) mx = v; sum += v; }
+    var mean = sum / n, range = mx - mn;
+    var ss = 0; for (i = 0; i < n; i++) { var d = values[i] - mean; ss += d * d; }
+    var std = Math.sqrt(ss / n), peak = Math.max(Math.abs(mn), Math.abs(mx));
+    // flatline: 표준편차가 피크 대비 극히 작음(거의 상수)
+    if (peak === 0 || std < 1e-9 || (peak > 0 && std < 0.002 * peak)) {
+      issues.push({ key: 'flatline', label: '플랫라인', detail: '값이 거의 변하지 않습니다 — 센서 정지·케이블 탈락 의심' });
+      return { ok: false, issues: issues, severe: true }; // 나머지 검사 무의미
+    }
+    // clip: 최고치 밴드가 바로 아래 밴드보다 과밀 = 평평한 꼭대기(잘림). 매끈한 사인은 밀도비 ≈2.4라 안 걸림.
+    var b = range * 0.005;
+    function inBand(lo, hi) { var c = 0; for (var j = 0; j < n; j++) if (values[j] >= lo && values[j] < hi) c++; return c; }
+    var topMax = inBand(mx - b, mx + 1e-9), nextMax = inBand(mx - 2 * b, mx - b);
+    var topMin = inBand(mn - 1e-9, mn + b), nextMin = inBand(mn + b, mn + 2 * b);
+    var clipMax = topMax > 0.03 * n && topMax > 4 * (nextMax + 1);
+    var clipMin = topMin > 0.03 * n && topMin > 4 * (nextMin + 1);
+    if (clipMax || clipMin) issues.push({ key: 'clip', label: '클리핑(포화)', detail: '파형 꼭대기가 잘렸습니다 — 측정범위 초과, 진폭 과소·가짜 고주파 위험' });
+    // DC 드리프트: 평균이 표준편차(교류 성분) 대비 과도하게 큼
+    if (Math.abs(mean) > 3 * std) issues.push({ key: 'dc', label: 'DC 드리프트', detail: '기준선이 0에서 크게 벗어났습니다 — 가짜 RMS 상승 가능' });
+    return { ok: issues.length === 0, issues: issues, severe: false };
+  }
+
+  // 첨도 포화 감지 — 첨도가 고점에서 하락 중인데 RMS는 유지/상승이면 "회복 아님(결함 확산 말기)" 경고.
+  //  kurtSeries·rmsSeries: 시간순 배열(추이). 반환 { flag, msg } (flag=true면 경고)
+  function kurtosisSaturation(kurtSeries, rmsSeries) {
+    var k = (kurtSeries || []).filter(function (x) { return isFinite(x); });
+    if (k.length < 6) return { flag: false };
+    var pi = 0, pk = -Infinity;
+    for (var i = 0; i < k.length; i++) if (k[i] > pk) { pk = k[i]; pi = i; }
+    var cur = k[k.length - 1];
+    // 고점이 유의미(>4.5)하고, 고점이 최근이 아니며(뒤에 데이터 있음), 현재가 고점 대비 30%+ 하락
+    if (pk < 4.5 || pi >= k.length - 2 || cur > pk * 0.7) return { flag: false };
+    // 같은 구간 RMS는 유지/상승(하락 아님)이어야 "회복 아님".
+    // ⚠ kurt 추이와 rms 배열은 길이가 다를 수 있어(청크 수 vs 롤업 버킷 수) 시간 비율로 정렬해 같은 시점끼리 비교.
+    var r = (rmsSeries || []).filter(function (x) { return isFinite(x); });
+    if (r.length >= 3) {
+      var rPeak = r[Math.round(pi / (k.length - 1) * (r.length - 1))], rCur = r[r.length - 1];
+      if (rCur < rPeak * 0.9) return { flag: false }; // RMS도 내렸으면 진짜 회복(일시 스파이크 등)
+    }
+    return { flag: true, msg: '첨도가 고점(' + pk.toFixed(1) + ')에서 ' + cur.toFixed(1) + '로 하락했으나 RMS는 유지·상승 — "회복"이 아니라 결함 확산(말기)일 수 있습니다. 포락선·RMS를 함께 확인하세요.' };
+  }
+
+  // 물리량 변환 — 가속도(g)↔속도(mm/s)↔변위(μm). 주파수 영역에서 (iω)^Δorder 적용 → 역FFT.
+  //  · 시간 적분 대신 주파수 영역: 드리프트(적분 상수) 누적이 없고 수학적으로 동일.
+  //  · 적분(오더↓) 시 저주파 드리프트를 hpHz 고역통과로 제거. 미분(오더↑)은 필터 불필요.
+  //  order: 변위=0 · 속도=1 · 가속도=2 (미분할수록 order↑). SI 단위로 변환 후 계수 적용, 다시 표시 단위로.
+  var UNIT_SI = { 'g': 9.80665, 'mm/s': 1e-3, 'μm': 1e-6 }; // 표시값 × 이것 = SI(m/s²·m/s·m)
+  var UNIT_ORD = { 'g': 2, 'mm/s': 1, 'μm': 0 };
+  function convertDomain(values, fs, fromUnit, toUnit, fr) {
+    if (fromUnit === toUnit) return values.slice(0);
+    var sFrom = UNIT_SI[fromUnit], sTo = UNIT_SI[toUnit], d = UNIT_ORD[toUnit] - UNIT_ORD[fromUnit];
+    if (sFrom == null || sTo == null || d === 0) return values.slice(0);
+    var n = values.length, m = 1; while (m * 2 <= n) m *= 2;
+    if (m < 16 || !(fs > 0)) return values.slice(0);
+    var re = new Array(m), im = new Array(m), i, mean = 0;
+    for (i = 0; i < m; i++) mean += values[i]; mean /= m;
+    for (i = 0; i < m; i++) { re[i] = (values[i] - mean) * sFrom; im[i] = 0; }
+    fftComplex(re, im);
+    var df = fs / m, integ = d < 0;
+    var hpBin = integ ? Math.max(1, Math.round(Math.max(2, (fr || 0) * 0.3) / df)) : 0; // 적분 시 저주파 드리프트 컷
+    re[0] = 0; im[0] = 0;
+    for (var k = 1; k < m / 2; k++) {
+      if (integ && k < hpBin) { re[k] = 0; im[k] = 0; re[m - k] = 0; im[m - k] = 0; continue; }
+      var w = 2 * Math.PI * k * df, mag = Math.pow(w, d), ang = d * Math.PI / 2; // (iω)^d = ω^d ∠ d·90°
+      var hr = mag * Math.cos(ang), hi = mag * Math.sin(ang);
+      var rk = re[k], ik = im[k];
+      re[k] = rk * hr - ik * hi; im[k] = rk * hi + ik * hr;
+      re[m - k] = re[k]; im[m - k] = -im[k]; // 실신호 보장: 미러는 켤레
+    }
+    re[m / 2] = 0; im[m / 2] = 0; // Nyquist 빈 제거
+    for (i = 0; i < m; i++) im[i] = -im[i];
+    fftComplex(re, im);
+    var out = new Array(m), toDisp = 1 / sTo;
+    for (i = 0; i < m; i++) out[i] = (re[i] / m) * toDisp;
+    return out;
+  }
+  // 스펙트럼(진폭) 물리량 변환 — 서버 FFT mags를 표시 단위로. |(iω)^d| = ω^d 스케일.
+  function convertSpectrumMags(mags, freqs, fromUnit, toUnit) {
+    var d = UNIT_ORD[toUnit] - UNIT_ORD[fromUnit];
+    if (d === 0 || UNIT_SI[fromUnit] == null || UNIT_SI[toUnit] == null) return mags.slice(0);
+    var sc = UNIT_SI[fromUnit] / UNIT_SI[toUnit];
+    return mags.map(function (mg, i) { var w = 2 * Math.PI * freqs[i]; return w > 0 ? mg * sc * Math.pow(w, d) : 0; });
+  }
+
+  // 대역통과: FFT에서 [loHz,hiHz] 밖 빈을 제거하고 역FFT → 그 대역만 남은 실신호. (양측 대칭 유지)
+  function bandpassSignal(values, fs, loHz, hiHz) {
+    var n = values.length, m = 1; while (m * 2 <= n) m *= 2;
+    if (m < 16 || !(fs > 0)) return values.slice(0);
+    var re = new Array(m), im = new Array(m), i, mean = 0;
+    for (i = 0; i < m; i++) mean += values[i]; mean /= m;
+    for (i = 0; i < m; i++) { re[i] = values[i] - mean; im[i] = 0; }
+    fftComplex(re, im);
+    var df = fs / m, lo = Math.max(1, Math.round(loHz / df)), hi = Math.min(m / 2 - 1, Math.round(hiHz / df));
+    for (var k = 0; k < m; k++) { var keep = (k >= lo && k <= hi) || (k >= m - hi && k <= m - lo); if (!keep) { re[k] = 0; im[k] = 0; } }
+    for (i = 0; i < m; i++) im[i] = -im[i];
+    fftComplex(re, im);
+    var out = new Array(m); for (i = 0; i < m; i++) out[i] = re[i] / m;
+    return out;
+  }
+
+  // 커토그램 — 대역별 Spectral Kurtosis(대역통과 신호의 첨도)를 스캔해 "가장 충격성이 강한 대역"을 찾는다.
+  // 포락선 복조 대역을 자동 선택하기 위한 앞단. 반환 { levels:[{nb,bwHz,sk:[...]}], best:{loHz,hiHz,center,bw,sk}, fmax }
+  function kurtogram(values, fs) {
+    var n = values.length;
+    if (n < 512 || !(fs > 0)) return null;
+    var m = 1; while (m * 2 <= n) m *= 2;
+    var re0 = new Array(m), im0 = new Array(m), i, mean = 0;
+    for (i = 0; i < m; i++) mean += values[i]; mean /= m;
+    for (i = 0; i < m; i++) { re0[i] = values[i] - mean; im0[i] = 0; }
+    fftComplex(re0, im0); // 스펙트럼 1회 계산 후, 대역마다 역FFT만
+    var df = fs / m, nyq = m / 2;
+    var BANDS = [4, 8, 16, 32], levels = [], best = null;
+    BANDS.forEach(function (nb) {
+      var bw = Math.floor(nyq / nb);
+      if (bw < 16) return; // 대역이 너무 좁으면 첨도가 불안정 → 건너뜀
+      var sk = [];
+      for (var bi = 0; bi < nb; bi++) {
+        var lo = bi * bw + 1, hi = Math.min(nyq - 1, (bi + 1) * bw);
+        var re = new Array(m), im = new Array(m), j;
+        for (j = 0; j < m; j++) { re[j] = 0; im[j] = 0; }
+        for (var k = lo; k <= hi; k++) { re[k] = re0[k]; im[k] = im0[k]; re[m - k] = re0[m - k]; im[m - k] = im0[m - k]; }
+        for (j = 0; j < m; j++) im[j] = -im[j];
+        fftComplex(re, im);
+        var bp = new Array(m), fe = 0;
+        for (j = 0; j < m; j++) { bp[j] = re[j] / m; fe += bp[j] * bp[j]; }
+        var v = Math.sqrt(fe / m) > 1e-9 ? kurtosis(bp) : 0; // 대역 에너지 없으면 0
+        sk.push(v);
+        if (v > 0 && (!best || v > best.sk)) best = { loHz: lo * df, hiHz: hi * df, center: (lo + hi) / 2 * df, bw: (hi - lo) * df, sk: v, nb: nb };
+      }
+      levels.push({ nb: nb, bwHz: bw * df, sk: sk });
+    });
+    if (!levels.length || !best) return null;
+    return { levels: levels, best: best, fmax: nyq * df };
+  }
+
   // 진폭 스펙트럼: 평균 제거 + Hann 창 + zero-pad → 단측 진폭 (maxHz까지)
   function amplitudeSpectrum(values, fs, maxHz) {
     var n = values.length;
@@ -168,12 +312,14 @@
     return { freqs: freqs, mags: mags, res: res };
   }
 
-  // 포락선 스펙트럼: 정류(|x|) 신호의 저주파 스펙트럼 — 베어링 충격 반복 주파수 복조
-  function envelopeSpectrum(values, fs, maxHz) {
+  // 포락선 스펙트럼: 정류(|x|) 신호의 저주파 스펙트럼 — 베어링 충격 반복 주파수 복조.
+  // band({loHz,hiHz})를 주면 커토그램이 찾은 최적 대역만 통과시킨 뒤 복조(권장) → 잡음 억제·결함 반복 주파수 선명.
+  function envelopeSpectrum(values, fs, maxHz, band) {
     var n = values.length;
     if (n < 64) return { freqs: [], mags: [], res: 1 };
-    var env = new Array(n), i;
-    for (i = 0; i < n; i++) env[i] = Math.abs(values[i]);
+    var src = (band && band.hiHz > band.loHz) ? bandpassSignal(values, fs, band.loHz, band.hiHz) : values;
+    var env = new Array(src.length), i;
+    for (i = 0; i < src.length; i++) env[i] = Math.abs(src[i]);
     return amplitudeSpectrum(env, fs, Math.min(maxHz || 500, fs * 0.4));
   }
 
@@ -270,6 +416,9 @@
     var oneXn = harmonicEnergy(freqs, mags, fr, 8, thr);
     var oneX = harmonicEnergy(freqs, mags, fr, 1, thr).energy;
     var twoX = harmonicEnergy(freqs, mags, 2 * fr, 1, thr).energy;
+    // 지배 피크의 동기성 — 정수배 하모닉 열(풀림)은 지배 성분이 동기일 때만 성립. 비동기 지배면 하모닉 계수가 있어도 풀림 아님(베어링·벨트 등).
+    var domF = null, domM = 0; for (i = 0; i < mags.length; i++) if (mags[i] > domM) { domM = mags[i]; domF = freqs[i]; }
+    var domOrd = domF != null ? domF / fr : 0, domSync = Math.abs(domOrd - Math.round(domOrd)) < 0.06 && Math.round(domOrd) >= 1;
     var picked = null;
     if (bf) {
       var bpfo = harmonicEnergy(freqs, mags, bf.BPFO, 5, thr);
@@ -280,8 +429,9 @@
       if (bpfi.count >= 3) { out.notes.push('BPFI(' + bf.BPFI.toFixed(1) + ' Hz) 하모닉 ' + bpfi.count + '개' + (bpfiSb > 0 ? ' + 1× 측대역' : '') + ' — 내륜 결함 패턴'); picked = picked || '베어링 내륜 결함'; }
       if (bsf.count >= 3) { out.notes.push('BSF(' + bf.BSF.toFixed(1) + ' Hz) 하모닉 ' + bsf.count + '개 열 — 전동체 결함 패턴'); picked = picked || '베어링 전동체 결함'; }
     }
-    if (oneXn.count >= 4) { out.notes.push('1× 하모닉 ' + oneXn.count + '개 열 — 기계적 풀림 패턴'); picked = picked || '기계적 풀림'; }
-    if (twoX > 0 && oneX > 0 && twoX >= 0.8 * oneX) { out.notes.push('2×(' + (2 * fr).toFixed(0) + ' Hz)가 1× 이상으로 우세 — 축 정렬 불량 패턴'); picked = picked || '축 정렬 불량'; }
+    if (oneXn.count >= 4 && domSync) { out.notes.push('1× 하모닉 ' + oneXn.count + '개 열(동기 지배) — 기계적 풀림 패턴'); picked = picked || '기계적 풀림'; }
+    else if (oneXn.count >= 4 && !domSync) { out.notes.push('정수배 하모닉 ' + oneXn.count + '개 존재하나 지배 성분이 비동기(' + domOrd.toFixed(2) + '×) — 풀림보다 베어링·비1× 우선'); }
+    if (twoX > 0 && oneX > 0 && twoX >= 0.8 * oneX && domSync) { out.notes.push('2×(' + (2 * fr).toFixed(0) + ' Hz)가 1× 이상으로 우세 — 축 정렬 불량 패턴'); picked = picked || '축 정렬 불량'; }
     out.cause = picked;
     return out;
   }
@@ -322,6 +472,9 @@
     BEARINGS: BEARINGS, bearingFreqs: bearingFreqs, faultFreqSummary: faultFreqSummary,
     toBucket: toBucket, kurtosis: kurtosis, fmt: fmt, timeIndics: timeIndics,
     fftComplex: fftComplex, bandKurtosis: bandKurtosis, amplitudeSpectrum: amplitudeSpectrum, envelopeSpectrum: envelopeSpectrum,
+    bandpassSignal: bandpassSignal, kurtogram: kurtogram,
+    convertDomain: convertDomain, convertSpectrumMags: convertSpectrumMags,
+    signalQuality: signalQuality, kurtosisSaturation: kurtosisSaturation,
     cepstrumFromSpectrum: cepstrumFromSpectrum, stftGrid: stftGrid, bandEnergies: bandEnergies,
     diagnoseDominant: diagnoseDominant, analyzeSpectrum: analyzeSpectrum, harmonicEnergy: harmonicEnergy,
     baselineFit: baselineFit, baselineLimit: baselineLimit,

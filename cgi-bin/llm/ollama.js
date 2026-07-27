@@ -8,7 +8,8 @@
 
   var DEFAULT_MODEL = 'llama3.1:8b';
 
-  function complete(cfg, prompt) {
+  function complete(cfg, prompt, opts) {
+    opts = opts || {}; // signal: 호출자가 중단할 수 있게 (리포트 생성 중단)
     var base = (cfg.baseURL || 'http://127.0.0.1:11434').replace(/\/$/, '');
     var body = JSON.stringify({
       model: cfg.model || DEFAULT_MODEL,
@@ -19,6 +20,7 @@
     });
     return fetch(base + '/api/chat', {
       method: 'POST',
+      signal: opts.signal,
       headers: { 'Content-Type': 'application/json' },
       body: body,
     }).then(function (r) {
