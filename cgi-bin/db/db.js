@@ -96,17 +96,36 @@
   }
 
   // 원시 파형 구간 — maxPts=0이면 전체 해상도(스펙트럼 계산용), 지정 시 다운샘플(표시용)
+  /* 원시 파형 조회 — 유일하게 수십만 행이 오가는 경로라 전송 형식이 응답 시간을 지배한다.
+     JSON은 행마다 대괄호·쉼표가 붙고 파서가 객체를 만들어야 해서, 25.6 kHz 20초(약 54만 행)면
+     본문 전송+파싱만 0.7초가 든다. CSV는 같은 데이터가 절반 이하 크기이고 split+Number로 끝난다.
+     (다른 조회는 행 수가 작아 JSON 그대로 둔다 — 에러 본문의 reason을 살리는 이점이 크다.) */
   function rawWindow(table, tag, fromMs, toMs, maxPts) {
-    return q(SQL.rawWindow(table, tag, fromMs, toMs)).then(function (rows) {
+    var sql = SQL.rawWindow(table, tag, fromMs, toMs);
+    var url = '/db/query?q=' + encodeURIComponent(sql) + '&format=csv&timeformat=ms&heading=false';
+    return fetch(url).then(function (r) {
+      if (!r.ok) throw new Error('db/query HTTP ' + r.status);
+      return r.text();
+    }).then(function (txt) {
+      // CSV가 아니라 JSON 에러 본문이 오는 경우(구문 오류 등) — 사유를 그대로 올린다
+      if (txt.charAt(0) === '{') { var j = JSON.parse(txt); throw new Error(j.reason || 'query failed'); }
+      var lines = txt.split('\n');
+      var n = lines.length;
+      while (n > 0 && !lines[n - 1]) n--;              // 끝 빈 줄 제거
       var stride = 1;
-      if (maxPts && rows.length > maxPts) stride = Math.ceil(rows.length / maxPts);
-      var times_ms = [], values = [];
-      var t0 = rows.length ? rows[0][0] : 0;
-      for (var i = 0; i < rows.length; i += stride) {
-        times_ms.push(rows[i][0] - t0);
-        values.push(rows[i][1]);
+      if (maxPts && n > maxPts) stride = Math.ceil(n / maxPts);
+      var times_ms = [], values = [], t0 = 0, first = true;
+      for (var i = 0; i < n; i += stride) {
+        var l = lines[i];
+        if (!l) continue;
+        var c = l.indexOf(',');
+        if (c < 0) continue;
+        var t = +l.slice(0, c);
+        if (first) { t0 = t; first = false; }
+        times_ms.push(t - t0);
+        values.push(+l.slice(c + 1));
       }
-      return { times_ms: times_ms, values: values, n: rows.length };
+      return { times_ms: times_ms, values: values, n: n };
     });
   }
 
@@ -133,9 +152,9 @@
   // 설정 도메인 → 파일 매핑 (state 키와 1:1)
   var CONFIG_FILES = {
     'source.json': ['srcSel'], // DB 접속 정보는 UI가 아니라 cgi-bin/config/neo-auth.json으로 관리
-    'equipment.json': ['equipCls', 'equipRpm', 'equipBearing', 'equipGeo', 'equipUnit', 'aliases'],
+    'equipment.json': ['equipCls', 'equipRpm', 'equipBearing', 'equipGeo', 'equipUnit', 'equipMeta', 'lineHz', 'aliases', 'cardOrder', 'knownTags', 'revived'],
     'criteria.json': ['machineClass', 'classThresh', 'unitThresh'],
-    'monitor.json': ['monitorOn', 'evalWindow', 'evalAgg', 'notifCh', 'notifTo', 'routes', 'monitorInterval', 'monMode', 'escHold', 'recHold', 'renotify'],
+    'monitor.json': ['monitorOn', 'evalWindow', 'notifCh', 'notifTo', 'routes', 'monitorInterval', 'monMode', 'escHold', 'recHold', 'renotify', 'bandOn', 'bandInterval', 'bandWin'],
     'llm.json': ['llmProvider', 'llmKeys', 'llmModels', 'ollamaUrl'],
   };
   function configDir() { return pkgBase() + '/cgi-bin/config'; }
@@ -201,6 +220,34 @@
   }
 
   // flat 설정 객체를 도메인별 파일로 나눠 저장 (app은 통짜 cfg만 넘기면 된다)
+  /* 일부 키만 저장 — 해당 키가 든 파일만, 파일에 이미 있는 값은 보존하고 덮어쓴다.
+     설정 탭에서 아직 저장 안 한 편집이 state에 남아 있을 수 있으므로(카드 순서는 모니터링 탭에서
+     즉시 저장된다) 전체 저장을 쓰면 그 편집까지 같이 나가버린다. */
+  function saveConfigPartial(cfg, keys) {
+    var names = Object.keys(CONFIG_FILES).filter(function (n) {
+      return CONFIG_FILES[n].some(function (k) { return keys.indexOf(k) >= 0; });
+    });
+    return Promise.all(names.map(function (n) {
+      return authedFetch(configDir() + '/' + n, { cache: 'no-store' })
+        .then(function (r) { return r.ok ? r.json() : {}; }).catch(function () { return {}; })
+        .then(function (cur) {
+          var part = Object.assign({}, cur || {});
+          keys.forEach(function (k) {
+            if (CONFIG_FILES[n].indexOf(k) >= 0 && cfg[k] !== undefined) part[k] = cfg[k];
+          });
+          return authedFetch(configDir() + '/' + n, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(part, null, 2),
+          }).then(function (r) {
+            return r.json().catch(function () { return { success: r.ok }; }).then(function (j) {
+              if (!r.ok || j.success === false) throw new Error(n + ' 저장 실패: ' + (j.reason || 'HTTP ' + r.status));
+            });
+          });
+        });
+    })).then(function () { return true; });
+  }
+
   function saveConfig(cfg, auth) {
     setAuth(auth);
     var jobs = Object.keys(CONFIG_FILES).map(function (n) {
@@ -264,12 +311,15 @@
   function decVal(s) { try { return JSON.parse(decodeURIComponent(s)); } catch (e) { return null; } }
 
   function ensureMonTables() {
-    return Promise.all(SQL.monCreateTables().map(function (s) { return q(s).catch(function () { }); }));
+    // CREATE는 이미 있으면 실패하는 게 정상이라 전부 삼킨다. 그 뒤 기존 설치용 컬럼 추가를 시도한다
+    // (신규 설치는 CREATE에 DETAIL이 이미 있어 ALTER가 실패하지만 역시 무해 — 멱등하게 취급).
+    return Promise.all(SQL.monCreateTables().map(function (s) { return q(s).catch(function () { }); }))
+      .then(function () { return q(SQL.eventsAddDetail()).catch(function () { }); });
   }
   function loadEvents(limit) {
     return q(SQL.eventsSelect(limit)).then(function (rows) {
       return rows.map(function (r) {
-        return { eid: r[0], ts: Number(r[1]), tbl: r[2], tag: r[3], etype: r[4], grade: r[5], val: Number(r[6]), lim: Number(r[7]) };
+        return { eid: r[0], ts: Number(r[1]), tbl: r[2], tag: r[3], etype: r[4], grade: r[5], val: Number(r[6]), lim: Number(r[7]), detail: r[8] || '' };
       });
     });
   }
@@ -307,7 +357,7 @@
   function loadEventsRange(fromMs, toMs, limit) {
     return q(SQL.eventsRange(fromMs, toMs, limit)).then(function (rows) {
       return rows.map(function (r) {
-        return { eid: r[0], ts: Number(r[1]), tbl: r[2], tag: r[3], etype: r[4], grade: r[5], val: Number(r[6]), lim: Number(r[7]) };
+        return { eid: r[0], ts: Number(r[1]), tbl: r[2], tag: r[3], etype: r[4], grade: r[5], val: Number(r[6]), lim: Number(r[7]), detail: r[8] || '' };
       });
     });
   }
@@ -324,9 +374,74 @@
       return fetch('/web/api/timers' + (sub || ''), opts);
     });
   }
+  /* 타이머 상태 조회 — { 이름: { state, schedule, task } }.
+     state는 'RUNNING' 또는 'STOP, <에러문구>' 형태로 실패 이유까지 담겨 온다.
+     감시 타이머는 등록만 성공하고 첫 실행에서 죽을 수 있는데, 그러면 화면에는 아무 표시가
+     없어 "조용함 = 정상"과 구분되지 않는다. 그 구분을 만들려고 읽는다. */
+  function timerStates() {
+    return authedTimer('', { cache: 'no-store' })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (j) {
+        var m = {};
+        ((j && j.data) || []).forEach(function (t) {
+          if (t && t.name) m[t.name] = { state: t.state || '', schedule: t.schedule || '', task: t.task || '' };
+        });
+        return m;
+      })
+      .catch(function () { return null; });   // 조회 실패는 "상태 모름" — 없다고 단정하지 않는다
+  }
   // 없는 타이머 삭제는 조용히 통과 (idempotent — 서버 모드 한 번도 안 켰으면 없음)
   function deleteMonitorTimer() {
     return authedTimer('/' + MON_TIMER, { method: 'DELETE' }).then(function () { return true; }).catch(function () { return true; });
+  }
+  /* 대역 추출 타이머 — 판정 타이머와 이름·파일·주기를 분리한다.
+     판정은 10초가 좋고 대역 추출은 FFT라 태그당 0.5~1초가 든다. 한 타이머에 묶으면
+     둘 다 나빠지고, 한쪽 실패가 다른 쪽을 멈춘다. */
+  var BAND_TIMER = 'NEO_VIBE_BAND';
+  function bandTqlPath() { return pkgBase() + '/cgi-bin/band.tql'; }
+  function deleteBandTimer() {
+    return authedTimer('/' + BAND_TIMER, { method: 'DELETE' }).then(function () { return true; }).catch(function () { return true; });
+  }
+  function createBandTimer(tqlSource, schedule) {
+    return saveFile(bandTqlPath(), tqlSource, 'text/plain')
+      .then(function () { return deleteBandTimer(); })
+      .then(function () {
+        return authedTimer('', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name: BAND_TIMER, autoStart: true, schedule: schedule, path: bandTqlPath() }),
+        });
+      })
+      .then(function (r) { return r.json().catch(function () { return { success: r.ok }; }); })
+      .then(function (j) { if (j.success === false) throw new Error('대역 타이머 생성 실패: ' + (j.reason || '')); return true; });
+  }
+  /* 백필 한 청크 즉시 실행 — 타이머 등록 없이 그 자리에서 앵커 몇 개를 계산·저장한다.
+     청크로 쪼개는 것은 호출측 책임이다. 한 요청에 전부 넣으면 길게는 몇 시간이라
+     타임아웃으로 죽고, 진행률도 취소도 못 준다. 반환은 "done,<now>,<성공 앵커 수>" CSV. */
+  function bandBackfill(tqlSource) {
+    return tql(tqlSource).then(function (text) {
+      var m = /done,\d+,(\d+)/.exec(text || '');
+      return m ? +m[1] : 0;
+    });
+  }
+  // 시리즈별 보유 시각 목록 — 채움 현황 계산·중복 방지용
+  function bandTimes(keys, fromMs, toMs) {
+    if (!keys || !keys.length) return Promise.resolve({});
+    return q(SQL.bandTimes(keys, fromMs, toMs)).then(function (rows) {
+      var m = {};
+      rows.forEach(function (r) { (m[r[0]] = m[r[0]] || []).push(r[1]); });
+      return m;
+    });
+  }
+  // 대역 추세/원본 조회 — NAME은 "<테이블>:<태그>:<대역>"
+  function bandTrend(key, unit, fromMs, toMs) {
+    return q(SQL.bandTrend(key, unit, fromMs, toMs)).then(function (rows) {
+      return rows.map(function (r) { return { ms: r[0], v: r[1] }; });
+    });
+  }
+  function bandRaw(key, fromMs, toMs) {
+    return q(SQL.bandRaw(key, fromMs, toMs)).then(function (rows) {
+      return rows.map(function (r) { return { ms: r[0], v: r[1] }; });
+    });
   }
   // 판정 TQL 저장 → 기존 타이머 삭제(실행 중 PUT 수정=500이라 delete→create) → 생성(autoStart)
   function createMonitorTimer(tqlSource, schedule) {
@@ -345,10 +460,12 @@
   return {
     q: q, tql: tql, SQL: SQL, pkgBase: pkgBase, login: login,
     createMonitorTimer: createMonitorTimer, deleteMonitorTimer: deleteMonitorTimer,
+    timerStates: timerStates, MON_TIMER: MON_TIMER, BAND_TIMER: BAND_TIMER,
+    createBandTimer: createBandTimer, deleteBandTimer: deleteBandTimer, bandTrend: bandTrend, bandRaw: bandRaw, bandBackfill: bandBackfill, bandTimes: bandTimes,
     ensureDir: ensureDir, saveFile: saveFile, listDir: listDir, deleteFile: deleteFile, readFileBlob: readFileBlob,
     listTagTables: listTagTables, listTags: listTags, tagStats: tagStats, isNoRollup: isNoRollup,
     rollupTrend: rollupTrend, rollupBatch: rollupBatch, rawWindow: rawWindow, fftSpectrum: fftSpectrum,
-    loadConfig: loadConfig, saveConfig: saveConfig,
+    loadConfig: loadConfig, saveConfig: saveConfig, saveConfigPartial: saveConfigPartial,
     ensureMonTables: ensureMonTables, loadEvents: loadEvents, loadEventsRange: loadEventsRange, countEvents: countEvents,
     loadBaselines: loadBaselines, saveBaseline: saveBaseline, deleteBaseline: deleteBaseline,
     insertEvent: insertEvent, loadMonState: loadMonState, saveMonState: saveMonState

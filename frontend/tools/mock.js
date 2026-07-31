@@ -99,7 +99,9 @@ const { ISO_ZONES, UNIT_ZONES, zonesFor, gradeFor, bearingFreqs, BEARINGS, fault
     });
 
     // 이벤트 생성 (grade>=1 위주)
-    var TYPES = [{ k: 'threshold', ko: '임계 초과' }, { k: 'spectrum', ko: '스펙트럼 변화' }];
+    // 실제 앱이 만드는 유형만 — 'spectrum'은 생성 코드가 없어 목에만 있던 유령 유형이었다
+    var TYPES = [{ k: 'threshold', ko: '임계 초과' }, { k: 'baseline', ko: '베이스라인 이탈' },
+      { k: 'band', ko: '대역 이탈' }, { k: 'recovery', ko: '정상 복귀' }];
     var events = [];
     equipment.forEach(function (eq) {
       var nEv = eq.grade === 0 ? (rnd() < 0.25 ? 1 : 0) : eq.grade + Math.round(rnd() * 2);

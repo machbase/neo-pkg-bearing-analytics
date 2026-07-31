@@ -3,7 +3,7 @@ import { html } from './html.js';
 
 export function view(v) {
   const {
-    activeCount, aliasRows, blEmpty, blK, blRows, blWin, cardSize, cards, cepNote, csvFrom, csvTo, dateStyle, detBearing, detSpec, detailEmptyShow, detailShow, dlFmt, dlOpen, dxActions, dxAiFallback, dxAiIdle, dxAiLoading, dxAiSections, dxAiText, dxEvidence, dxLlmModel, dxOpen, dxStamp, dxToggleLabel, dxVerdict, envHint, envMarkers, equipRows, equipUnsetDot, escHold, escHoldOptions, evalAgg, evalAggOptions, evalBasisText, evalWindow, evalWindowOptions, evtCapped, evtCount, evtEmpty, evtEmptyText, evtRows, evtScopeChips, evtTagFilter, evtTagOptions, evtTypeFilter, evtTypeOptions, fftMarkers, fftRangeChips, fftRangeShow, filterNotice, genBtnLabel, genBtnStyle, genCancelLabel, genCancelStyle, genDateStyle, genKnobStyle, genLLMNotice, genPeriodCustomShow, genPeriodFrom, genPeriodNone, genPeriodPresetShow, genPeriodPresets, genPeriodShow, genPeriodSummary, genPeriodTo, genRunning, genSelAllLabel, genSteps, genTagsCount, genToggleStyle, goSettings, gridCols, indicsDesc, indicsTitle, isMonitor, isOllama, isSettings, kpiCells, kurtWarn, kurtWarnShow, kurtogramHint, kurtogramShow, lastEventText, llmApiKey, llmModel, llmModelPh, llmProvOptions, llmProviderSel, llmProviders, llmProvsAvail, llmStatusColor, llmStatusText, llmTestColor, llmTestIcon, llmTestMsg, llmTestShow, llmTesting, logoFilter, mcDescBody, mcDescTitle, mcOptions, mcZones, monBlNotice, monBlUnlearned, monEmpty, monEventsShow, monKnobStyle, monModeBadgeShow, monModeBadgeStyle, monModeBadgeText, monModeOptions, monPillTitle, monToggleStyle, monitorDotColor, monitorDotRing, monitorInterval, monitorText, navTabs, notReady, notifChannels, ollamaUrl, onBlK, onBlLearnAll, onBlWin, onCancelGen, onCardSize, onClearFilter, onCloseDownload, onCloseRv, onConfirmCancel, onConfirmDiscard, onConfirmSave, onCsvFrom, onCsvTo, onDlFmt, onDoDownload, onDxExplain, onEscHold, onEvalAgg, onEvalWindow, onEvtTag, onEvtType, onFormChange, onFromChange, onGenFromChange, onGenReport, onGenSelectAll, onGenToChange, onGoSource, onLlmKey, onLlmModel, onLlmProvPick, onMonToggle, onMonitorInterval, onOllamaUrl, onOpenDownload, onRecHold, onRefresh, onResetThresh, onRouteSelectAll, onRpNext, onRpPrev, onSaveSettings, onSrcDismiss, onSrcReload, onSrcSelectAll, onTagChange, onTestLLM, onToChange, onToggleDx, onToggleGenLLM, onToggleMonitor, onTotalClick, pendingNavOpen, periodFrom, periodPresets, periodTo, qualityShow, qualityText, recHold, recHoldOptions, renotifyOptions, renotifyRows, reportEmpty, reportEmptyShow, reportRows, reportShow, reportTags, rootClass, routeNoneWarn, routeRows, routeSelAllLabel, routeTimings, rpBtnStyle, rpPageText, rpPagerShow, rvFname, rvOpen, rvUrl, secCriteria, secEquip, secLlm, secMonitor, secSource, selTag, serverMon, setNav, settingsActiveStyle, settingsDirty, sevCards, sevColor, sevGradeKo, sevMachine, sevReco, sevZones, showAdvanced, specIndics, srcNotice, srcSelAllLabel, srcSelCount, srcTables, srcTotal, statRows, stopClick, sumTotal, tagOptions, themeIcon, threshRows, toast, toastIcon, toastMsg, toastStyle, toggleTheme, totalStyle, unitChips, unitOptions
+    activeCount, aliasRows, blEmpty, blK, blRows, blWin, blOldCnt, cardSize, cards, cardDrag, cepNote, csvFrom, csvTo, dateStyle, detBearing, detSpec, detailEmptyShow, detailShow, dlFmt, dlOpen, dxActions, dxAiFallback, dxAiIdle, dxAiLoading, dxAiSections, dxAiText, dxEvidence, dxLlmModel, dxOpen, dxStamp, dxToggleLabel, dxVerdict, envHint, envMarkers, equipRows, equipUnsetDot, escHold, escHoldOptions, evalBasisText, evalWinBad, evalWindowSel, evalWinCustom, evalWinCustomMin, onEvalWinMin, evalLoadText, evalLoadWarn, evalWindow, evalWindowOptions, evtCapped, evtCount, evtEmpty, evtEmptyText, evtRows, evtScopeChips, evtTagFilter, evtTagOptions, evtTypeFilter, evtTypeOptions, fftMarkers, fftRangeChips, fftRangeShow, filterNotice, genBtnLabel, genBtnStyle, genCancelLabel, genCancelStyle, genDateStyle, genKnobStyle, genLLMNotice, genPeriodCustomShow, genPeriodFrom, genPeriodNone, genPeriodPresetShow, genPeriodPresets, genPeriodShow, genPeriodSummary, genPeriodTo, genRunning, genSelAllLabel, genSteps, genTagsCount, genToggleStyle, goSettings, gridCols, indicsDesc, indicsTitle, isMonitor, isOllama, isSettings, kpiCells, kurtWarn, kurtWarnShow, kurtogramHint, kurtogramShow, lastEventText, lineHz, lineHzHint, lineHzShow, helpTip, healthWarns, bandOn, bandInterval, bandFillNone, bandIntervalKo, onBandIvOpen, bandFill, bandFillDesc, bandFillShort, bandFillBtnStyle, bandFillBarStyle, bandFillEta, onBandFill, onBandFillStop, bandIvOpen, bandIvNext, bandIvSame, onBandIvCancel, onBandIvPick, bandIvFacts, bandIvChoices, bandIvApplyStyle, onBandIvApply, bandToggleStyle, bandKnobStyle, bandRows, bandEmpty, bandLearnedN, bandTotalN, bandFillTargets, bandFillSkipTip, bandIvOptions, onBandIvPickDirect, bandSampleText, bandSampleWarn, bandWin, bandWinOptions, onBandWin, blSampleText, llmApiKey, llmModel, llmModelPh, llmProvOptions, llmProviderSel, llmProviders, llmProvsAvail, llmStatusColor, llmStatusText, llmTestColor, llmTestIcon, llmTestMsg, llmTestShow, llmTesting, logoFilter, mcDescBody, mcDescTitle, mcOptions, mcZones, monBlNotice, monBlUnlearned, monEmpty, monEventsShow, monKnobStyle, monModeBadgeShow, monModeBadgeStyle, monModeBadgeText, monModeOptions, monPillTitle, monToggleStyle, monitorDotColor, monitorDotRing, monitorInterval, monitorText, navTabs, notReady, notifChannels, ollamaUrl, onBlK, onBlLearnAll, onBlWin, onCancelGen, onCardSize, onClearFilter, onCloseDownload, onCloseRv, onConfirmCancel, onConfirmDiscard, onConfirmSave, onCsvFrom, onCsvTo, onDlFmt, onDoDownload, onDxExplain, onEscHold, onEvalAgg, onEvalWindow, onEvtTag, onEvtType, onFormChange, onFromChange, onGenFromChange, onGenReport, onGenSelectAll, onGenToChange, onGoSource, onBandToggle, onBandInterval, onBandLearnAll, onLineHz, onLlmKey, onLlmModel, onLlmProvPick, onMonToggle, onMonitorInterval, onOllamaUrl, onOpenDownload, onRecHold, onRefresh, onResetThresh, onRouteSelectAll, onRpNext, onRpPrev, onSaveSettings, onSrcDismiss, onSrcReload, onSrcSelectAll, onTagChange, onTestLLM, onToChange, onToggleDx, onToggleGenLLM, onToggleMonitor, onTotalClick, pendingNavOpen, periodFrom, periodPresets, periodTo, qualityShow, qualityText, recHold, recHoldOptions, renotifyOptions, renotifyRows, reportEmpty, reportEmptyShow, reportRows, reportShow, reportTags, rootClass, routeNoneWarn, routeRows, routeSelAllLabel, routeTimings, rpBtnStyle, rpPageText, rpPagerShow, rvFname, rvOpen, rvUrl, secCriteria, secEquip, secLlm, secMonitor, secSource, selTag, serverMon, setNav, settingsActiveStyle, settingsDirty, sevCards, sevColor, sevGradeKo, sevMachine, sevReco, sevZones, showAdvanced, specIndics, srcNotice, srcSelAllLabel, srcSelCount, srcTables, srcTotal, statRows, stopClick, sumTotal, tagOptions, themeIcon, threshRows, toast, toastIcon, toastMsg, toastStyle, toggleTheme, totalStyle, unitChips, unitOptions
   } = v;
   return html`
 <div class=${rootClass} style="height: 100vh; display: flex; flex-direction: column; background: var(--bg-primary); color: var(--text-primary); font-family: var(--font-sans); font-size: 13px; overflow: hidden;">
@@ -52,6 +52,13 @@ export function view(v) {
 
     ${(isMonitor) ? html`
       <div data-screen-label="모니터링" style="max-width: 1360px; margin: 0 auto; padding: 18px 20px 40px;">
+        ${(healthWarns || []).map((w) => html`
+          <div style=${w.style}>
+            <span class="codicon codicon-${w.err ? 'error' : 'warning'}" style=${w.iconStyle}></span>
+            <span style="font-size: 13px; color: var(--text-secondary);">${w.text}</span>
+            ${(w.act) ? html`<button onClick=${w.onAct} style="margin-left: auto; height: 30px; padding: 0 14px; border-radius: 6px; border: none; background: var(--primary-base); color: #fff; font-size: 12px; font-weight: 600; cursor: pointer; flex-shrink: 0;">${w.act}</button>` : null}
+          </div>
+        `)}
         ${(srcNotice) ? html`
           <div style="display: flex; align-items: center; gap: 10px; padding: 11px 14px; border-radius: 8px; background: rgba(217,154,43,0.12); border: 1px solid rgba(217,154,43,0.35); margin-bottom: 16px;">
             <span class="codicon codicon-warning" style="font-size: 16px; color: #d99a2b; flex-shrink: 0;"></span>
@@ -95,24 +102,32 @@ export function view(v) {
         ` : null}
         <div style="display: grid; grid-template-columns: ${gridCols}; gap: 12px;">
           ${(cards || []).map((card) => html`
-            <button onClick=${card.onClick} style="text-align: left; background: var(--bg-secondary); border: 1px solid var(--border-default); border-radius: 8px; padding: 14px 15px 12px; cursor: pointer; transition: border-color .15s ease, transform .12s ease; ${card.cardStyle}" class="vhov2">
+            <button onClick=${card.onClick} draggable="true" onDragStart=${cardDrag && cardDrag.onStart(card.id)} onDragOver=${cardDrag && cardDrag.onOver(card.id)} onDrop=${cardDrag && cardDrag.onDrop()} onDragEnd=${cardDrag && cardDrag.onEnd} style="${(cardDrag && cardDrag.dragId === card.id) ? 'opacity: .35;' : ''} text-align: left; background: var(--bg-secondary); border: 1px solid var(--border-default); border-radius: 8px; padding: 14px 15px 12px; cursor: ${cardDrag && cardDrag.dragId ? 'grabbing' : 'grab'}; transition: border-color .15s ease, transform .12s ease; ${card.cardStyle}" class="vhov2">
               <div style="display: flex; align-items: flex-start; justify-content: space-between; gap: 8px;">
                 <div style="min-width: 0;">
                   <div style="font-size: 14px; font-weight: 600; color: var(--text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${card.alias}</div>
                   <div style="font-size: 11px; color: var(--text-muted); font-family: var(--font-mono); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 2px;">${card.name}</div>
                 </div>
-                <span style="flex-shrink: 0; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 700; color: ${card.gradeColor}; background: ${card.gradeSoft};">${card.gradeKo}</span>
+                ${(card.flap) ? html`<span data-tip=${card.flap.tip} onClick=${card.flap.onFix} style="flex-shrink: 0; padding: 2px 7px; border-radius: 4px; font-size: 10px; font-weight: 700; cursor: pointer; color: #d99a2b; background: rgba(217,154,43,.14); border: 1px solid rgba(217,154,43,.35);">${card.flap.text}</span>` : null}
+                <span style="flex-shrink: 0; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 700; color: ${card.gradeColor}; background: ${card.gradeSoft};">${card.gradeKo}${(card.gradeNote) ? html`<span style="opacity: .75; font-weight: 600;"> · ${card.gradeNote}</span>` : null}</span>
               </div>
               <div style="display: flex; align-items: flex-end; gap: 4px; margin-top: 12px;">
-                <span style="font-size: 28px; font-weight: 700; color: var(--text-primary); line-height: 1; font-variant-numeric: tabular-nums;">${card.rmsText}</span>
+                <span data-tip=${card.valTip || null} style="font-size: 28px; font-weight: 700; color: var(--text-primary); line-height: 1; font-variant-numeric: tabular-nums; ${card.valTip ? 'cursor: help;' : ''}">${card.rmsText}</span>
                 <span style="font-size: 12px; font-weight: 600; color: var(--text-tertiary); margin-bottom: 2px;">${card.unit}</span>
                 <span style="margin-left: auto; font-size: 10px; color: var(--text-muted); margin-bottom: 3px;">RMS</span>
               </div>
-              <svg viewBox="0 0 132 40" preserveAspectRatio="none" style="width: 100%; height: ${card.sparkH}px; display: block; margin-top: 8px;">
-                <path d=${card.sparkArea} fill=${card.sparkFill} stroke="none"></path>
-                <polyline points=${card.sparkLine} fill="none" stroke=${card.sparkColor} stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round" vector-effect="non-scaling-stroke"></polyline>
-              </svg>
-              <div style="text-align: right; font-size: 10px; color: var(--text-muted); margin-top: 3px;">실시간 · 최근 1분</div>
+              <!-- 운전 상태 배지는 스파크라인 위에 겹친다 — 값이 멈춘 그 그래프가 지금 상태가 아니라는 표시라, 등급 배지 옆이 아니라 그래프 자리에 있어야 읽힌다.
+                   두절이면 선까지 흐리게 죽인다(배지는 그대로) — 선명한 선은 지금 들어오는 값으로 읽힌다. -->
+              <div style="position: relative; margin-top: 8px;">
+                <svg viewBox="0 0 132 40" preserveAspectRatio="none" style="width: 100%; height: ${card.sparkH}px; display: block; opacity: ${(card.runBadge && card.runBadge.err) ? '.4' : '1'};">
+                  <path d=${card.sparkArea} fill=${card.sparkFill} stroke="none"></path>
+                  <polyline points=${card.sparkLine} fill="none" stroke=${card.sparkColor} stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round" vector-effect="non-scaling-stroke"></polyline>
+                </svg>
+                ${(card.runBadge) ? html`<span data-tip=${card.runBadge.tip} style="position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); display: inline-flex; align-items: center; gap: 5px; height: 22px; padding: 0 9px; border-radius: 5px; font-size: 11px; font-weight: 600; white-space: nowrap; cursor: help; background: var(--bg-secondary); color: ${card.runBadge.err ? '#e04040' : 'var(--text-muted)'}; border: 1px solid ${card.runBadge.err ? 'rgba(224,64,64,.55)' : 'var(--border-medium)'};"><span class="codicon codicon-${card.runBadge.err ? 'debug-disconnect' : 'debug-pause'}" style="font-size: 11px;"></span>${card.runBadge.text}</span>` : null}
+              </div>
+              <!-- 두절이면 캡션을 비운다 — 249일 전 값을 놓고 "실시간"이라고 하면 배지가 말한 것을 캡션이 뒤집는다.
+                   마지막 수신 시각은 아래 줄에 이미 있다. 자리는 남겨 둔다(카드마다 아래 줄 높이가 어긋나지 않게). -->
+              <div style="text-align: right; font-size: 10px; color: var(--text-muted); margin-top: 3px; min-height: 1.3em;">${(card.runBadge && card.runBadge.err) ? '' : '실시간 · 최근 1분'}</div>
               <div style="display: flex; align-items: center; justify-content: space-between; margin-top: 9px; padding-top: 9px; border-top: 1px solid var(--border-light); font-size: 11px; color: var(--text-muted);">
                 <span><span class="codicon codicon-history" style="font-size: 11px; vertical-align: -1px; margin-right: 3px;"></span>${card.lastText}</span>
                 <span style="color: var(--text-tertiary);">Class ${card.cls}</span>
@@ -311,7 +326,7 @@ export function view(v) {
         <div id="sec-spec" style="display: flex; align-items: center; gap: 10px; margin: 24px 0 12px; flex-wrap: wrap;">
           <span class="codicon codicon-pulse" style="font-size: 14px; color: var(--primary-light);"></span>
           <span style="font-size: 13px; font-weight: 700; letter-spacing: .6px; color: var(--text-primary);">스펙트럼 분석</span>
-          <span style="font-size: 11px; color: var(--text-muted);">주파수 성분 분해 · 결함 원인 지목</span>
+          <span style="font-size: 11px; color: var(--text-muted);">주파수 성분 분해 · 결함 가설 탐색</span>
           <div style="flex: 1 1 0; min-width: 20px; height: 1px; background: var(--border-light);"></div>
           <span style="font-size: 11px; color: var(--text-muted);">표시 물리량</span>
           <div style="display: flex; background: var(--bg-elevated); border: 1px solid var(--border-default); border-radius: 6px; overflow: hidden;" title="아래 파형·FFT·포락선·스펙트로그램의 표시 물리량 — 가속도↔속도↔변위 변환. 변위=저주파(불균형)·가속도=고주파(베어링) 강조. 추세·등급 판정에는 영향 없음">
@@ -331,7 +346,7 @@ export function view(v) {
 
         <div style="background: var(--bg-primary); border: 1px solid var(--border-default); border-radius: 8px; padding: 16px 18px; margin-bottom: 14px;">
           <div style="display: flex; align-items: center; gap: 9px; font-size: 15px; font-weight: 600; color: var(--text-primary); margin-bottom: 12px;"><span style="width: 3px; height: 15px; border-radius: 2px; background: var(--primary-base);"></span>FFT 주파수 스펙트럼 <span style="font-size: 11px; color: var(--text-muted); font-weight: 400;">${detBearing}</span>${(fftRangeShow) ? html`<span style="margin-left: auto; display: inline-flex; align-items: center; gap: 7px;"><span style="font-size: 11px; color: var(--text-muted); font-weight: 400;">범위</span><span style="display: inline-flex; border: 1px solid var(--border-medium); border-radius: 5px; overflow: hidden;">${(fftRangeChips || []).map((rc) => html`<button onClick=${rc.onClick} style=${rc.style}>${rc.label}</button>`)}</span></span>` : null}</div>
-          <div style="font-size: 12px; color: var(--text-muted); margin: -4px 0 12px;">진동을 주파수별 성분으로 분해 · 결함 주파수와 맞춰 원인 지목</div>
+          <div style="font-size: 12px; color: var(--text-muted); margin: -4px 0 12px;">진동을 주파수별 성분으로 분해 · 결함 주파수와 맞춰 가설 수립</div>
           <div style="position: relative;">
             <canvas id="vc-fft" style="width: 100%; height: 280px; display: block;"></canvas>
             <div id="vt-fft" style="position: absolute; display: none; pointer-events: none; z-index: 10; background: var(--surface-menu); color: var(--text-primary); border: 1px solid var(--border-medium); border-radius: 4px; padding: 6px 9px; font-size: 12px; line-height: 1.55; white-space: nowrap; box-shadow: 0 4px 12px rgba(0,0,0,.3); font-family: var(--font-mono);"></div>
@@ -417,7 +432,7 @@ export function view(v) {
                   <th style="text-align: left; font-weight: 600; color: var(--text-tertiary); font-size: 12px; padding: 10px 12px; border-bottom: 1px solid var(--border-default); white-space: nowrap;">시각</th>
                   <th style="text-align: left; font-weight: 600; color: var(--text-tertiary); font-size: 12px; padding: 10px 12px; border-bottom: 1px solid var(--border-default);">태그</th>
                   <th style="text-align: left; font-weight: 600; color: var(--text-tertiary); font-size: 12px; padding: 10px 12px; border-bottom: 1px solid var(--border-default); white-space: nowrap;">유형</th>
-                  <th style="text-align: right; font-weight: 600; color: var(--text-tertiary); font-size: 12px; padding: 10px 12px; border-bottom: 1px solid var(--border-default); white-space: nowrap;">지표값 vs 기준</th>
+                  <th style="text-align: left; font-weight: 600; color: var(--text-tertiary); font-size: 12px; padding: 10px 12px; border-bottom: 1px solid var(--border-default); white-space: nowrap;">상세</th>
                   <th style="text-align: center; font-weight: 600; color: var(--text-tertiary); font-size: 12px; padding: 10px 12px; border-bottom: 1px solid var(--border-default);">등급</th>
                 </tr>
               </thead>
@@ -427,7 +442,8 @@ export function view(v) {
                     <td style="padding: 10px 12px 10px 13px; white-space: nowrap; border-left: 3px solid ${r.gradeColor};"><div style="color: var(--text-secondary); font-family: var(--font-mono); font-size: 12px;">${r.timeText}</div><div style="color: var(--text-muted); font-size: 11px; margin-top: 1px;">${r.agoText}</div></td>
                     <td style="padding: 10px 12px; color: var(--text-secondary);"><div style="font-weight: 500; color: var(--text-primary);">${r.tagAlias}</div><div style="font-size: 11px; color: var(--text-muted); font-family: var(--font-mono);">${r.tagName}</div></td>
                     <td style="padding: 10px 12px; color: var(--text-secondary); white-space: nowrap;">${r.typeKo}</td>
-                    <td style="padding: 10px 12px; text-align: right; font-family: var(--font-mono); white-space: nowrap;"><span style="color: var(--text-primary); font-weight: 600;">${r.metricText}</span> <span style="color: var(--text-muted); font-size: 11px;">/ ${r.baseText}</span></td>
+                    <!-- 값은 mono(자릿수), 근거는 본문체(한글) — 한 셀에 섞여 있어도 읽는 방식이 다르다 -->
+                    <td data-tip=${r.bandTip || ''} style="padding: 10px 12px; white-space: nowrap;${r.bandTip ? ' cursor: help;' : ''}"><span style="color: var(--text-primary); font-weight: 600; font-family: var(--font-mono);">${r.valText}</span>${(r.noteText) ? html`<span style="color: var(--text-muted); font-size: 11px;"> · ${r.noteText}</span>` : null}</td>
                     <td style="padding: 10px 12px; text-align: center;"><span style="padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 700; color: ${r.gradeColor}; background: ${r.gradeSoft};">${r.gradeKo}</span></td>
                   </tr>
                 `)}
@@ -605,9 +621,18 @@ export function view(v) {
                 <div style="font-size: 17px; font-weight: 600; color: var(--text-primary);">설비 정보</div>
                 <div style="font-size: 12px; color: var(--text-muted);">한 번만 설정하면 유지되는 정보입니다</div>
               </div>
-              <div style="font-size: 12px; color: var(--text-secondary); margin-bottom: 14px; line-height: 1.6; max-width: 740px;">베어링 모델을 선택하면 형상값이 자동 입력되고 결함 주파수(BPFO/BPFI/BSF/FTF)가 자동 계산됩니다. 특수·저널 베어링은 <b style="color: var(--text-primary); font-weight: 600;">보기</b>에서 직접 입력하세요.</div>
+              <div style="font-size: 12px; color: var(--text-secondary); margin-bottom: 14px; line-height: 1.6; max-width: 740px;">베어링 모델을 선택하면 형상값이 자동 입력되고 결함 주파수(BPFO/BPFI/BSF/FTF)가 자동 계산됩니다. 오른쪽 <b style="color: var(--text-primary); font-weight: 600;">설정</b> 버튼 안에 <b style="color: var(--text-primary); font-weight: 600;">마운팅 방식·구동방식·날개수</b>가 있습니다 — 채운 만큼 판정 가능한 결함 종류가 늘어납니다. 버튼의 <span style="font-family: var(--font-mono); font-size: 11px;">n/N</span>은 입력 완성도이며, 항목 옆 <span class="codicon codicon-question" style="font-size: 11px;"></span> 에 마우스를 올리면 설명이 나옵니다.</div>
               <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 10px;">
                 <div style="display: inline-flex; align-items: center; gap: 6px; font-size: 11px; color: var(--text-secondary); background: var(--bg-elevated); border: 1px solid var(--border-light); border-radius: 5px; padding: 5px 10px;"><span class="codicon codicon-database" style="font-size: 12px; color: var(--text-muted);"></span>데이터 소스 ${srcSelCount}개 · 태그 ${activeCount}개 · 별칭 없으면 NAME 표시</div>
+                <!-- 계통주파수: 국내 60Hz 단일 계통이라 평소 숨김(고정). 50 설정이거나 RPM이 다른 계통을
+                     가리킬 때만 경고와 함께 나타난다 — 고정 전제가 틀린 바로 그 순간에만 보이는 설정 -->
+                ${(lineHzShow) ? html`
+                  <label data-tip=${helpTip['전원 계통주파수']} style="display: inline-flex; align-items: center; gap: 6px; font-size: 11px; color: var(--text-secondary); background: var(--bg-elevated); border: 1px solid ${lineHzHint && lineHzHint.warn ? '#d99a2b' : 'var(--border-light)'}; border-radius: 5px; padding: 4px 10px; cursor: help;">전원 계통주파수<span class="codicon codicon-question" style="font-size: 10px; color: var(--text-muted);"></span>
+                    <select value=${lineHz} onChange=${onLineHz} style="height: 24px; padding: 0 4px; border-radius: 4px; border: 1px solid var(--border-medium); background: var(--bg-primary); color: var(--text-primary); font-size: 11px;"><option value="60">60 Hz</option><option value="50">50 Hz</option></select>
+                    <span style="color: var(--text-muted);">→ 전기적 결함 ${lineHz === '50' ? '100' : '120'} Hz</span>
+                    ${(lineHzHint) ? html`<span style="color: ${lineHzHint.warn ? '#d99a2b' : 'var(--text-muted)'};">· ${lineHzHint.text}</span>` : null}
+                  </label>
+                ` : null}
               </div>
               <div style="display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-bottom: 16px;">
                 <span style="font-size: 11px; color: var(--text-muted); margin-right: 2px;">Class (ISO 10816)</span>
@@ -620,11 +645,11 @@ export function view(v) {
                 <table style="width: 100%; border-collapse: collapse; font-size: 12px; min-width: 800px;">
                   <thead><tr>
                     <th style="text-align: left; font-weight: 600; color: var(--text-tertiary); padding: 8px 8px; border-bottom: 1px solid var(--border-default); white-space: nowrap;">태그</th>
-                    <th style="text-align: left; font-weight: 600; color: var(--text-tertiary); padding: 8px 8px; border-bottom: 1px solid var(--border-default);">단위</th>
-                    <th style="text-align: left; font-weight: 600; color: var(--text-tertiary); padding: 8px 8px; border-bottom: 1px solid var(--border-default);">Class</th>
-                    <th style="text-align: left; font-weight: 600; color: var(--text-tertiary); padding: 8px 8px; border-bottom: 1px solid var(--border-default);">RPM</th>
-                    <th style="text-align: left; font-weight: 600; color: var(--text-tertiary); padding: 8px 8px; border-bottom: 1px solid var(--border-default);">베어링 모델</th>
-                    <th style="text-align: left; font-weight: 600; color: var(--text-tertiary); padding: 8px 8px; border-bottom: 1px solid var(--border-default);">형상·주파수</th>
+                    <th style="text-align: left; font-weight: 600; color: var(--text-tertiary); padding: 8px 8px; border-bottom: 1px solid var(--border-default);"><span data-tip=${helpTip['단위']} style="cursor: help; display: inline-flex; align-items: center; gap: 4px;">단위<span class="codicon codicon-question" style="font-size: 11px; color: var(--text-muted);"></span></span></th>
+                    <th style="text-align: left; font-weight: 600; color: var(--text-tertiary); padding: 8px 8px; border-bottom: 1px solid var(--border-default);"><span data-tip=${helpTip['Class']} style="cursor: help; display: inline-flex; align-items: center; gap: 4px;">Class<span class="codicon codicon-question" style="font-size: 11px; color: var(--text-muted);"></span></span></th>
+                    <th style="text-align: left; font-weight: 600; color: var(--text-tertiary); padding: 8px 8px; border-bottom: 1px solid var(--border-default);"><span data-tip=${helpTip['RPM']} style="cursor: help; display: inline-flex; align-items: center; gap: 4px;">RPM<span class="codicon codicon-question" style="font-size: 11px; color: var(--text-muted);"></span></span></th>
+                    <th style="text-align: left; font-weight: 600; color: var(--text-tertiary); padding: 8px 8px; border-bottom: 1px solid var(--border-default);"><span data-tip=${helpTip['베어링 모델']} style="cursor: help; display: inline-flex; align-items: center; gap: 4px;">베어링 모델<span class="codicon codicon-question" style="font-size: 11px; color: var(--text-muted);"></span></span></th>
+                    <th style="text-align: left; font-weight: 600; color: var(--text-tertiary); padding: 8px 8px; border-bottom: 1px solid var(--border-default);">형상·계측·구동</th>
                   </tr></thead>
                   <tbody>
                     ${(equipRows || []).map((r) => html`
@@ -634,17 +659,17 @@ export function view(v) {
                         <td style="padding: 5px 8px;"><select value=${r.cls} onChange=${r.onCls} style="height: 30px; width: 116px; padding: 0 6px; border-radius: 5px; border: 1px solid var(--border-medium); background: var(--bg-elevated); color: var(--text-primary); font-size: 12px;">${(r.clsOptions || []).map((c) => html`<option value=${c.v}>${c.l}</option>`)}</select></td>
                         <td style="padding: 5px 8px;"><input value=${r.rpm} onChange=${r.onRpm} placeholder="기본 1800" style="height: 30px; width: 72px; padding: 0 8px; border-radius: 5px; border: 1px solid var(--border-medium); background: var(--bg-elevated); color: var(--text-primary); font-size: 12px; font-family: var(--font-mono);" /></td>
                         <td style="padding: 5px 8px;"><select value=${r.bModel} onChange=${r.onModel} style="height: 30px; width: 100px; padding: 0 6px; border-radius: 5px; border: 1px solid var(--border-medium); background: var(--bg-elevated); color: var(--text-primary); font-size: 12px; font-family: var(--font-mono);"><option value="">— 선택 —</option>${(r.bModelOptions || []).map((o) => html`<option value=${o}>${o}</option>`)}</select></td>
-                        <td style="padding: 5px 8px; white-space: nowrap;"><button onClick=${r.onToggleAdv} style="display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 10px; border-radius: 5px; border: 1px solid var(--border-medium); background: var(--bg-elevated); color: var(--text-secondary); font-size: 11px; font-weight: 500; cursor: pointer;"><span class="codicon codicon-symbol-numeric" style="font-size: 12px; color: var(--text-muted);"></span>${r.advLabel}</button></td>
+                        <td style="padding: 5px 8px; white-space: nowrap;"><button onClick=${r.onToggleAdv} style="display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 10px; border-radius: 5px; border: 1px solid ${(r.setIncomplete && !r.adv) ? '#d99a2b' : 'var(--border-medium)'}; background: var(--bg-elevated); color: var(--text-secondary); font-size: 11px; font-weight: 500; cursor: pointer;"><span class="codicon codicon-settings-gear" style="font-size: 12px; color: var(--text-muted);"></span>${r.advLabel}${(!r.adv) ? html`<span style="font-size: 10px; font-weight: 700; font-family: var(--font-mono); color: ${r.setIncomplete ? '#d99a2b' : 'var(--text-muted)'}; background: var(--bg-primary); border-radius: 3px; padding: 1px 5px;">${r.setCount}/${r.setTotal}</span><span style="font-size: 9px; color: var(--text-muted);">▾</span>` : null}</button></td>
                       </tr>
                       ${(r.adv) ? html`
                         <tr style="border-bottom: 1px solid var(--border-light); background: var(--bg-elevated);">
                           <td colspan="6" style="padding: 14px 16px;">
                             <div style="display: flex; flex-wrap: wrap; gap: 24px;">
                               <div>
-                                <div style="font-size: 10px; font-weight: 700; letter-spacing: .4px; text-transform: uppercase; color: var(--text-muted); margin-bottom: 8px;">결함 주파수 <span style="font-weight: 500; text-transform: none; letter-spacing: 0; color: var(--text-muted);">Hz · 자동 계산</span></div>
+                                <div data-tip="RPM과 베어링 형상으로 계산한 이론값입니다. 스펙트럼이나 포락선에서 이 주파수에 피크가 서면 해당 부위의 결함을 의심합니다. 각 칩에 마우스를 올리면 항목별 설명이 나옵니다." style="font-size: 10px; font-weight: 700; letter-spacing: .4px; text-transform: uppercase; color: var(--text-muted); margin-bottom: 8px; cursor: help; display: inline-flex; align-items: center; gap: 4px;">결함 주파수 <span style="font-weight: 500; text-transform: none; letter-spacing: 0; color: var(--text-muted);">Hz · 자동 계산</span><span class="codicon codicon-question" style="font-size: 10px; color: var(--text-muted);"></span></div>
                                 <div style="display: flex; gap: 7px; flex-wrap: wrap;">
                                   ${(r.freqChips || []).map((c) => html`
-                                    <div style="display: flex; flex-direction: column; gap: 3px; padding: 6px 12px; border-radius: 6px; background: var(--bg-primary); border: 1px solid var(--border-light); min-width: 52px;">
+                                    <div data-tip=${c.tip || ''} style="display: flex; flex-direction: column; gap: 3px; padding: 6px 12px; border-radius: 6px; background: var(--bg-primary); border: 1px solid var(--border-light); min-width: 52px;${c.tip ? ' cursor: help;' : ''}">
                                       <span style="font-size: 9px; font-weight: 700; letter-spacing: .3px; color: var(--text-muted); white-space: nowrap;">${c.label}</span>
                                       <span style="font-size: 14px; font-weight: 600; color: var(--text-primary); font-family: var(--font-mono);">${c.val}</span>
                                     </div>
@@ -656,7 +681,7 @@ export function view(v) {
                                   <div style="font-size: 10px; font-weight: 700; letter-spacing: .4px; text-transform: uppercase; color: var(--text-muted); margin-bottom: 8px;">베어링 형상 <span style="font-weight: 500; text-transform: none; letter-spacing: 0; color: var(--text-muted);">· ${r.bModel} 자동</span></div>
                                   <div style="display: flex; gap: 7px; flex-wrap: wrap;">
                                     ${(r.geoCells || []).map((g) => html`
-                                      <div style="display: flex; flex-direction: column; gap: 3px; padding: 6px 12px; border-radius: 6px; background: var(--bg-primary); border: 1px solid var(--border-light);">
+                                      <div data-tip=${helpTip[g.k] || ''} style="display: flex; flex-direction: column; gap: 3px; padding: 6px 12px; border-radius: 6px; background: var(--bg-primary); border: 1px solid var(--border-light); cursor: help;">
                                         <span style="font-size: 9px; font-weight: 700; letter-spacing: .3px; color: var(--text-muted); white-space: nowrap;">${g.k}</span>
                                         <span style="font-size: 14px; font-weight: 600; color: var(--text-primary); font-family: var(--font-mono);">${g.v}</span>
                                       </div>
@@ -668,13 +693,38 @@ export function view(v) {
                             ${(r.isSleeve) ? html`
                               <div style="font-size: 12px; color: var(--text-muted); margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border-light);">저널(sleeve) 베어링 — 구름요소가 없어 BPFO/BPFI/BSF/FTF가 정의되지 않습니다. 1×·2× 회전주파수 기준으로만 진단합니다.</div>
                             ` : null}
+                            <div style="margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--border-light);">
+                              <div style="font-size: 10px; font-weight: 700; letter-spacing: .4px; text-transform: uppercase; color: var(--text-muted); margin-bottom: 10px;">계측·구동 <span style="font-weight: 500; text-transform: none; letter-spacing: 0;">· 선택 입력 — 모르면 비워두세요(<span class="codicon codicon-question" style="font-size: 10px;"></span> 에 마우스를 올리면 설명)</span></div>
+                              <div style="display: flex; align-items: center; gap: 18px; flex-wrap: wrap;">
+                                <label data-tip=${helpTip['마운팅 방식']} style="display: flex; align-items: center; gap: 5px; font-size: 12px; color: var(--text-secondary); cursor: help;">마운팅<span class="codicon codicon-question" style="font-size: 10px; color: var(--text-muted); margin-right: 2px;"></span>
+                                  <select value=${r.mMount} onChange=${r.onMount} style="height: 28px; padding: 0 6px; border-radius: 5px; border: 1px solid ${r.mountUnset ? '#d99a2b' : 'var(--border-medium)'}; background: var(--bg-primary); color: var(--text-primary); font-size: 12px;">${(r.mountOptions || []).map((o) => html`<option value=${o.v}>${o.l}</option>`)}</select>
+                                </label>
+                                <label data-tip=${helpTip['구동방식']} style="display: flex; align-items: center; gap: 5px; font-size: 12px; color: var(--text-secondary); cursor: help;">구동<span class="codicon codicon-question" style="font-size: 10px; color: var(--text-muted); margin-right: 2px;"></span>
+                                  <select value=${r.mDrive} onChange=${r.onDrive} style="height: 28px; padding: 0 6px; border-radius: 5px; border: 1px solid var(--border-medium); background: var(--bg-primary); color: var(--text-primary); font-size: 12px;">${(r.driveOptions || []).map((o) => html`<option value=${o.v}>${o.l}</option>`)}</select>
+                                </label>
+                                <label data-tip=${helpTip['날개수 · 잇수']} style="display: flex; align-items: center; gap: 5px; font-size: 12px; color: var(--text-secondary); cursor: help;">${r.isGear ? '잇수' : '날개수'}<span class="codicon codicon-question" style="font-size: 10px; color: var(--text-muted); margin-right: 2px;"></span>
+                                  <input value=${r.mVanes} onChange=${r.onVanes} placeholder="선택" style="height: 28px; width: 62px; padding: 0 8px; border-radius: 5px; border: 1px solid var(--border-medium); background: var(--bg-primary); color: var(--text-primary); font-size: 12px; font-family: var(--font-mono);" />
+                                </label>
+                                ${(r.vaneNote) ? html`<span data-tip="날개수 × 회전주파수로 계산한 베인 통과 주파수입니다. 스펙트럼에서 이 성분이 크면 유동 이상이나 간극 문제를 의심합니다." style="font-size: 11px; color: var(--text-muted); font-family: var(--font-mono); cursor: help;">${r.vaneNote}</span>` : null}
+                              </div>
+                              ${(r.isBelt) ? html`
+                                <div style="display: flex; align-items: center; gap: 14px; flex-wrap: wrap; margin-top: 10px; padding-left: 12px; border-left: 2px solid var(--border-medium);">
+                                  <span data-tip=${helpTip['벨트 제원']} style="font-size: 11px; font-weight: 700; color: var(--text-tertiary); cursor: help; display: inline-flex; align-items: center; gap: 4px;">벨트 제원<span class="codicon codicon-question" style="font-size: 10px; color: var(--text-muted);"></span></span>
+                                  <label style="display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-secondary);">구동 풀리경 D1(mm)<input value=${r.mBeltD1} onChange=${r.onBeltD1} style="height: 28px; width: 62px; padding: 0 8px; border-radius: 5px; border: 1px solid var(--border-medium); background: var(--bg-primary); color: var(--text-primary); font-size: 12px; font-family: var(--font-mono);" /></label>
+                                  <label style="display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-secondary);">종동 풀리경 D2(mm)<input value=${r.mBeltD2} onChange=${r.onBeltD2} style="height: 28px; width: 62px; padding: 0 8px; border-radius: 5px; border: 1px solid var(--border-medium); background: var(--bg-primary); color: var(--text-primary); font-size: 12px; font-family: var(--font-mono);" /></label>
+                                  <label style="display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-secondary);">벨트길이(mm)<input value=${r.mBeltLen} onChange=${r.onBeltLen} placeholder="선택" style="height: 28px; width: 62px; padding: 0 8px; border-radius: 5px; border: 1px solid var(--border-medium); background: var(--bg-primary); color: var(--text-primary); font-size: 12px; font-family: var(--font-mono);" /></label>
+                                  ${(r.beltRatio) ? html`<span data-tip="풀리비(D1÷D2)로 계산한 벨트 반대쪽 축의 회전주파수입니다. 스펙트럼의 비동기 성분이 이 값과 일치하면 종동축에서 온 진동으로 귀속됩니다." style="font-size: 11px; color: var(--text-muted); font-family: var(--font-mono); cursor: help;">${r.beltRatio}</span>` : null}
+                                </div>
+                              ` : null}
+                              <div style="font-size: 11.5px; color: ${r.mountUnset ? '#d99a2b' : 'var(--text-muted)'}; margin-top: 10px; line-height: 1.6;">${r.mountNote}</div>
+                            </div>
                             ${(r.isCustom) ? html`
                               <div style="display: flex; align-items: center; gap: 14px; flex-wrap: wrap;">
-                                <span style="font-size: 11px; font-weight: 700; color: var(--text-tertiary);">직접 입력</span>
-                                <label style="display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-secondary);">볼 수 n<input value=${r.bN} onChange=${r.onGeoN} style="height: 28px; width: 52px; padding: 0 8px; border-radius: 5px; border: 1px solid var(--border-medium); background: var(--bg-primary); color: var(--text-primary); font-size: 12px; font-family: var(--font-mono);" /></label>
-                                <label style="display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-secondary);">볼경 Bd(mm)<input value=${r.bBd} onChange=${r.onGeoBd} style="height: 28px; width: 60px; padding: 0 8px; border-radius: 5px; border: 1px solid var(--border-medium); background: var(--bg-primary); color: var(--text-primary); font-size: 12px; font-family: var(--font-mono);" /></label>
-                                <label style="display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-secondary);">피치경 Pd(mm)<input value=${r.bPd} onChange=${r.onGeoPd} style="height: 28px; width: 60px; padding: 0 8px; border-radius: 5px; border: 1px solid var(--border-medium); background: var(--bg-primary); color: var(--text-primary); font-size: 12px; font-family: var(--font-mono);" /></label>
-                                <label style="display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-secondary);">접촉각 φ(°)<input value=${r.bPhi} onChange=${r.onGeoPhi} style="height: 28px; width: 52px; padding: 0 8px; border-radius: 5px; border: 1px solid var(--border-medium); background: var(--bg-primary); color: var(--text-primary); font-size: 12px; font-family: var(--font-mono);" /></label>
+                                <span data-tip="목록에 없는 베어링의 형상값을 직접 넣습니다. 네 값 모두 제조사 카탈로그의 형상 제원 표에 있습니다." style="font-size: 11px; font-weight: 700; color: var(--text-tertiary); cursor: help; display: inline-flex; align-items: center; gap: 4px;">직접 입력<span class="codicon codicon-question" style="font-size: 10px; color: var(--text-muted);"></span></span>
+                                <label data-tip=${helpTip['볼 수 n']} style="display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-secondary); cursor: help;">볼 수 n<input value=${r.bN} onChange=${r.onGeoN} style="height: 28px; width: 52px; padding: 0 8px; border-radius: 5px; border: 1px solid var(--border-medium); background: var(--bg-primary); color: var(--text-primary); font-size: 12px; font-family: var(--font-mono);" /></label>
+                                <label data-tip=${helpTip['볼경 Bd']} style="display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-secondary); cursor: help;">볼경 Bd(mm)<input value=${r.bBd} onChange=${r.onGeoBd} style="height: 28px; width: 60px; padding: 0 8px; border-radius: 5px; border: 1px solid var(--border-medium); background: var(--bg-primary); color: var(--text-primary); font-size: 12px; font-family: var(--font-mono);" /></label>
+                                <label data-tip=${helpTip['피치경 Pd']} style="display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-secondary); cursor: help;">피치경 Pd(mm)<input value=${r.bPd} onChange=${r.onGeoPd} style="height: 28px; width: 60px; padding: 0 8px; border-radius: 5px; border: 1px solid var(--border-medium); background: var(--bg-primary); color: var(--text-primary); font-size: 12px; font-family: var(--font-mono);" /></label>
+                                <label data-tip=${helpTip['접촉각 φ']} style="display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-secondary); cursor: help;">접촉각 φ(°)<input value=${r.bPhi} onChange=${r.onGeoPhi} style="height: 28px; width: 52px; padding: 0 8px; border-radius: 5px; border: 1px solid var(--border-medium); background: var(--bg-primary); color: var(--text-primary); font-size: 12px; font-family: var(--font-mono);" /></label>
                               </div>
                             ` : null}
                           </td>
@@ -690,7 +740,11 @@ export function view(v) {
           ${(secCriteria) ? html`
             <div style="background: var(--bg-secondary); border: 1px solid var(--border-default); border-radius: 8px; padding: 20px; margin-bottom: 16px;">
               <div style="font-size: 17px; font-weight: 600; color: var(--text-primary); margin-bottom: 4px;">판정 기준</div>
-              <div style="font-size: 12px; color: var(--text-muted); margin-bottom: 18px;">심각도를 판정하는 두 가지 기준을 설정합니다 — ISO 10816 머신 클래스로 정하는 <b style="color: var(--text-secondary);">절대 임계</b>(존 경계), 그리고 설비별 정상 상태를 학습하는 <b style="color: var(--text-secondary);">상대 기준</b>(베이스라인, 아래).</div>
+              <div style="font-size: 12px; color: var(--text-muted); margin-bottom: 6px; line-height: 1.7;">심각도를 판정하는 두 가지 기준을 설정합니다.</div>
+              <ul style="margin: 0 0 18px; padding-left: 18px; font-size: 12px; color: var(--text-tertiary); line-height: 1.7; list-style: none;">
+                <li style="position: relative;"><span style="position: absolute; left: -14px;">•</span><b style="color: var(--text-secondary);">절대 임계</b>(존 경계) — ISO 10816 머신 클래스로 정합니다.</li>
+                <li style="position: relative;"><span style="position: absolute; left: -14px;">•</span><b style="color: var(--text-secondary);">상대 기준</b>(베이스라인, 아래) — 설비별 정상 상태를 학습합니다.</li>
+              </ul>
               <label style="display: block; font-size: 12px; font-weight: 600; color: var(--text-tertiary); margin-bottom: 8px;">머신 클래스</label>
               <div style="display: flex; gap: 8px; margin-bottom: 12px;">
                 ${(mcOptions || []).map((m) => html`<div onClick=${m.onClick} style=${m.style}>${m.label}</div>`)}
@@ -715,16 +769,16 @@ export function view(v) {
             <div style="background: var(--bg-secondary); border: 1px solid var(--border-default); border-radius: 8px; padding: 20px; margin-bottom: 16px;">
               <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 4px;">
                 <label style="font-size: 12px; font-weight: 600; color: var(--text-tertiary);">클래스별 임계값</label>
-                <button onClick=${onResetThresh} style="margin-left: auto; height: 28px; padding: 0 12px; border-radius: 6px; border: 1px solid var(--border-medium); background: var(--bg-elevated); color: var(--text-secondary); font-size: 11px; font-weight: 500; cursor: pointer;">기본값으로 초기화</button>
+                <button data-tip=${helpTip['임계 초기화']} onClick=${onResetThresh} style="margin-left: auto; height: 28px; padding: 0 12px; border-radius: 6px; border: 1px solid var(--border-medium); background: var(--bg-elevated); color: var(--text-secondary); font-size: 11px; font-weight: 500; cursor: pointer;">기본값으로 초기화</button>
               </div>
               <div style="font-size: 11px; color: var(--text-muted); margin-bottom: 12px;">각 태그는 자신의 Class(속도 mm/s) 또는 단위(g·μm) 행 값을 상속합니다. 속도(mm/s)는 <b style="color: var(--text-secondary);">ISO 10816 기준값</b>, 가속도(g)·변위(μm)는 <b style="color: var(--text-secondary);">일반 참고 기본값</b>이며 모두 직접 수정할 수 있습니다.</div>
               <div style="overflow-x: auto;">
                 <table style="width: 100%; border-collapse: collapse; font-size: 12px; min-width: 560px;">
                   <thead><tr>
                     <th style="text-align: left; font-weight: 600; color: var(--text-tertiary); padding: 7px 8px; border-bottom: 1px solid var(--border-default); font-size: 11px; white-space: nowrap;">구분</th>
-                    <th style="text-align: left; font-weight: 600; color: var(--text-tertiary); padding: 7px 8px; border-bottom: 1px solid var(--border-default); font-size: 11px; white-space: nowrap;">양호↔주의 (A/B)</th>
-                    <th style="text-align: left; font-weight: 600; color: var(--text-tertiary); padding: 7px 8px; border-bottom: 1px solid var(--border-default); font-size: 11px; white-space: nowrap;">주의↔위험 (B/C)</th>
-                    <th style="text-align: left; font-weight: 600; color: var(--text-tertiary); padding: 7px 8px; border-bottom: 1px solid var(--border-default); font-size: 11px; white-space: nowrap;">위험↔심각 (C/D)</th>
+                    <th style="text-align: left; font-weight: 600; color: var(--text-tertiary); padding: 7px 8px; border-bottom: 1px solid var(--border-default); font-size: 11px; white-space: nowrap;"><span data-tip=${helpTip['A/B']} style="cursor: help; display: inline-flex; align-items: center; gap: 4px;">양호↔주의 (A/B)<span class="codicon codicon-question" style="font-size: 10px; color: var(--text-muted);"></span></span></th>
+                    <th style="text-align: left; font-weight: 600; color: var(--text-tertiary); padding: 7px 8px; border-bottom: 1px solid var(--border-default); font-size: 11px; white-space: nowrap;"><span data-tip=${helpTip['B/C']} style="cursor: help; display: inline-flex; align-items: center; gap: 4px;">주의↔위험 (B/C)<span class="codicon codicon-question" style="font-size: 10px; color: var(--text-muted);"></span></span></th>
+                    <th style="text-align: left; font-weight: 600; color: var(--text-tertiary); padding: 7px 8px; border-bottom: 1px solid var(--border-default); font-size: 11px; white-space: nowrap;"><span data-tip=${helpTip['C/D']} style="cursor: help; display: inline-flex; align-items: center; gap: 4px;">위험↔심각 (C/D)<span class="codicon codicon-question" style="font-size: 10px; color: var(--text-muted);"></span></span></th>
                     <th style="text-align: left; font-weight: 600; color: var(--text-tertiary); padding: 7px 8px; border-bottom: 1px solid var(--border-default); font-size: 11px;">단위</th>
                   </tr></thead>
                   <tbody>
@@ -746,27 +800,105 @@ export function view(v) {
                 <div style="font-size: 17px; font-weight: 600; color: var(--text-primary);">베이스라인 학습</div>
                 <button onClick=${onBlLearnAll} style="margin-left: auto; height: 28px; padding: 0 12px; border-radius: 6px; border: 1px solid var(--border-medium); background: var(--bg-elevated); color: var(--text-secondary); font-size: 11px; font-weight: 600; cursor: pointer;">전체 학습</button>
               </div>
-              <div style="font-size: 12px; color: var(--text-muted); margin-bottom: 14px;">정상 운전 구간의 RMS 평균(μ)·표준편차(σ)를 학습해 μ+kσ 초과 시 <b style="color: var(--text-secondary);">베이스라인 이탈</b> 이벤트를 추가로 생성합니다 — 절대값이 양호 존이라도 평소 대비 급증을 조기에 감지합니다. 학습은 선택 사항이며, 임계(위 존 경계) 감지는 학습과 무관하게 항상 동작합니다.</div>
+              <!-- 설명이 길어 한 문단이면 읽히지 않는다 — 첫 줄에 요지, 부연은 불릿+들여쓰기로 계층화 -->
+              <div style="font-size: 12px; color: var(--text-muted); margin-bottom: 14px; line-height: 1.7;">정상 운전 구간 RMS의 중심(μ)과 평소 변동(σ)을 학습해 한계(μ+kσ) 초과 시 <b style="color: var(--text-secondary);">베이스라인 이탈</b> 이벤트를 추가로 생성합니다.</div>
+              <ul style="margin: -6px 0 14px; padding-left: 18px; font-size: 12px; color: var(--text-tertiary); line-height: 1.7; list-style: none;">
+                <li style="position: relative;"><span style="position: absolute; left: -14px;">•</span>절대값이 양호 존이라도 평소 대비 급증을 조기에 감지합니다.</li>
+                <li style="position: relative;"><span style="position: absolute; left: -14px;">•</span>추정은 스파이크에 흔들리지 않는 중앙값 방식이고, 정지·기동 구간은 학습에서 자동 제외됩니다.</li>
+                <li style="position: relative;"><span style="position: absolute; left: -14px;">•</span>학습은 선택 사항이며, 임계(위 존 경계) 감지는 학습과 무관하게 항상 동작합니다.</li>
+              </ul>
               ${(monBlNotice) ? html`
                 <div style="display: flex; align-items: center; gap: 10px; padding: 11px 14px; border-radius: 8px; background: rgba(217,154,43,0.12); border: 1px solid rgba(217,154,43,0.35); margin-bottom: 14px;">
                   <span class="codicon codicon-warning" style="font-size: 15px; color: #d99a2b; flex-shrink: 0;"></span>
                   <span style="font-size: 12px; color: var(--text-secondary);">미학습 태그 <b style="color: var(--text-primary);">${monBlUnlearned}개</b> — 임계 초과는 감지되지만 평소 대비 급증(베이스라인 이탈)은 감지되지 않습니다. 조기 감지를 원하면 아래에서 학습하세요.</span>
                 </div>
               ` : null}
+              ${/* 오래된 기준 안내 — 자동 재학습은 하지 않으므로(결함이 자라는 중이면 그 결함을 정상으로
+                   흡수한다) 사람에게 알린다. 좌측 판정 기준 배지에도 "재학습 N"으로 올라간다. */ ''}
+              ${(blOldCnt > 0) ? html`
+                <div style="display: flex; align-items: center; gap: 10px; padding: 11px 14px; border-radius: 8px; background: rgba(217,154,43,0.12); border: 1px solid rgba(217,154,43,0.35); margin-bottom: 14px;">
+                  <span class="codicon codicon-history" style="font-size: 15px; color: #d99a2b; flex-shrink: 0;"></span>
+                  <span style="font-size: 12px; color: var(--text-secondary); line-height: 1.6;">학습한 지 한 달이 넘은 태그 <b style="color: var(--text-primary);">${blOldCnt}개</b> — 그 사이 정비나 운전 조건 변경이 있었다면 지금 기준은 정상을 대표하지 않습니다. 각 행의 <b style="color: var(--text-primary);">학습</b>으로 갱신하십시오.</span>
+                </div>
+              ` : null}
               <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 4px;">
-                <label style="font-size: 12px; font-weight: 600; color: var(--text-tertiary);">정상 학습 기간</label>
+                <label data-tip=${helpTip['정상 학습 기간']} style="font-size: 12px; font-weight: 600; color: var(--text-tertiary); cursor: help; display: inline-flex; align-items: center; gap: 4px;">정상 학습 기간<span class="codicon codicon-question" style="font-size: 10px; color: var(--text-muted);"></span></label>
                 <select value=${blWin} onChange=${onBlWin} style="height: 30px; padding: 0 10px; border-radius: 6px; border: 1px solid var(--border-medium); background: var(--bg-elevated); color: var(--text-primary); font-size: 12px;"><option value="1h">최근 1시간</option><option value="6h">최근 6시간</option><option value="24h">최근 24시간</option></select>
-                <label style="font-size: 12px; font-weight: 600; color: var(--text-tertiary); margin-left: 8px;">k (σ 배수)</label>
+                <label data-tip=${helpTip['k (σ 배수)']} style="font-size: 12px; font-weight: 600; color: var(--text-tertiary); margin-left: 8px; cursor: help; display: inline-flex; align-items: center; gap: 4px;">k (σ 배수)<span class="codicon codicon-question" style="font-size: 10px; color: var(--text-muted);"></span></label>
                 <input value=${blK} onChange=${onBlK} style="height: 30px; width: 64px; padding: 0 8px; border-radius: 6px; border: 1px solid var(--border-medium); background: var(--bg-elevated); color: var(--text-primary); font-size: 12px; font-family: var(--font-mono);" />
+                <span style="font-size: 11px; color: var(--text-muted);">${blSampleText}</span>
               </div>
               <div style="font-size: 11px; color: var(--text-muted); margin-bottom: 12px;">기간이 길수록 다양한 정상 운전 상태를 포함해 기준이 견고해집니다(대표성↑). 데이터가 그보다 짧으면 있는 만큼만 학습합니다. 해상도는 초 단위 고정으로 판정 값과 일치합니다.</div>
               ${(blEmpty) ? html`<div style="font-size: 12px; color: var(--text-muted); padding: 10px 0;">선택된 데이터 소스가 없습니다 — 데이터 소스에서 테이블을 먼저 선택하세요.</div>` : null}
               ${(blRows || []).map((r) => html`
                 <div style="display: flex; align-items: center; gap: 12px; padding: 8px 4px; border-bottom: 1px solid var(--border-light);">
                   <span style="font-size: 13px; color: var(--text-primary); min-width: 180px;">${r.label}</span>
-                  <span style="font-size: 11px; font-family: var(--font-mono); color: ${r.statusColor}; flex: 1;">${r.statusText}</span>
+                  <span data-tip=${r.statusTip || ''} style="font-size: 11px; font-family: var(--font-mono); color: ${r.statusColor}; flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;${r.statusTip ? ' cursor: help;' : ''}">${r.statusText}</span>
+                  ${(r.ago) ? html`<span data-tip="이 기준을 학습한 시점입니다. 설비 정비나 운전 조건 변경 뒤의 기준은 정상을 대표하지 않으니 다시 학습하십시오." style="font-size: 10px; font-weight: 600; padding: 2px 7px; border-radius: 4px; white-space: nowrap; cursor: help; color: ${r.agoStale ? '#d99a2b' : 'var(--text-muted)'}; background: ${r.agoStale ? 'rgba(217,154,43,.12)' : 'var(--bg-elevated)'};">${r.ago}</span>` : null}
+                  ${(r.revived) ? html`
+                    <button onClick=${r.revActions.keep} style="height: 26px; padding: 0 12px; border-radius: 5px; border: 1px solid var(--border-medium); background: transparent; color: var(--text-secondary); font-size: 11px; font-weight: 600; cursor: pointer; white-space: nowrap;">같은 설비 — 유지</button>
+                    <button onClick=${r.revActions.reset} style="height: 26px; padding: 0 12px; border-radius: 5px; border: none; background: var(--primary-base); color: #fff; font-size: 11px; font-weight: 600; cursor: pointer; white-space: nowrap;">다른 설비 — 초기화</button>
+                  ` : html`
+                    <button onClick=${r.onLearn} style=${r.learnBtnStyle}>학습</button>
+                    ${(r.hasBl) ? html`<button onClick=${r.onDel} style="height: 26px; padding: 0 10px; border-radius: 5px; border: 1px solid var(--border-medium); background: transparent; color: var(--text-muted); font-size: 11px; cursor: pointer;">삭제</button>` : null}
+                  `}
+                </div>
+              `)}
+            </div>
+            <div style="background: var(--bg-secondary); border: 1px solid var(--border-default); border-radius: 8px; padding: 20px;">
+              <div style="font-size: 17px; font-weight: 600; color: var(--text-primary); margin-bottom: 4px;">대역 에너지 추세</div>
+              <div style="font-size: 12px; color: var(--text-muted); line-height: 1.7;">전체 RMS로는 안 보이는 변화를 잡습니다 — 베어링 결함이 커져도 전체는 거의 안 움직이지만 해당 대역만 보면 몇 배로 뜁니다.</div>
+
+              ${/* 구획은 소제목 + 윗선으로 나눈다 — 다른 카드가 전부 그 방식이라 상자를 겹치면 혼자 튄다.
+                   추출(값을 만드는 일) · 학습(기준을 잡는 일) · 채널 상태 순. */ ''}
+              <div style="display: flex; align-items: center; gap: 10px; margin-top: 16px;">
+                <span style="font-size: 13px; font-weight: 600; color: var(--text-primary);">대역 추출</span>
+                <div style="margin-left: auto;"><div style=${bandToggleStyle} onClick=${onBandToggle}><div style=${bandKnobStyle}></div></div></div>
+              </div>
+              <div style="display: flex; align-items: center; gap: 10px; margin-top: 10px;">
+                <label data-tip=${helpTip['대역 추출 주기']} style="font-size: 12px; font-weight: 600; color: var(--text-tertiary); cursor: help; display: inline-flex; align-items: center; gap: 4px;">추출 주기<span class="codicon codicon-question" style="font-size: 10px; color: var(--text-muted);"></span></label>
+                <select value=${bandInterval} onChange=${onBandIvPickDirect} style="height: 30px; padding: 0 10px; border-radius: 6px; border: 1px solid var(--border-medium); background: var(--bg-elevated); color: var(--text-primary); font-size: 12px;">${(bandIvOptions || []).map((o) => html`<option value=${o.v}>${o.l}</option>`)}</select>
+                <span style="font-size: 11px; color: var(--text-muted); line-height: 1.6;">주기가 짧을수록 표본이 빨리 쌓입니다</span>
+              </div>
+
+              <div style="display: flex; align-items: center; gap: 10px; margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--border-light);"><span style="font-size: 13px; font-weight: 600; color: var(--text-primary);">정상 기준 학습</span></div>
+              <div style="font-size: 11px; color: var(--text-muted); line-height: 1.7; margin-top: 8px;">정상 운전이 확실할 때 학습하십시오 — 결함이 진행 중이면 그 결함이 정상 기준이 됩니다.</div>
+              <div style="display: flex; align-items: center; gap: 10px; margin-top: 12px;">
+                <label data-tip=${helpTip['대역 학습 기간']} style="font-size: 12px; font-weight: 600; color: var(--text-tertiary); cursor: help; display: inline-flex; align-items: center; gap: 4px;">대역 학습 기간<span class="codicon codicon-question" style="font-size: 10px; color: var(--text-muted);"></span></label>
+                <select value=${bandWin} onChange=${onBandWin} style="height: 30px; padding: 0 10px; border-radius: 6px; border: 1px solid var(--border-medium); background: var(--bg-elevated); color: var(--text-primary); font-size: 12px;">${(bandWinOptions || []).map((o) => html`<option value=${o.v}>${o.l}</option>`)}</select>
+                <span style="font-size: 11px; color: ${bandSampleWarn ? 'var(--warning)' : 'var(--text-muted)'}; line-height: 1.6;">${bandSampleText}</span>
+              </div>
+              <div style="display: flex; align-items: center; gap: 10px; margin-top: 10px;">
+                <span data-tip=${bandFillDesc} style="font-size: 12px; font-weight: 600; color: var(--text-tertiary); cursor: help;">과거 데이터 채우기</span>
+                ${(bandFill) ? html`<button onClick=${onBandFillStop} style="height: 28px; padding: 0 12px; border-radius: 6px; border: 1px solid var(--danger-border); background: transparent; color: var(--danger-text); font-size: 11px; font-weight: 600; cursor: pointer;">중지</button>`
+                  : html`<button onClick=${onBandFill} disabled=${!bandOn} style=${bandFillBtnStyle}>채우기</button>`}
+                <span style="font-size: 11px; color: var(--text-muted); line-height: 1.6;">${bandFillShort}</span>
+                ${(bandFillSkipTip) ? html`<span data-tip=${bandFillSkipTip} style="font-size: 10px; font-weight: 600; padding: 2px 7px; border-radius: 4px; cursor: help; color: #d99a2b; background: rgba(217,154,43,.12); white-space: nowrap;">대상 ${bandFillTargets}</span>` : null}
+              </div>
+              ${(bandFill) ? html`
+                <div style="margin-top: 10px;">
+                  <div style="height: 6px; border-radius: 3px; background: var(--bg-elevated); overflow: hidden;"><div style=${bandFillBarStyle}></div></div>
+                  <div style="display: flex; gap: 10px; margin-top: 6px; font-size: 11px; font-family: var(--font-mono); color: var(--text-muted);">
+                    <span>${bandFill.done} / ${bandFill.total}</span>
+                    <span>남은 시간 약 ${bandFillEta}</span>
+                    <span style="margin-left: auto; color: ${bandFill.learnable ? 'var(--ok-text)' : 'var(--text-muted)'}; font-weight: 600;">${bandFill.learnable ? '학습 가능 ✓' : '학습 최소 표본 미달'}</span>
+                  </div>
+                </div>` : null}
+
+              <div style="display: flex; align-items: center; gap: 10px; margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--border-light);">
+                <span style="font-size: 13px; font-weight: 600; color: var(--text-primary);">채널별 학습 상태</span>
+                <span style="font-size: 11px; color: var(--text-muted);">학습됨 ${bandLearnedN}/${bandTotalN}</span>
+                <button onClick=${onBandLearnAll} style="margin-left: auto; height: 28px; padding: 0 12px; border-radius: 6px; border: 1px solid var(--border-medium); background: var(--bg-elevated); color: var(--text-secondary); font-size: 11px; font-weight: 600; cursor: pointer;">전체 학습</button>
+              </div>
+              ${(bandEmpty) ? html`<div style="font-size: 12px; color: var(--text-muted); padding: 6px 0;">선택된 데이터 소스가 없습니다.</div>` : null}
+              ${(bandRows || []).map((r) => html`
+                <div style="display: flex; align-items: center; gap: 12px; padding: 8px 4px; border-bottom: 1px solid var(--border-light);">
+                  <span style="font-size: 12px; color: var(--text-secondary); min-width: 150px;">${r.label}</span>
+                  ${(r.fill) ? html`<span data-tip=${r.fill.tip} style=${r.fill.style}>${r.fill.text}</span>` : null}
+                  <span data-tip=${r.tip || ''} style="font-size: 11px; font-family: var(--font-mono); color: ${r.color}; flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;${r.tip ? ' cursor: help;' : ''}">${r.statusText}</span>
+                  ${(r.ago) ? html`<span data-tip="이 기준을 학습한 시점입니다. 설비 정비나 운전 조건 변경 뒤의 기준은 정상을 대표하지 않으니 다시 학습하십시오." style="font-size: 10px; font-weight: 600; padding: 2px 7px; border-radius: 4px; white-space: nowrap; cursor: help; color: ${r.agoStale ? '#d99a2b' : 'var(--text-muted)'}; background: ${r.agoStale ? 'rgba(217,154,43,.12)' : 'var(--bg-elevated)'};">${r.ago}</span>` : null}
                   <button onClick=${r.onLearn} style=${r.learnBtnStyle}>학습</button>
-                  ${(r.hasBl) ? html`<button onClick=${r.onDel} style="height: 26px; padding: 0 10px; border-radius: 5px; border: 1px solid var(--border-medium); background: transparent; color: var(--text-muted); font-size: 11px; cursor: pointer;">삭제</button>` : null}
+                  ${(r.hasBl) ? html`<button onClick=${r.onDel} title="대역 베이스라인 삭제" style="height: 26px; width: 26px; border-radius: 5px; border: 1px solid var(--border-medium); background: transparent; color: var(--text-muted); cursor: pointer; flex-shrink: 0;"><span class="codicon codicon-trash" style="font-size: 12px;"></span></button>` : null}
                 </div>
               `)}
             </div>
@@ -790,14 +922,24 @@ export function view(v) {
                     </button>
                   `)}
                 </div>
-                ${(serverMon) ? html`<div style="font-size: 11px; color: var(--text-muted); margin-top: 10px; padding: 9px 11px; background: var(--bg-elevated); border: 1px solid var(--border-light); border-radius: 6px; line-height: 1.5;">저장하면 Neo 타이머가 <b style="color: var(--text-secondary);">평가 주기</b>마다 선택 태그를 판정합니다. 앱을 닫아도 이벤트가 쌓입니다. 이 모드에서는 앱 화면은 표시만 하고 판정은 서버가 담당합니다.</div>` : null}
+                ${(serverMon) ? html`<div style="font-size: 11px; color: var(--text-muted); margin-top: 8px; line-height: 1.6;">저장하면 Neo 타이머가 <b style="color: var(--text-secondary);">평가 주기</b>마다 선택 태그를 판정합니다. 앱을 닫아도 이벤트가 쌓이며, 이 모드에서 앱 화면은 표시만 하고 판정은 서버가 담당합니다.</div>` : null}
               </div>
-              <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 18px; margin-top: 18px;">
-                <div><label style="display: block; font-size: 12px; font-weight: 600; color: var(--text-tertiary); margin-bottom: 7px;">평가 주기</label><select value=${monitorInterval} onChange=${onMonitorInterval} style="height: 34px; width: 100%; padding: 0 10px; border-radius: 6px; border: 1px solid var(--border-medium); background: var(--bg-elevated); color: var(--text-primary); font-size: 13px;"><option value="10s">10초</option><option value="30s">30초</option><option value="1m">1분</option><option value="10m">10분</option></select></div>
-                <div><label style="display: block; font-size: 12px; font-weight: 600; color: var(--text-tertiary); margin-bottom: 7px;">평가 윈도우</label><select value=${evalWindow} onChange=${onEvalWindow} style="height: 34px; width: 100%; padding: 0 10px; border-radius: 6px; border: 1px solid var(--border-medium); background: var(--bg-elevated); color: var(--text-primary); font-size: 13px;">${(evalWindowOptions || []).map((o) => html`<option value=${o.v}>${o.l}</option>`)}</select></div>
-                <div><label style="display: block; font-size: 12px; font-weight: 600; color: var(--text-tertiary); margin-bottom: 7px;">집계 방식</label><select value=${evalAgg} onChange=${onEvalAgg} style="height: 34px; width: 100%; padding: 0 10px; border-radius: 6px; border: 1px solid var(--border-medium); background: var(--bg-elevated); color: var(--text-primary); font-size: 13px;">${(evalAggOptions || []).map((o) => html`<option value=${o.v}>${o.l}</option>`)}</select></div>
+              ${/* 두 값의 관계가 라벨만으로는 안 드러나서(둘 다 시간값) 문장 안에 넣는다.
+                   부하·경고도 같은 상자에 담아 왼쪽선을 맞춘다. */ ''}
+              <div style="margin-top: 18px; padding: 14px 16px; border-radius: 8px; background: var(--bg-secondary);">
+                <div style="display: flex; align-items: center; flex-wrap: wrap; gap: 8px;">
+                  <span style="font-size: 13px; color: var(--text-secondary);">직전</span>
+                  <select value=${evalWindowSel} onChange=${onEvalWindow} style="height: 32px; padding: 0 8px; border-radius: 6px; border: 1px solid var(--border-medium); background: var(--bg-elevated); color: var(--text-primary); font-size: 13px; font-weight: 600;">${(evalWindowOptions || []).map((o) => html`<option value=${o.v} disabled=${o.disabled}>${o.l}${o.disabled ? ' (주기보다 짧음)' : ''}</option>`)}</select>
+                  ${(evalWinCustom) ? html`<input type="number" min="1" step="1" value=${evalWinCustomMin} onInput=${onEvalWinMin} style="height: 32px; width: 72px; padding: 0 8px; border-radius: 6px; border: 1px solid var(--border-medium); background: var(--bg-elevated); color: var(--text-primary); font-size: 13px; font-weight: 600; font-family: var(--font-mono);" /><span style="font-size: 13px; color: var(--text-secondary);">분</span>` : null}
+                  <span style="font-size: 13px; color: var(--text-secondary);">구간의 데이터를</span>
+                  <select value=${monitorInterval} onChange=${onMonitorInterval} style="height: 32px; padding: 0 8px; border-radius: 6px; border: 1px solid var(--border-medium); background: var(--bg-elevated); color: var(--text-primary); font-size: 13px; font-weight: 600;"><option value="1s">1초</option><option value="3s">3초</option><option value="5s">5초</option><option value="10s">10초</option><option value="30s">30초</option><option value="1m">1분</option></select>
+                  <span style="font-size: 13px; color: var(--text-secondary);">마다 판정</span>
+                  <span data-tip=${helpTip['RMS 구간']} class="codicon codicon-question" style="font-size: 11px; color: var(--text-muted); cursor: help;"></span>
+                </div>
+                ${(evalLoadWarn) ? html`<div style="font-size: 11px; color: var(--warning); margin-top: 10px; font-weight: 600;">${evalLoadText}</div>` : null}
+                ${(evalWinBad) ? html`<div style="font-size: 11px; color: var(--warning); margin-top: 8px; font-weight: 600;">RMS 구간이 판정 주기보다 짧습니다 — 그 사이 데이터가 판정에 들어가지 않습니다.</div>` : null}
               </div>
-              <div style="font-size: 11px; color: var(--text-muted); margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--border-light);">지표: <b style="color: var(--text-secondary);">RMS (속도)</b> · 위 <b style="color: var(--text-secondary);">평가 윈도우 + 집계</b> 정의가 대시보드 '현재 심각도'와 알람 판정에 동일하게 적용됩니다.</div>
+              <div style="font-size: 11px; color: var(--text-muted); margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--border-light); line-height: 1.7;">구간이 길면 짧은 진동이 하나의 상태로 합쳐집니다. 대시보드 등급도 같은 값을 씁니다.</div>
             </div>
             <div style="background: var(--bg-secondary); border: 1px solid var(--border-default); border-radius: 8px; padding: 20px; margin-top: 16px;">
               <div style="font-size: 17px; font-weight: 600; color: var(--text-primary); margin-bottom: 4px;">알람 동작</div>
@@ -945,6 +1087,37 @@ export function view(v) {
             <button onClick=${onCloseRv} title="닫기" style="width: 30px; height: 30px; border-radius: 5px; border: 1px solid var(--border-default); background: transparent; color: var(--text-muted); cursor: pointer; flex-shrink: 0;"><span class="codicon codicon-close" style="font-size: 14px;"></span></button>
           </div>
           <iframe src=${rvUrl} style="flex: 1 1 0; width: 100%; border: none; background: #1e1e1e;" title="리포트 미리보기"></iframe>
+        </div>
+      </div>
+    ` : null}
+
+    ${/* 추출 주기 변경 — 이전 구간과 밀도가 갈리므로 무슨 일이 생기는지 먼저 보이고 처리 방법을 고르게 한다 */ ''}
+    ${(bandIvOpen) ? html`
+      <div style="position: fixed; inset: 0; z-index: 200; background: var(--overlay-scrim); display: flex; align-items: center; justify-content: center; padding: 24px;">
+        <div style="width: 480px; max-height: 100%; overflow: auto; background: var(--bg-elevated); border: 1px solid var(--border-default); border-radius: 10px; padding: 22px; box-shadow: 0 8px 40px rgba(0,0,0,.5);">
+          <div style="font-size: 15px; font-weight: 600; color: var(--text-primary); margin-bottom: 14px;">대역 추출 주기 변경</div>
+          <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 14px;">
+            <span style="font-size: 13px; font-family: var(--font-mono); color: var(--text-muted);">${bandIntervalKo}</span>
+            <span class="codicon codicon-arrow-right" style="font-size: 12px; color: var(--text-muted);"></span>
+            <select value=${bandIvNext} onChange=${onBandIvPick} style="height: 32px; padding: 0 10px; border-radius: 6px; border: 1px solid var(--border-medium); background: var(--bg-elevated); color: var(--text-primary); font-size: 13px;"><option value="1m">1분</option><option value="5m">5분</option><option value="10m">10분</option><option value="30m">30분</option><option value="1h">1시간</option></select>
+          </div>
+          <div style="font-size: 12px; color: var(--text-tertiary); line-height: 1.9; padding: 12px 14px; border-radius: 7px; background: var(--bg-secondary); margin-bottom: 16px;">
+            ${(bandIvFacts || []).map((f) => html`<div style="display: flex; gap: 10px;"><span style="color: var(--text-muted); min-width: 118px;">${f.k}</span><span style="color: ${f.warn ? 'var(--warning)' : 'var(--text-secondary)'}; font-weight: ${f.warn ? '600' : '500'};">${f.v}</span></div>`)}
+          </div>
+          <div style="font-size: 12px; font-weight: 600; color: var(--text-tertiary); margin-bottom: 8px;">이전 구간 처리</div>
+          ${(bandIvChoices || []).map((c) => html`
+            <label style=${c.style}>
+              <input type="radio" name="bandivact" checked=${c.on} onChange=${c.onPick} style="margin-top: 3px;" />
+              <span>
+                <span style="display: block; font-size: 13px; color: var(--text-primary); font-weight: 500;">${c.label}</span>
+                <span style="display: block; font-size: 11px; color: var(--text-muted); line-height: 1.6; margin-top: 2px;">${c.desc}</span>
+              </span>
+            </label>
+          `)}
+          <div style="display: flex; gap: 8px; justify-content: flex-end; margin-top: 18px;">
+            <button onClick=${onBandIvCancel} style="height: 34px; padding: 0 14px; border-radius: 6px; border: 1px solid var(--border-default); background: transparent; color: var(--text-secondary); font-size: 13px; cursor: pointer;">취소</button>
+            <button onClick=${onBandIvApply} disabled=${bandIvSame} style=${bandIvApplyStyle}>적용</button>
+          </div>
         </div>
       </div>
     ` : null}

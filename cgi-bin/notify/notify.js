@@ -46,15 +46,15 @@
 
   // 이 이벤트를 이 채널로 보낼 것인가 — 앱·서버 공통 규칙(서버 TQL도 이 소스를 임베드).
   //  cfg: { channels:{webhook:{on,to}}, routes:{주의|위험|심각: {webhook:bool, timing}} }
-  //  timing '무시'면 미발송. recovery(정상 복귀)는 어느 심각도든 그 채널로 라우팅돼 있으면 발송
-  //  — 알람을 받았으면 해제도 알아야 하므로.
+  //  timing '무시'면 미발송. 복귀 계열(recovery·bandrec)은 어느 심각도든 그 채널로 라우팅돼 있으면 발송
+  //  — 알람을 받았으면 해제도 알아야 하므로. 복귀는 등급이 '양호'라 라우팅 표에 행이 없다.
   function shouldNotify(gradeKo, etype, ch, cfg) {
     cfg = cfg || {};
     var c = (cfg.channels || {})[ch];
     if (!c || !c.on || !c.to) return false;
     var routes = cfg.routes || {};
     var routed = function (k) { var r = routes[k]; return !!(r && r[ch] && r.timing !== '무시'); };
-    if (etype === 'recovery') return routed('주의') || routed('위험') || routed('심각');
+    if (etype === 'recovery' || etype === 'bandrec') return routed('주의') || routed('위험') || routed('심각');
     return routed(gradeKo);
   }
 

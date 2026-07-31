@@ -45,15 +45,128 @@
     ".xline{position:absolute;top:14px;bottom:34px;width:1px;background:rgba(0,117,226,.5);display:none;pointer-events:none}",
     ".legend{display:flex;flex-wrap:wrap;gap:8px 18px;margin-top:10px;font-size:12px;color:var(--text-tertiary)}.legend span{display:inline-flex;align-items:center;gap:7px}.sw{width:14px;height:2px;display:inline-block}",
     ".sev-box{border:1px solid var(--border-faint);border-radius:10px;padding:18px 20px 12px;margin-bottom:14px}",
+    ".summary-box{background:var(--bg-panel);border:1px solid var(--border-default);border-radius:var(--radius-md);padding:20px 24px 18px;margin-bottom:24px}",
+    "body.view-sum #detail{display:none}",
+    "body.view-full .summary-box{display:none}",
+    "@media print{.summary-box{display:block !important}.sum-more{display:none}}",
+    ".view-sw{display:inline-flex;border:1px solid var(--border-default);border-radius:var(--radius-sm);overflow:hidden}",
+    ".view-btn{padding:0 12px;height:34px;font-size:12px;font-weight:600;color:var(--text-tertiary);background:var(--bg-input);border:none;cursor:pointer}",
+    ".view-btn.on{background:var(--primary);color:#fff}",
+    ".view-btn+.view-btn{border-left:1px solid var(--border-default)}",
+    ".sum-more{margin-top:14px;padding-top:12px;border-top:1px solid var(--border-faint);font-size:11.5px;color:var(--text-muted)}",
+    "@media print{#detail{display:block !important}.view-sw{display:none}}",
+    ".sum-hd{display:flex;align-items:baseline;gap:10px;margin-bottom:14px;flex-wrap:wrap}",
+    ".sum-eyebrow{font-size:11px;font-weight:700;letter-spacing:1.2px;text-transform:uppercase;color:var(--primary-hover)}",
+    ".sum-sub{font-size:11px;color:var(--text-muted)}",
+    ".sum-alert{border-radius:8px;padding:11px 14px;margin-bottom:10px;font-size:12.5px;line-height:1.6}",
+    ".sum-alert .t{font-weight:700;margin-bottom:3px}.sum-alert .d{color:var(--text-secondary);font-size:12px}",
+    ".sum-alert.red{background:rgba(229,72,77,.08);border:1px solid rgba(229,72,77,.45)}.sum-alert.red .t{color:#e5484d}",
+    ".sum-alert.amber{background:rgba(199,125,10,.09);border:1px solid rgba(199,125,10,.4)}.sum-alert.amber .t{color:#c77d0a}",
+    ".sum-alert.ok{background:rgba(58,167,109,.08);border:1px solid rgba(58,167,109,.35)}.sum-alert.ok .t{color:#3aa76d}",
+    ".sum-sec{margin-top:12px}.sum-t{font-size:12px;font-weight:700;color:var(--text-primary);margin-bottom:5px}",
+    ".sum-t .mut{font-weight:400;color:var(--text-muted)}.amber{color:#c77d0a}",
+    ".sum-tbl{width:100%;font-size:12.5px}.sum-tbl td{padding:5px 8px;border-bottom:1px solid var(--border-faint);vertical-align:top}",
+    ".sum-tbl .k{width:150px;color:var(--text-secondary)}.sum-tbl .v{width:200px;color:var(--text-primary)}",
+    ".sum-tbl .n{color:var(--text-muted);font-size:11.5px;line-height:1.5}",
+    ".sum-ol{margin:0 0 0 18px;font-size:12.5px;color:var(--text-secondary);line-height:1.75}",
+    ".sum-lines{font-size:12px;color:var(--text-muted);line-height:1.7}.sum-lines b{color:var(--text-secondary)}",
+    ".act-card{display:flex;align-items:center;gap:10px;margin-top:12px;padding:12px 14px;border-radius:8px;font-size:13px;font-weight:700;flex-wrap:wrap}",
+    ".act-card .ic{font-size:16px}.act-card .nt{font-weight:400;font-size:11.5px;color:var(--text-muted)}",
+    ".act-card.ok{background:rgba(58,167,109,.10);border:1px solid rgba(58,167,109,.4);color:#3aa76d}",
+    ".act-card.watch{background:rgba(217,154,43,.10);border:1px solid rgba(217,154,43,.4);color:#d99a2b}",
+    ".act-card.plan{background:rgba(224,123,57,.10);border:1px solid rgba(224,123,57,.45);color:#e07b39}",
+    ".act-card.urgent{background:rgba(229,72,77,.10);border:1px solid rgba(229,72,77,.45);color:#e5484d}",
+    ".sum-tbl .rk{display:inline-block;padding:0 6px;border-radius:3px;font-size:10px;font-weight:700;background:var(--primary);color:#fff;vertical-align:middle}",
+    ".sum-tbl .lv{font-family:inherit;font-size:11px;color:var(--text-tertiary)}",
+    ".sum-div{margin:16px 0 4px;padding-top:12px;border-top:1px dashed var(--border-default);font-size:11px;color:var(--text-muted)}",
+    ".sum-alert{position:relative;padding-left:18px}.sum-alert:before{content:'';position:absolute;left:7px;top:12px;bottom:12px;width:4px;border-radius:2px}",
+    ".sum-alert.red:before{background:#e5484d}.sum-alert.amber:before{background:#c77d0a}.sum-alert.ok:before{background:#3aa76d}",
+    ".sum-alert .t{font-size:15px;letter-spacing:-.2px;display:flex;align-items:center;gap:8px}",
+    ".sum-alert .t .dot{width:7px;height:7px;border-radius:50%;background:currentColor;flex-shrink:0}",
+    ".sum-alert .t2{font-size:13px;font-weight:700;color:var(--text-primary);margin-bottom:3px}",
+    ".sum-alert .al-div{height:1px;background:var(--border-faint);margin:12px 0}",
+    ".sum-alert.plain{background:transparent;border:none;padding:0}.sum-alert.plain:before{display:none}",
+    ".act{margin-top:12px;padding:13px 15px;border-radius:8px;border:1px solid var(--border-default);background:var(--bg-elevated)}",
+    ".act .act-h{display:flex;align-items:center;gap:9px;font-size:15px;font-weight:700;letter-spacing:-.2px}",
+    ".act .act-ic{font-size:17px;line-height:1}",
+    ".act .act-b{margin-top:5px;font-size:12.5px;color:var(--text-secondary);line-height:1.6}",
+    ".act .act-x{margin-top:7px;font-size:11.5px;color:var(--text-muted);font-family:'D2Coding',monospace}",
+    ".act .act-a{margin-top:7px;padding-top:7px;border-top:1px solid var(--border-faint);font-size:11.5px;color:var(--text-muted)}",
+    ".act.hold{border-style:dashed;border-color:var(--border-medium)}.act.hold .act-h{color:var(--text-primary)}",
+    ".act.ok{border-color:rgba(58,167,109,.45);background:rgba(58,167,109,.07)}.act.ok .act-h{color:#3aa76d}",
+    ".act.watch{border-color:rgba(217,154,43,.45);background:rgba(217,154,43,.07)}.act.watch .act-h{color:#d99a2b}",
+    ".act.plan{border-color:rgba(224,123,57,.45);background:rgba(224,123,57,.07)}.act.plan .act-h{color:#e07b39}",
+    ".act.urgent{border-color:rgba(229,72,77,.45);background:rgba(229,72,77,.07)}.act.urgent .act-h{color:#e5484d}",
+    ".sum-tbl .k-sub{font-size:10.5px;font-weight:400;color:var(--text-muted);margin-top:1px}",
+    ".judge-note{margin:2px 0 8px;padding:7px 11px;border-radius:6px;background:var(--bg-input);font-size:12px;color:var(--text-secondary);line-height:1.55}",
+    ".judge-note b{color:var(--text-primary)}.judge-note .mut{color:var(--text-muted);font-weight:400}",
+    ".sum-tbl .mut{color:var(--text-tertiary)}",
+    ".sum-tbl .tag{display:inline-block;margin-left:4px;font-size:10px;font-weight:700;color:var(--text-muted);background:var(--bg-input);border-radius:3px;padding:0 5px;line-height:16px}",
+    ".sum-t .mut{font-weight:400;color:var(--text-muted)}",
+    ".sum-alert .d+.t2{margin-top:0}",
+    ".sum-tbl tr.top td{background:rgba(0,117,226,.06)}.sum-tbl tr.top td:first-child{box-shadow:inset 3px 0 0 var(--primary)}",
+    ".sum-more .lnk{color:var(--primary-hover);text-decoration:none}.sum-more .lnk:hover{text-decoration:underline}",
+    ".lim-row{display:flex;gap:10px;align-items:baseline;font-size:12px;margin-bottom:5px}",
+    ".lim-row .lk{width:104px;flex-shrink:0;color:var(--text-secondary);font-weight:500}",
+    ".lim-box{margin-top:2px}",
+    ".lim-box .nb-t{font-size:12.5px;font-weight:700;color:var(--text-primary);margin:11px 0 4px}",
+    ".lim-box .nb-t:first-child{margin-top:0}",
+    ".lim-box .nb-s{font-weight:400;font-size:11.5px;color:var(--text-muted)}",
+    ".lim-box .nb-r{margin-left:12px;font-size:12px;color:var(--text-muted);line-height:1.7}",
+    ".lim-box .lc{display:inline-block;margin-left:6px;font-size:10px;font-weight:700;color:var(--text-muted);background:var(--bg-input);border-radius:3px;padding:0 5px;line-height:16px;vertical-align:1px}",
+    ".pips{display:inline-flex;gap:2px;vertical-align:middle;margin-right:6px}",
+    ".pips i{width:8px;height:8px;border-radius:2px;display:inline-block;background:var(--border-medium)}",
+    ".pips i.on{background:#d99a2b}.pips i.hi{background:#e07b39}",
+    ".cand-sub{font-size:11px;font-weight:400;color:var(--text-muted);margin-top:1px}",
+    ".navbar{position:sticky;top:0;z-index:30;display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin:0 0 18px;padding:10px 12px;background:var(--bg-panel);border:1px solid var(--border-default);border-radius:var(--radius-md);box-shadow:0 4px 14px rgba(0,0,0,.28)}",
+    ".theme-light .navbar{box-shadow:0 4px 14px rgba(0,0,0,.08)}",
+    ".navbar a.on{background:var(--primary);color:#fff;border-color:var(--primary)}",
+    ".navbar .nl{font-size:10px;font-weight:600;letter-spacing:1px;text-transform:uppercase;color:var(--text-muted);margin-right:2px}",
+    ".navbar a{padding:0 10px;height:26px;line-height:24px;font-size:12px;color:var(--text-tertiary);background:transparent;border:1px solid var(--border-default);border-radius:4px;text-decoration:none}",
+    ".navbar a:hover{background:var(--bg-hover);color:var(--text-primary);border-color:var(--border-medium)}",
+    ".zone-lab{font-size:12px;font-weight:600;color:var(--text-tertiary);margin-left:10px;vertical-align:middle}",
+    ".gate-box{padding:14px 16px;margin-bottom:10px;border-radius:8px;background:rgba(229,72,77,.07);border:1px solid rgba(229,72,77,.42);font-size:12px;line-height:1.6}",
+    ".gate-box.amber{background:rgba(199,125,10,.09);border-color:rgba(199,125,10,.4)}",
+    ".gate-box .gb-t{font-size:13.5px;font-weight:700;color:#e5484d;margin-bottom:8px}.gate-box.amber .gb-t{color:#c77d0a}",
+    ".gate-box .gb-i{margin:0 0 7px 4px}.gate-box .gb-il{font-weight:600;color:var(--text-primary);font-size:12.5px}",
+    ".gate-box .gb-id{margin-left:12px;color:var(--text-muted)}",
+    ".gate-box .gb-d{margin-top:8px;color:var(--text-secondary)}",
+    ".neg-box{margin-top:14px;padding:14px 16px;border-radius:8px;background:var(--bg-elevated);border:1px solid var(--border-faint);font-size:12px;line-height:1.65}",
+    ".neg-box .nb-t{font-weight:700;color:var(--text-secondary);margin:10px 0 3px}.neg-box .nb-t:first-child{margin-top:0}",
+    ".neg-box .nb-s{font-weight:400;color:var(--text-muted)}",
+    ".neg-box .nb-r{margin-left:12px;color:var(--text-muted)}",
+    ".unit-fx{display:inline-block;width:46px;text-align:left;color:var(--text-muted)}",
+    "@media print{.navbar{display:none}}",
+    "details.adv{margin-bottom:24px}",
+    "details.adv>summary{cursor:pointer;font-size:12.5px;color:var(--text-secondary);padding:10px 14px;background:var(--bg-elevated);border:1px solid var(--border-faint);border-radius:8px;list-style:none}",
+    "details.adv>summary::-webkit-details-marker{display:none}",
+    "details.adv[open]>summary{margin-bottom:14px}",
+    "@media print{details.adv[open]>summary,details.adv>summary{display:none}details.adv{display:block}}",
     ".gauge{display:flex;height:30px;border-radius:6px;overflow:hidden;border:1px solid var(--border-faint);margin-top:14px}.gauge .cell{flex:1 1 0;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:600}",
     ".gauge-lab{display:flex;margin-top:4px;font-size:11px;color:var(--text-muted);font-family:'D2Coding',monospace}.gauge-lab div{flex:1 1 0;text-align:center}",
     ".verdict{display:flex;align-items:baseline;gap:10px;margin-top:16px;padding-top:12px;border-top:1px solid var(--border-faint);flex-wrap:wrap}",
     "table{width:100%;border-collapse:collapse;font-size:14px}thead th{text-align:left;font-weight:600;color:var(--text-tertiary);font-size:13px;padding:12px 14px;border-bottom:1px solid var(--border-default);white-space:nowrap}",
     "tbody td{padding:12px 14px;border-bottom:1px solid var(--border-faint);color:var(--text-secondary)}tbody tr:last-child td{border-bottom:none}",
-    ".num{text-align:right;font-variant-numeric:tabular-nums;font-family:'D2Coding',monospace}",
+    ".num{text-align:right;font-variant-numeric:tabular-nums;font-family:'D2Coding',monospace;white-space:nowrap}",
+    ".nw{white-space:nowrap}",
+    ".ind-band{margin-top:3px;font-family:'Pretendard',sans-serif;font-size:11.5px;color:var(--text-muted);white-space:nowrap;word-break:keep-all}",
+    "body{word-break:keep-all;overflow-wrap:break-word}",
     ".analysis-content p{margin-bottom:12px;line-height:1.7;color:var(--text-secondary);font-size:14px}",
+    ".analysis-content .op-h{font-size:13px;font-weight:700;color:var(--text-primary);margin:20px 0 7px;padding-bottom:5px;border-bottom:1px solid var(--border-faint);letter-spacing:.2px}",
+    ".analysis-content .op-h:first-child{margin-top:0}",
+    ".analysis-content .op-li{display:flex;gap:8px;margin:3px 0 3px 2px;line-height:1.65;font-size:13.5px;color:var(--text-secondary)}",
+    ".analysis-content .op-li .op-dot{color:var(--text-muted);flex-shrink:0}",
+    ".analysis-content .op-li strong{color:var(--text-primary);font-weight:600}",
+    ".analysis-content .op-arrow{margin:1px 0 8px 22px;padding-left:9px;border-left:1px solid var(--border-medium);color:var(--text-tertiary);font-size:12.5px;line-height:1.6}",
+    ".analysis-content .op-arrow strong{color:var(--text-secondary);font-weight:600}",
     ".rec-item{margin:10px 0 6px 8px;font-size:14px;color:var(--text-secondary)}.rec-item .no{font-weight:700;color:var(--primary-hover);margin-right:8px}",
     ".footer{margin-top:32px;padding-top:14px;border-top:1px solid var(--border-default);display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px;font-size:11px;color:var(--text-muted)}",
+    ".build-strip{display:flex;flex-wrap:wrap;gap:1px;margin-top:26px;background:var(--border-faint);border:1px solid var(--border-faint);border-radius:6px;overflow:hidden}",
+    ".build-strip .bs-i{flex:1 1 170px;background:var(--bg-panel);padding:11px 14px}",
+    ".build-strip .bs-i.narrow{flex:0 1 190px}",
+    ".build-strip .bs-k{font-size:9.5px;font-weight:600;letter-spacing:.6px;text-transform:uppercase;color:var(--text-muted)}",
+    ".build-strip .bs-v{margin-top:4px;font-size:13px;font-weight:600;color:var(--text-primary);font-family:'D2Coding',monospace;white-space:nowrap}",
+    ".build-strip .bs-s{margin-top:2px;font-size:11px;color:var(--text-muted);font-family:'D2Coding',monospace;white-space:nowrap}",
     ".group-hd{display:flex;align-items:center;gap:10px;margin:4px 0 14px;color:var(--text-primary)}.group-hd .hr{flex:1 1 0;height:1px;background:var(--border-faint)}",
     ".grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(460px,1fr));gap:24px;margin-bottom:24px}.grid2 .section{margin-bottom:0}",
     ".sev-cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px;margin-top:14px}",
@@ -62,7 +175,10 @@
     ".sev-card .badge2{display:inline-block;padding:1px 6px;border-radius:3px;font-size:9px;font-weight:700;letter-spacing:.3px;margin-left:4px;vertical-align:middle}",
     ".sev-card .val{font-size:26px;font-weight:700;letter-spacing:-.5px;margin-bottom:8px;font-variant-numeric:tabular-nums;color:var(--text-primary)}.sev-card .val .u{font-size:12px;font-weight:500;color:var(--text-muted);margin-left:2px}",
     ".sev-card .foot{display:flex;justify-content:space-between;font-size:11px;color:var(--text-muted)}",
-    ".stat-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:1px;background:var(--border-faint);border:1px solid var(--border-faint);border-radius:6px;overflow:hidden}",
+    // 항목 수(6)와 열 수가 안 맞으면 마지막 줄에 빈칸이 남는다 → auto-fit 대신 약수 열로 고정
+    ".stat-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:1px;background:var(--border-faint);border:1px solid var(--border-faint);border-radius:6px;overflow:hidden}",
+    "@media(min-width:1100px){.stat-grid{grid-template-columns:repeat(6,1fr)}}",
+    "@media(max-width:680px){.stat-grid{grid-template-columns:repeat(2,1fr)}}",
     ".stat-grid .cell{background:var(--bg-panel);padding:13px 16px}.stat-grid .cell .k{font-size:11px;color:var(--text-muted)}.stat-grid .cell .v{margin-top:5px;font-size:16px;font-weight:600;color:var(--text-primary);font-family:'D2Coding',monospace}",
   ].join('\n');
 
@@ -94,13 +210,23 @@
     " if(R.cep)fftc('cCep',null,{freqs:R.cep.freqs,mags:R.cep.mags,markers:R.cep.markers,res:1,height:200,hideMarkerLabels:true});",
     "}",
     "window.toggleTheme=function(){var r=document.documentElement;r.classList.toggle('theme-light');try{localStorage.setItem('neoVibeReportTheme',r.classList.contains('theme-light')?'light':'dark');}catch(e){}drawAll();};",
+    "function applyView(v){var b=document.body;b.classList.toggle('view-sum',v==='sum');b.classList.toggle('view-full',v!=='sum');",
+    " var bs=document.querySelectorAll('.view-btn');for(var i=0;i<bs.length;i++)bs[i].classList.toggle('on',bs[i].getAttribute('data-v')===v);",
+    " if(v!=='sum')setTimeout(drawAll,0);}",   // 숨김 해제 직후엔 캔버스 폭이 잡힌 뒤 그려야 한다
+    "window.setView=function(v){try{localStorage.setItem('neoVibeReportView',v);}catch(e){}applyView(v);};",
+    "var _v0='sum';try{_v0=localStorage.getItem('neoVibeReportView')||'sum';}catch(e){}applyView(_v0);",
     "var rt;window.addEventListener('resize',function(){clearTimeout(rt);rt=setTimeout(drawAll,80);});",
+    "var navA=[].slice.call(document.querySelectorAll('.navbar a'));",
+    "function syncNav(){var y=window.scrollY+120,cur=null;navA.forEach(function(a){var el=document.querySelector(a.getAttribute('href'));if(el&&el.getBoundingClientRect().top+window.scrollY<=y)cur=a;});navA.forEach(function(a){a.classList.toggle('on',a===cur);});}",
+    "var st;window.addEventListener('scroll',function(){clearTimeout(st);st=setTimeout(syncNav,60);});syncNav();",
+    "window.addEventListener('beforeprint',function(){var b=document.body;b.classList.remove('view-sum');b.classList.remove('view-full');drawAll();});",
+    "window.addEventListener('afterprint',function(){try{applyView(localStorage.getItem('neoVibeReportView')||'sum');}catch(e){applyView('sum');}});",
     "drawAll();",
     "})();",
   ].join('\n');
 
-  function sectionOpen(h, title, sub, hint) {
-    h.push('<div class="section"><div class="section-title"><span class="bar"></span> ' + esc(title)
+  function sectionOpen(h, title, sub, hint, id) {
+    h.push('<div class="section"' + (id ? ' id="' + id + '"' : '') + '><div class="section-title"><span class="bar"></span> ' + esc(title)
       + (sub ? ' <span style="font-weight:500;color:var(--text-muted);font-size:13px;">' + esc(sub) + '</span>' : '')
       + (hint ? ' <span class="nav-hint">' + hint + '</span>' : '')
       + '</div>');
@@ -130,6 +256,25 @@
   //      fftHint, waveDesc, envDesc, cepDesc }
   function buildReportHTML(p) {
     var d = p.data || {};
+    // 후보명 "본체(부제)" 분리 — 괄호 안 보조 설명은 작은 글씨로 내려 한 줄을 짧게 유지
+    var nameMain = function (f) { var i = f.indexOf('('); return i > 0 ? f.slice(0, i).trim() : f; };
+    var nameSub = function (f) { var m = f.match(/\(([^)]*)\)\s*$/); return m ? m[1].replace(/^[^—-]*[—-]\s*/, '') : ''; };
+    // 조치 카드 — "그래서 뭘 해야 하나"에 1초 안에 답하는 한 장. 해당하는 것만 크게.
+    // 게이트 카드는 A~D 팔레트를 쓰지 않는다(중립색) — 계측 상태를 기계 등급으로 오독하면 안 된다.
+    var actionCard = function (a) {
+      return '<div class="act ' + esc(a.cls || '') + '">'
+        + '<div class="act-h"><span class="act-ic">' + (a.icon || '') + '</span>' + esc(a.title || '') + '</div>'
+        + (a.body ? '<div class="act-b">' + esc(a.body) + '</div>' : '')
+        + (a.basis ? '<div class="act-x">근거 · ' + esc(a.basis) + '</div>' : '')
+        + (a.aside ? '<div class="act-a">' + esc(a.aside) + '</div>' : '')
+        + '</div>';
+    };
+    // ★ 대신 사각 pip — 별은 "평점"으로 읽혀 근거 강도가 등급처럼 오독된다
+    var pips = function (n) {
+      var o = '<span class="pips">';
+      for (var i = 0; i < 5; i++) o += '<i class="' + (i < n ? (n >= 4 ? 'hi' : 'on') : '') + '"></i>';
+      return o + '</span>';
+    };
     var h = [];
     h.push('<!DOCTYPE html><html lang="ko"><head><meta charset="UTF-8">');
     h.push('<meta http-equiv="Content-Security-Policy" content="default-src \'none\'; img-src data:; style-src \'unsafe-inline\'; script-src \'unsafe-inline\'">');
@@ -148,6 +293,7 @@
     h.push('<span class="meta"><span class="meta-k">문서번호</span><span class="meta-v mono">' + esc(p.docNo) + '</span></span>');
     h.push('</div></div><div class="hd-right">');
     if (p.logoDataURL) h.push('<img class="logo" src="' + p.logoDataURL + '" alt="MACHBASE NEO">');
+    h.push('<div class="view-sw"><button class="view-btn on" data-v="sum" onclick="setView(\'sum\')">요약</button><button class="view-btn" data-v="full" onclick="setView(\'full\')">전체</button></div>');
     h.push('<button class="theme-btn" onclick="toggleTheme()" title="라이트/다크 전환">');
     h.push('<svg class="ic-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path></svg>');
     h.push('<svg class="ic-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="5"></circle><line x1="12" y1="1" x2="12" y2="3"></line><line x1="12" y1="21" x2="12" y2="23"></line><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line><line x1="1" y1="12" x2="3" y2="12"></line><line x1="21" y1="12" x2="23" y2="12"></line><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line></svg>');
@@ -156,29 +302,165 @@
     // ── 조회 스펙 패널 ──
     h.push('<div class="spec-panel">');
     (p.specs || []).forEach(function (s) {
-      h.push('<div class="spec-col"><div class="spec-k">' + esc(s.k) + '</div><div class="spec-v">' + esc(s.v)
+      // 날짜·시각은 한 덩어리로 — "2025-" / "11-24 10:19"처럼 중간에서 끊기면 읽을 수 없다
+      var sv = esc(s.v).split(' ~ ').map(function (x) { return '<span class="nw">' + x + '</span>'; }).join(' ~ ');
+      h.push('<div class="spec-col"><div class="spec-k">' + esc(s.k) + '</div><div class="spec-v">' + sv
         + (s.unit ? '<span style="font-size:13px;font-weight:600;color:var(--text-tertiary);margin-left:3px;">' + esc(s.unit) + '</span>' : '') + '</div></div>');
     });
     h.push('</div>');
 
+    // ── 요약 모드 (30초 판독) ────────────────────────────────────────────────
+    // 8블록 최소 집합. 순서는 "상태 → 후보"이지 "후보 → 상태"가 아니다 — 평균이 양호한 기계에
+    // 결함명이 첫 줄로 오면 거짓 경보가 되고, 다음 진짜 경보가 무시된다.
+    // [5]측정 불가·[6]음성 소견·[7]미설명은 게이트와 무관하게 항상 인쇄한다
+    // (게이트가 만든 게 아니라 계측 구성·메타데이터가 만든 것이라 센서를 다시 붙여도 남는다).
+    // ⚠요약과 심각도 섹션이 함께 쓰므로 요약보다 앞에서 선언한다
+    //   (아래에서 var로 선언하면 호이스팅 탓에 요약에서는 undefined가 되어 ISO 행이 통째로 사라진다)
+    var isoH = d.iso; // {rms, gradeIdx, gradeKo, color, anaSec, blocks, spread, spreadWarn}
+    var sm = d.summary;
+    if (sm) {
+      h.push('<div class="summary-box">');
+      h.push('<div class="sum-hd"><span class="sum-eyebrow">요약</span><span class="sum-sub">30초 판독용 · 근거와 그래프는 아래 상세 분석에 있습니다</span></div>');
+
+      // [1] 최상위 상태 — 게이트·가속도 보류·조치를 한 박스에 묶는다.
+      //    셋은 별개 사건이 아니라 "계측을 못 믿는다"는 한 사건의 세 측면이다.
+      //    박스를 쪼개면 경고 개수만 늘어 정작 중요한 것이 묻힌다.
+      var alerts = [];
+      if (sm.gate) {
+        alerts.push({ t: '계측 검증 필요 — 결함 진단 보류', head: true, lines: [
+          esc(sm.gateReason),
+          'Crest 15 초과는 단발 스파이크(ESD·케이블·커넥터·마운트) 시그니처입니다. 시간영역 임펄스는 주파수영역으로 퍼지므로 <b>모든 스펙트럼 피크 진폭이 잠정</b>입니다.',
+        ] });
+      }
+      if (d.levelsOk === false) {
+        alerts.push({ t: '가속도 값 게재 보류', lines: ['에너지 중심 f_eff ' + (d.accelFeff / 1000).toFixed(1)
+          + ' kHz = Nyquist의 ' + Math.round(d.accelNyqFrac * 100) + '% — 안티에일리어싱 필터·센서 공진 확인 전까지 가속도 값을 쓰지 마십시오'] });
+      }
+
+      if (alerts.length) {
+        var cls0 = sm.gate ? 'red' : (isoH && isoH.gradeIdx >= 2 ? 'red' : isoH && isoH.gradeIdx === 1 ? 'amber' : 'ok');
+        h.push('<div class="sum-alert ' + cls0 + '">');
+        alerts.forEach(function (a, ai) {
+          if (ai) h.push('<div class="al-div"></div>');
+          h.push('<div class="' + (a.head ? 't' : 't2') + '">' + (a.head ? '<span class="dot"></span>' : '') + esc(a.t) + '</div>');
+          a.lines.forEach(function (ln) { h.push('<div class="d">' + ln + '</div>'); });
+        });
+        // 조치 카드 — 박스 안 마지막. 게이트가 조치의 전제이므로 게이트 줄 아래에 온다.
+        if (sm.action) h.push(actionCard(sm.action));
+        h.push('</div>');
+      } else {
+        if (sm.action) h.push('<div class="sum-alert plain">' + actionCard(sm.action) + '</div>');
+      }
+
+      // [2] 상태 — 규격 판정과 감시 등급은 다른 값이며 한 문장에 섞지 않는다
+      h.push('<div class="sum-sec"><div class="sum-t">' + (sm.gate ? '관측값 <span class="mut">— 게이트 적용 중 · 전부 잠정</span>' : '상태') + '</div>');
+      // 한 문서에 RMS가 여러 종류라 "주의"와 "위험"이 동시에 보인다 — 판정에 쓰는 값을 못박고 나머지를 참고로 내린다
+      if (isoH) h.push('<div class="judge-note">판정에 쓰는 값은 <b>ISO 대역제한 속도 RMS ' + esc(isoH.rms) + ' ' + esc(p.zonesUnit || 'mm/s') + '</b> 하나입니다'
+        + (sm.gate ? ' <span class="mut">— 단, 계측 게이트로 판정 보류</span>' : '') + '. 아래 나머지 값은 참고입니다.</div>');
+      h.push('<table class="sum-tbl"><tbody>');
+      if (isoH) {
+        // 게이트 중에는 "판정"이 아니라 관측값이다 — 라벨·색을 내리고 편향 방향(상한/하한)을 밝힌다.
+        // 값을 숨기지는 않는다: 8블록 평균한 대역제한 값이 이 리포트에서 아티팩트에 가장 강건한 숫자다.
+        h.push('<tr><td class="k">' + (sm.gate ? 'ISO 대역제한 속도 RMS<div class="k-sub">판정 보류</div>' : 'ISO 10816 판정') + '</td>'
+          + '<td class="v">' + (sm.gate
+            ? '<span class="mut">' + esc(isoH.gradeKo) + ' 수준</span> · ' + esc(isoH.rms) + ' ' + esc(p.zonesUnit || 'mm/s') + ' <span class="tag">잠정</span>'
+            : '<b style="color:' + esc(isoH.color) + ';">' + esc(isoH.gradeKo) + '</b> · ' + esc(isoH.rms) + ' ' + esc(p.zonesUnit || 'mm/s')) + '</td>'
+          + '<td class="n">10–1000 Hz 대역제한 · ' + (isoH.blocks || 1) + '블록 평균 · 총 ' + esc(isoH.anaSec) + '초'
+          + (sm.winNote ? '<br>' + esc(sm.winNote) : '')
+          + (sm.gate && sm.bias ? '<br><span class="amber">' + esc(sm.bias) + '</span>' : '')
+          + (isoH.spreadWarn ? '<br><span class="amber">블록간 변동 ×' + esc(isoH.spread) + ' — 정상상태 전제 미충족, 존 판정 잠정</span>' : '') + '</td></tr>');
+      }
+      if (d.mon) {
+        h.push('<tr><td class="k">실시간 감시<div class="k-sub">알람 기준</div></td><td class="v"><b style="color:' + esc(d.mon.color) + ';">' + esc(d.mon.gradeKo) + '</b> · ' + esc(d.mon.rms) + ' ' + esc(d.mon.unit || '') + '</td>'
+          + '<td class="n">' + esc(d.mon.basis || '') + (d.mon.src ? ' · 등급 결정: ' + esc(d.mon.src) : '')
+          + (d.mon.wide ? '<br><span class="mut">전대역 ' + esc(d.mon.wide) + ' ' + esc(d.mon.unit || '') + ' — 차이는 1 kHz 초과 성분</span>' : '') + (sm.gate ? '<br><span class="amber">\uD83D\uDFE1 게이트 적용 중 — 이 등급도 잠정</span>' : '') + '</td></tr>');
+      }
+      h.push('<tr><td class="k">회전수</td><td class="v">' + esc(sm.rpmTxt) + '</td><td class="n">차수는 실측 기준</td></tr>');
+      h.push('<tr><td class="k">관측 창</td><td class="v">' + esc(sm.obsTxt) + '</td><td class="n">이 창을 넘는 시간 스케일 주장 불가</td></tr>');
+      h.push('</tbody></table></div>');
+
+      if (p.actions && p.actions.length) {
+        h.push('<div class="sum-sec"><div class="sum-t">지금 할 일</div><ol class="sum-ol">');
+        p.actions.slice(0, 3).forEach(function (a) { h.push('<li>' + esc(a.txt) + '</li>'); });
+        h.push('</ol></div>');
+      }
+
+      // [4] 후보 — 게이트 중이면 제목에 상한을 밝힌다(★ 표시가 상한을 우회하지 않도록)
+      if (sm.cands && sm.cands.length) {
+        h.push('<div class="sum-sec"><div class="sum-t">' + (sm.gate ? '잠정 후보 <span class="amber">— 진단 보류 중 · 전역 상한 ' + sm.gateCap + '/100</span>' : '결함 후보') + '</div><table class="sum-tbl"><tbody>');
+        sm.cands.forEach(function (c, ci) {
+          var st = Math.max(0, Math.min(5, Math.round(c.s || 0)));
+          // 절대 점수만 보면 "40점이면 약한가?"로 읽힌다 — 상대 등급을 함께 준다
+          var lv = c.score == null ? '' : (c.score >= 70 ? '강함' : c.score >= 40 ? '중간' : c.score >= 20 ? '약함' : '근거 부족');
+          h.push('<tr class="' + (ci === 0 ? 'top' : '') + '"><td class="k">' + (ci === 0 ? '<span class="rk">1순위</span> ' : '') + esc(nameMain(c.f))
+            + (nameSub(c.f) ? '<div class="cand-sub">' + esc(nameSub(c.f)) + '</div>' : '') + '</td>'
+            + '<td class="v">' + pips(st) + '<span class="mono">' + (c.score == null ? '—' : c.score + '/100') + '</span>' + (lv ? ' <span class="lv">' + lv + '</span>' : '') + '</td>'
+            + '<td class="n">' + esc(c.why || '') + '</td></tr>');
+        });
+        h.push('</tbody></table></div>');
+      }
+
+      // 한계·반대 증거 — 2열(라벨|내용)은 무엇이 제목이고 어디까지가 그 내용인지 구분이 안 된다.
+      // 상세의 음성 소견 블록과 같은 구조로 통일: 제목 한 줄 + 그 아래 들여쓴 줄.
+      var _um = sm.unmeasurable || [], _ng = d.negatives || [], _ux = d.unexplained || [];
+      var limBlk = function (label, n, unit, sub, rows) {
+        h.push('<div class="nb-t">' + label + '<span class="lc">' + n + unit + '</span>'
+          + (sub ? ' <span class="nb-s">— ' + sub + '</span>' : '') + '</div>');
+        rows.forEach(function (r) { h.push('<div class="nb-r">' + r + '</div>'); });
+      };
+      if (_um.length || _ng.length || _ux.length) {
+        h.push('<div class="sum-div">판단의 한계 — 왜 확정하지 못했나</div>');
+        h.push('<div class="lim-box">');
+        if (_um.length) limBlk('이 측정으론 볼 수 없음', _um.length, '종', '원리상 판별 불가',
+          [esc(_um.map(function (u) { return u.f.replace(/\s*\([^)]*\)/, ''); }).join(' · ')), '위상·설비 제원 미입력']);
+        if (_ng.length) limBlk('확인했으나 미검출', _ng.length, '건', '반대 증거', _ng.map(function (n) { return esc(n); }));
+        if (_ux.length) limBlk('아직 설명 못 한 성분', _ux.length, '개', '사전으로 설명되지 않음',
+          [esc(_ux.join(' · ')), '구동 계통도(풀리비·기어비)·인접 기계 확인 시 대부분 해소']);
+        h.push('</div>');
+      }
+      h.push('<div class="sum-more">상세 근거·그래프·LLM 소견은 <a href="#" onclick="setView(\'full\');return false;" class="lnk">전체 보기</a>에서 · 인쇄·저장 시에는 항상 전체가 포함됩니다</div>');
+      h.push('</div>');
+    }
+    h.push('<div id="detail">');   // 요약 보기에서 숨겨지는 상세 영역(인쇄 시엔 항상 노출)
+    // 바로가기는 상세 상단에 — 요약은 짧게 유지하고, 긴 문서를 여는 쪽에 이동 수단을 둔다
+    h.push('<div class="navbar"><span class="nl">바로가기</span>'
+      + '<a href="#s-sev">심각도</a><a href="#s-trend">추세</a><a href="#s-spec">스펙트럼</a><a href="#s-evid">결함 근거</a>'
+      + (p.opinion ? '<a href="#s-llm">LLM 소견</a>' : '') + '<a href="#s-verdict">권고</a></div>');
+
     // ── 심각도 평가 ──
-    sectionOpen(h, '진동 심각도 평가', null, '<span class="mono">' + esc(p.sevMachine) + '</span>');
+    // 헤드라인은 ISO 10816 규격 정의(10–1000 Hz 대역제한 속도 RMS)로 판정 — 광대역 감시 RMS(알람용)와 분리.
+    // 감시 등급이 더 높아도 규격 판정은 방어 가능한 값이어야 정비팀 신뢰를 유지한다.
+    var hlKo = isoH ? isoH.gradeKo : p.gradeKo, hlColor = isoH ? isoH.color : p.gradeColor, hlIdx = isoH ? isoH.gradeIdx : p.gradeIdx;
+    sectionOpen(h, '진동 심각도 평가', null, '<span class="mono">' + esc(p.sevMachine) + '</span>', 's-sev');
     h.push('<div class="sev-box">');
-    h.push('<div style="font-size:11px;color:var(--text-muted);margin-bottom:3px;">종합 위험도 <span style="color:var(--text-tertiary);">· ISO 10816 최신 순간 RMS(1초 롤업) 존 기준 — 평균이 낮아도 순간·상승 추세로 등급이 오릅니다</span></div>');
-    h.push('<span style="font-size:38px;font-weight:800;line-height:1;letter-spacing:-.5px;color:' + esc(p.gradeColor) + '">' + esc(p.gradeKo) + '</span>');
+    h.push('<div style="font-size:11px;color:var(--text-muted);margin-bottom:3px;">' + (isoH
+      ? 'ISO 10816 판정 <span style="color:var(--text-tertiary);">· 10–1000 Hz 대역제한 속도 RMS ' + esc(isoH.rms) + ' ' + esc(p.zonesUnit || 'mm/s')
+        + (isoH.blocks ? ' · ' + isoH.blocks + '블록 에너지 평균' : '') + (isoH.anaSec ? ' · 총 ' + esc(isoH.anaSec) + '초' : '')
+        + (isoH.spread ? ' · 블록간 변동 ×' + esc(isoH.spread) : '') + ' — 규격 정의 물리량 기준</span>'
+        + (isoH.spreadWarn ? '<span style="margin-left:6px;color:#c77d0a;font-weight:600;">⚠정상상태 전제 미충족 — 존 판정 잠정</span>' : '')
+        + (d.parsevalOk === false ? '<span style="margin-left:6px;color:#e5484d;font-weight:700;">⚠대역 분해 검산 실패(' + esc(d.parsevalErr) + '%) — 해석 전 계측 확인 필요</span>' : '')
+      : '종합 위험도 <span style="color:var(--text-tertiary);">· 광대역 최신 순간 RMS(1초 롤업) 존 기준</span>') + '</div>');
+    h.push('<span style="font-size:38px;font-weight:800;line-height:1;letter-spacing:-.5px;color:' + esc(hlColor) + '">' + esc(hlKo) + '</span>');
     var Z = p.zones || ['-', '-', '-'];
     var zoneDefs = [
       { ko: '양호', range: '< ' + Z[0] }, { ko: '주의', range: Z[0] + '–' + Z[1] },
       { ko: '위험', range: Z[1] + '–' + Z[2] }, { ko: '심각', range: '> ' + Z[2] },
     ];
+    if (isoH) h.push('<span class="zone-lab">ISO 10816 Zone ' + ['A', 'B', 'C', 'D'][isoH.gradeIdx] + '</span>');
     h.push('<div class="gauge">');
     zoneDefs.forEach(function (zz, i) {
-      var act = i === p.gradeIdx;
+      var act = i === hlIdx;
       h.push('<div class="cell" style="' + (act ? 'background:' + STATUS_COLOR[zz.ko] + ';color:#fff;' : 'background:var(--bg-elevated);color:var(--text-muted);') + 'border-right:1px solid var(--border-faint);">' + zz.ko + '</div>');
     });
     h.push('</div><div class="gauge-lab">');
     zoneDefs.forEach(function (zz) { h.push('<div>' + esc(zz.range + (p.zonesUnit ? ' ' + p.zonesUnit : '')) + '</div>'); });
     h.push('</div>');
+    if (isoH && d.mon) h.push('<div style="margin-top:8px;font-size:12px;color:var(--text-secondary);">실시간 감시 등급(' + esc(d.mon.rms) + ' ' + esc(d.mon.unit || '') + '): <b style="color:' + esc(d.mon.color) + ';">' + esc(d.mon.gradeKo) + '</b> <span style="color:var(--text-muted);">— ' + esc(d.mon.basis || '') + '</span>'
+      + (d.gate ? '<div style="margin-top:3px;color:#c77d0a;">⚠계측 게이트 적용 중 — 이 등급도 잠정입니다'
+        + (d.hfFrac > 0.2 ? '. 분석 창(' + esc(d.anaSecTxt) + '초) 광대역 ' + esc(d.velBB) + ' ' + esc(d.mon.unit || '') + ' 기준으로 에너지의 '
+          + Math.round(d.hfFrac * 100) + '%가 게재 보류된 1 kHz 초과 대역이며, 그 대역을 제외하면 ' + esc(d.velExHigh) + ' ' + esc(d.mon.unit || '')
+          + (d.exHighSameZone === true ? '로 규격 판정과 같은 존입니다' : d.exHighSameZone === false ? '(' + esc(d.exHighZoneKo) + ' 존)입니다' : '입니다')
+          + ' — 감시값(1초 롤업)과는 산출 창이 다릅니다' : '') + '</div>' : '') + '</div>');
     h.push('<div class="verdict"><span style="font-weight:700;">' + esc(p.verdict) + '</span><span style="font-size:12px;color:var(--text-tertiary);">' + esc(p.verdictSub) + '</span></div>');
     h.push('</div>');
     h.push('<div class="sev-cards">');
@@ -187,13 +469,15 @@
       h.push('<div class="sev-card"><div class="lab">' + esc(c.label)
         + '<span class="badge2" style="color:' + bc + ';background:' + bc + '26;">' + esc(c.badgeKo) + '</span></div>'
         + '<div class="val">' + esc(c.value) + '<span class="u">' + esc(c.unit || '') + '</span></div>'
-        + '<div class="foot"><span>' + esc(c.thr) + '</span><span style="color:' + (c.over ? '#e5484d' : '#3aa76d') + ';font-weight:600;">' + esc(c.arrow + ' ' + c.delta) + '</span></div></div>');
+        + '<div class="foot"><span>' + esc(c.thr) + '</span><span style="color:' + (c.over ? '#e5484d' : '#3aa76d') + ';font-weight:600;">' + esc(c.arrow + ' ' + c.delta) + '</span></div>'
+        + (c.foot2 ? '<div style="margin-top:4px;font-size:10.5px;color:var(--text-muted);line-height:1.45;">' + esc(c.foot2) + '</div>' : '')
+        + '</div>');
     });
     h.push('</div></div>');
 
     // ── 종합 진동 레벨 (물리량별 RMS) — 에너지가 어느 도메인에 있나. 단위가 달라 값 크기 직접 비교는 불가(막대 없음) ──
     if (d.levels) {
-      var _lu = [{ u: 'g', l: '가속도', d: '고주파(베어링·기어)' }, { u: 'mm/s', l: '속도', d: 'ISO 10816 판정 기준' }, { u: 'μm', l: '변위', d: '저주파(불균형·정렬)' }];
+      var _lu = [{ u: 'g', l: '가속도', d: '고주파(베어링·기어) · 광대역 변환값 — 미분이 고주파 잡음을 증폭해 과대 가능(방향 참고용)' }, { u: 'mm/s', l: '속도', d: '광대역 — ISO 판정은 10–1000 Hz 대역제한 값(심각도 평가 참조)' }, { u: 'μm', l: '변위', d: '저주파 — 사실상 1× 성분 지배(불균형·정렬 계열 지표)' }];
       var fmtL = function (v) { return (v >= 100 ? v.toFixed(0) : v >= 1 ? v.toFixed(2) : v.toFixed(3)); };
       sectionOpen(h, '종합 진동 레벨');
       h.push('<div style="font-size:11px;color:var(--text-muted);margin:-4px 0 10px;">같은 신호를 세 물리량으로 본 RMS · 어느 대역에 에너지가 있는지 방향 파악용 (단위가 달라 값끼리 크기 비교는 하지 않음)</div>');
@@ -201,19 +485,37 @@
       _lu.forEach(function (x) {
         if (d.levels[x.u] == null) return;
         var iso = (x.u === (d.natUnit || d.isoUnit));
+        // 가속도 에너지 중심이 Nyquist에 근접하면 물리 신호로 볼 수 없다 → 값 대신 보류 사유를 인쇄
+        var hold = (x.u === 'g' && d.levelsOk === false);
+        var valCell = hold
+          ? '<span style="color:#e5484d;font-weight:600;">게재 보류</span>'
+          : fmtL(d.levels[x.u]) + ' <span style="color:var(--text-muted);">' + x.u + '</span>';
+        var descCell = hold
+          ? '에너지 중심 f_eff ' + (d.accelFeff / 1000).toFixed(1) + ' kHz = Nyquist의 ' + Math.round(d.accelNyqFrac * 100) + '% — 안티에일리어싱 필터 부재 시 센서 공진 폴딩 또는 미분 증폭 잡음. 계측 구성 확인 전까지 사용 금지'
+          : x.d;
         h.push('<tr><td>' + x.l + (iso ? ' <span style="font-size:10px;color:var(--primary-light);">(센서 원본)</span>' : '') + '</td>'
-          + '<td class="num mono">' + fmtL(d.levels[x.u]) + ' <span style="color:var(--text-muted);">' + x.u + '</span></td>'
-          + '<td style="color:var(--text-muted);font-size:12px;">' + x.d + '</td></tr>');
+          + '<td class="num mono">' + valCell + '</td>'
+          + '<td style="color:' + (hold ? '#c77d0a' : 'var(--text-muted)') + ';font-size:12px;">' + descCell + '</td></tr>');
       });
       h.push('</tbody></table></div>');
     }
 
-    // ── 측정 신뢰도·해석 경고 (신호 품질 이상·첨도 포화) ──
-    if (d.quality && d.quality.issues && d.quality.issues.length) {
-      h.push('<div style="display:flex;gap:9px;padding:11px 13px;margin-bottom:10px;border-radius:8px;background:rgba(199,125,10,.1);border:1px solid rgba(199,125,10,.4);font-size:12px;line-height:1.55;"><b style="color:#c77d0a;">⚠ 신호 품질 경고</b>&nbsp; ' + esc(d.quality.issues.map(function (x) { return x.label + ': ' + x.detail; }).join(' · ')) + ' — 측정 신뢰도 저하, 아래 판정은 센서 점검 전 잠정입니다.</div>');
-    }
-    if (d.kurtWarn) {
-      h.push('<div style="display:flex;gap:9px;padding:11px 13px;margin-bottom:10px;border-radius:8px;background:rgba(199,125,10,.1);border:1px solid rgba(199,125,10,.35);font-size:12px;line-height:1.55;"><b style="color:#c77d0a;">⚠ 첨도 포화 주의</b>&nbsp; ' + esc(d.kurtWarn) + '</div>');
+    // ── 계측 경고 — 게이트와 신호 품질은 같은 관측이므로 한 배너로 합친다.
+    //    경고 피로는 개수가 아니라 "같은 사실의 반복"에서 온다(빨강은 게이트·가속도 보류 둘만).
+    var _qi = (d.quality && d.quality.issues) ? d.quality.issues : [];
+    if (d.gate || _qi.length) {
+      var redG = !!d.gate;
+      h.push('<div class="gate-box' + (redG ? '' : ' amber') + '">');
+      h.push('<div class="gb-t">' + (redG ? '계측 검증 필요 — 결함 진단 보류' : '신호 품질 주의') + '</div>');
+      // 발화한 검사를 각각 제목+설명으로 — 한 줄로 이어붙이면 무엇이 걸렸는지 안 읽힌다
+      _qi.forEach(function (x) {
+        var dt = String(x.detail || ''), cut = dt.indexOf('—');
+        h.push('<div class="gb-i"><div class="gb-il">' + esc(x.label) + ' — ' + esc(cut > 0 ? dt.slice(0, cut).trim() : dt) + '</div>'
+          + (cut > 0 ? '<div class="gb-id">' + esc(dt.slice(cut + 1).trim()) + '</div>' : '') + '</div>');
+      });
+      h.push('<div class="gb-d">' + (redG
+        ? '극단적 Crest/첨도는 베어링 결함(통상 Crest &lt;10)보다 단발 스파이크(ESD·케이블 흔들림·커넥터 접촉·마운트 덜컹임) 시그니처에 가깝습니다. 센서 마운팅·케이블·커넥터 점검 후 재측정을 권장하며, 아래 결함 후보·근거 점수는 계측 검증 전까지 <b>잠정 참고용</b>입니다.'
+        : '측정 신뢰도 저하 — 아래 판정은 센서 점검 전 잠정입니다.') + '</div></div>');
     }
 
     // ── 통계 요약 ──
@@ -223,7 +525,7 @@
     h.push('</div></div>');
 
     // ── 추세 분석 ──
-    h.push('<div class="group-hd"><span style="font-size:13px;font-weight:700;letter-spacing:.6px;">추세 분석</span><span style="font-size:11px;color:var(--text-muted);">시간에 따른 지표 변화 · 열화 진행 추적</span><span class="hr"></span></div>');
+    h.push('<div class="group-hd" id="s-trend"><span style="font-size:13px;font-weight:700;letter-spacing:.6px;">추세 분석</span><span style="font-size:11px;color:var(--text-muted);">시간에 따른 지표 변화 · 열화 진행 추적</span><span class="hr"></span></div>');
     if (d.rms) chartSection(h, { title: 'RMS 추이', sub: 'ISO 10816 존 기준선', hint: ZOOM_HINT, canvasId: 'cRms', h: 230, tipId: 'tRms' });
     var g2 = [];
     if (d.p2p) g2.push({ title: 'Peak-to-Peak 추이', canvasId: 'cP2p', h: 220, tipId: 'tP2p' });
@@ -238,75 +540,135 @@
 
     // ── 스펙트럼 분석 ──
     var _duTag = (d.dispUnit && d.natUnit && d.dispUnit !== d.natUnit) ? '<span style="font-size:11px;font-weight:700;color:var(--primary-light);background:rgba(0,108,210,.14);padding:1px 7px;border-radius:4px;">표시 물리량: ' + esc(d.dispUnit) + ' (' + esc(d.natUnit) + '에서 변환)</span>' : (d.dispUnit ? '<span style="font-size:11px;color:var(--text-muted);">표시 물리량: ' + esc(d.dispUnit) + '</span>' : '');
-    h.push('<div class="group-hd"><span style="font-size:13px;font-weight:700;letter-spacing:.6px;">스펙트럼 분석</span><span style="font-size:11px;color:var(--text-muted);">주파수 성분 분해 · 결함 원인 지목</span><span class="hr"></span>' + _duTag + '</div>');
-    if (d.wave) chartSection(h, { title: '원시 파형', sub: 'Raw Waveform', hint: ZOOM_HINT, desc: p.waveDesc, canvasId: 'cWave', h: 240, tipId: 'tWave', xlineId: 'xWave' });
-    if (d.fft) chartSection(h, {
-      title: 'FFT 주파수 스펙트럼', hint: '<span class="mono">' + esc(p.fftHint || '') + '</span>', desc: '주파수별 성분 분해 · 결함 주파수와 대조해 원인 지목',
-      canvasId: 'cFft', h: 280, tipId: 'tFft',
-      legend: (d.fft.markers || []).filter(function (m) { return m.kind !== 'h'; }).map(function (m) { return { label: m.label + ' ' + m.freq.toFixed(1) + ' Hz', color: m.kind === 'f' ? '#e5646a' : '#8a8f99' }; }),
-    });
-    if (d.spec) chartSection(h, { title: '스펙트로그램', sub: '시간×주파수', desc: '결함 대역이 언제부터 자랐는지 확인 · 밝을수록 강한 성분', canvasId: 'cSpec', h: 200 });
-    if (d.kurtogram) chartSection(h, { title: '결함 대역 탐색', sub: 'Kurtogram · Spectral Kurtosis', desc: (d.kurtogram.best ? '충격성 최대 대역 ' + (d.kurtogram.best.loHz / 1000).toFixed(1) + '–' + (d.kurtogram.best.hiHz / 1000).toFixed(1) + ' kHz (SK ' + d.kurtogram.best.sk.toFixed(1) + ') → 포락선을 이 대역으로 복조' : '충격성이 가장 강한 대역 자동 탐색'), canvasId: 'cKurtogram', h: 180 });
-    if (d.env) chartSection(h, { title: '포락선 스펙트럼', sub: 'Envelope', desc: p.envDesc, canvasId: 'cEnv', h: 210 });
+    h.push('<div class="group-hd" id="s-spec"><span style="font-size:13px;font-weight:700;letter-spacing:.6px;">스펙트럼 분석</span><span style="font-size:11px;color:var(--text-muted);">주파수 성분 분해 · 결함 가설 탐색</span><span class="hr"></span>' + _duTag + '</div>');
+    // 기본 노출은 2개. 게이트가 걸리면 그 근거가 시간영역에 있으므로 파형이 FFT보다 위다
+    // — 단발 임펄스는 주파수영역에서 평탄하게 퍼져 FFT에는 원인이 보이지 않는다.
+    var _wave = function () { if (d.wave) chartSection(h, { title: '원시 파형', sub: 'Raw Waveform', hint: ZOOM_HINT, desc: p.waveDesc, canvasId: 'cWave', h: 240, tipId: 'tWave', xlineId: 'xWave' }); };
+    var _fft = function () {
+      if (!d.fft) return;
+      chartSection(h, {
+        title: 'FFT 주파수 스펙트럼', hint: '<span class="mono">' + esc(p.fftHint || '') + '</span>', desc: '주파수별 성분 분해 · 결함 주파수와 대조해 가설 수립(확정은 다축·위상 필요)',
+        canvasId: 'cFft', h: 280, tipId: 'tFft',
+        legend: (d.fft.markers || []).filter(function (m) { return m.kind !== 'h'; }).map(function (m) { return { label: m.label + ' ' + m.freq.toFixed(1) + ' Hz', color: m.kind === 'f' ? '#e5646a' : '#8a8f99' }; }),
+      });
+    };
+    if (d.gate) { _wave(); _fft(); } else { _fft(); _wave(); }
+    // 나머지는 접되 요약줄에 숫자를 남긴다 — 접힌 줄만 읽어도 무엇이 있는지 알아야 "안 본 것"이 되지 않는다.
+    // 전체 보기에서는 접지 않는다 — 요약/전체 토글이 이미 "짧게 보기"를 담당한다.
+    if (d.spec) chartSection(h, { title: '스펙트로그램', sub: '시간×주파수', desc: '충격이 특정 시각에 몰렸는지(계측 사고) 구간에 고르게 퍼졌는지(기계 현상) 판별 · 밝을수록 강한 성분', canvasId: 'cSpec', h: 200 });
+    // 커토그램이 대역을 고르고 포락선이 그 대역으로 복조한다 — 파이프라인 순서대로
+    if (d.kurtogram) chartSection(h, { title: '결함 대역 탐색', sub: 'Kurtogram · Spectral Kurtosis', desc: (d.kurtogram.best ? '충격성 최대 대역 ' + (d.kurtogram.best.loHz / 1000).toFixed(1) + '–' + (d.kurtogram.best.hiHz / 1000).toFixed(1) + ' kHz (SK ' + d.kurtogram.best.sk.toFixed(1) + ') → 아래 포락선을 이 대역으로 복조 · 마운팅이 자석이면 2 kHz 초과 분석은 무효' : '충격성이 가장 강한 대역 자동 탐색'), canvasId: 'cKurtogram', h: 180 });
+    if (d.env) chartSection(h, { title: '포락선 스펙트럼', sub: 'Envelope · 위 커토그램 대역으로 복조', desc: p.envDesc, canvasId: 'cEnv', h: 210 });
     if (d.cep) chartSection(h, { title: '켑스트럼', sub: 'Cepstrum', desc: p.cepDesc, canvasId: 'cCep', h: 200 });
 
     // ── 지표 요약 ──
     sectionOpen(h, '지표 요약');
-    h.push('<table><thead><tr><th>지표</th><th class="num" style="width:170px;">측정값</th><th>비고</th></tr></thead><tbody>');
+    h.push('<table><thead><tr><th>지표</th><th class="num" style="width:200px;white-space:nowrap;">측정값</th><th>비고</th></tr></thead><tbody>');
     (p.indics || []).forEach(function (it) {
-      h.push('<tr><td>' + esc(it.k) + '</td><td class="num">' + esc(it.v + (it.hint ? ' · ' + it.hint : '')) + '</td><td style="font-size:12px;color:var(--text-muted);">' + esc(it.desc || '') + '</td></tr>');
+      // 값과 단위를 분리해 고정폭으로 — 숫자 열이 흔들리지 않게. 단위 없는 지표는 "무차원"
+      var uKnown = /^(mm\/s|g|μm)$/.test(it.hint || '') ? it.hint : '';
+      var band = (!uKnown && it.hint) ? it.hint : '';   // 밴드 해석(계측 아티팩트 의심 등)은 값과 줄을 나눈다
+      h.push('<tr><td>' + esc(it.k) + '</td><td class="num"><span class="nw">' + esc(it.v) + ' <span class="unit-fx">' + esc(uKnown || '무차원') + '</span></span>'
+        + (band ? '<div class="ind-band">' + esc(band) + '</div>' : '') + '</td>'
+        + '<td style="font-size:12px;color:var(--text-muted);">' + esc(it.desc || '') + '</td></tr>');
     });
     h.push('</tbody></table></div>');
 
     // ── 결함 근거 강도 (Evidence) — 규칙 기반 자동 산출. LLM 소견 위에 배치해 "근거→해석" 순서 ──
     if (d.evidence && d.evidence.length) {
       var starOf = function (s) { s = Math.max(0, Math.min(5, Math.round(s))); return '★★★★★'.slice(0, s) + '☆☆☆☆☆'.slice(0, 5 - s); };
-      sectionOpen(h, '결함 근거 강도', '측정 지표 기반 자동 산출 · ★ 높은 순 = 우선순위');
-      h.push('<div style="font-size:11px;color:var(--text-muted);margin:-4px 0 10px;">동기/비동기 피크·충격성·대역 에너지 등 실제 지표에서 규칙으로 산출한 후보별 근거 강도입니다(임의 확률 아님).</div>');
-      h.push('<table><thead><tr><th>결함 후보</th><th style="width:120px;">근거 강도</th><th class="num" style="width:56px;">점수</th><th>근거</th></tr></thead><tbody>');
+      sectionOpen(h, '결함 근거 강도', '근거 점수(Evidence Score, 0~100) · 높은 순 = 우선순위', null, 's-evid');
+      h.push('<div style="font-size:11px;color:var(--text-muted);margin:-4px 0 10px;">동기/비동기 피크·충격성·대역 에너지 등 실제 지표에서 규칙으로 산출한 <b>근거 점수(Evidence Score)</b>입니다 — <b>확률(%)이 아닙니다</b>. "근거" 열에 점수를 만든 가점 내역을 그대로 공개합니다.</div>');
+      h.push('<table><thead><tr><th>결함 후보</th><th style="width:120px;">근거 강도</th><th class="num" style="width:66px;">근거점수</th><th>근거 내역 (가점 합산)</th></tr></thead><tbody>');
       d.evidence.forEach(function (c, i) {
         var sc = c.score != null ? c.score : c.s * 20;
+        var detail = c.na ? '<span style="color:#c77d0a;">' + esc(c.caveat || '판별 조건 미충족') + '</span> — 점수 산정 대상 아님(볼 수 없는 것이지 가능성이 낮은 것이 아님)'
+          : (c.breakdown ? esc(c.breakdown) : esc(c.why)) + (c.caveat ? ' <span style="color:#c77d0a;">· ' + esc(c.caveat) + '</span>' : '');
+        // na = 근거 부족이 아니라 "이 측정 구성으론 볼 수 없음"(위상·축방향 필요) — 낮은 점수와 구분해 표기
+        var starCell = c.na ? '<span style="font-size:11px;color:var(--text-muted);">측정 불가</span>' : '<span style="letter-spacing:1px;">' + starOf(c.s) + '</span>';
         h.push('<tr><td>' + (i === 0 ? '<b>' + esc(c.f) + '</b>' : esc(c.f)) + '</td>'
-          + '<td class="mono" style="color:' + (c.s >= 4 ? '#e07b39' : c.s >= 3 ? '#d99a2b' : 'var(--text-muted)') + ';letter-spacing:1px;">' + starOf(c.s) + '</td>'
-          + '<td class="num mono" style="color:' + (sc >= 70 ? '#e07b39' : sc >= 40 ? '#d99a2b' : 'var(--text-muted)') + ';">' + sc + '</td>'
-          + '<td style="font-size:12px;color:var(--text-muted);">' + esc(c.why) + '</td></tr>');
+          + '<td class="mono" style="color:' + (c.s >= 4 ? '#e07b39' : c.s >= 3 ? '#d99a2b' : 'var(--text-muted)') + ';">' + starCell + '</td>'
+          + '<td class="num mono" style="color:' + (sc >= 70 ? '#e07b39' : sc >= 40 ? '#d99a2b' : 'var(--text-muted)') + ';">' + (c.na ? '—' : sc + '<span style="color:var(--text-muted);font-size:10px;">/100</span>') + '</td>'
+          + '<td style="font-size:12px;color:var(--text-muted);">' + detail + '</td></tr>');
       });
-      h.push('</tbody></table></div>');
+      h.push('</tbody></table></div>'); // ⚠table을 닫지 않으면 섹션 div가 조기 종료돼 뒤 블록이 카드 밖으로 밀려난다
+    }
+
+    // 음성 소견·미설명 성분·미입력 메타데이터 — LLM이 빠뜨려도 리포트에는 남도록 결정론적으로 인쇄
+    // 제목 + 들여쓴 줄 — 항목마다 한 줄씩 세워야 "몇 건인지"가 눈에 들어온다
+    var negBlk = [];
+    if (d.negatives && d.negatives.length) negBlk.push({ t: '음성 소견', sub: '찾았으나 없음 · 반대 증거', rows: d.negatives });
+    if (d.unexplained && d.unexplained.length) negBlk.push({ t: '미설명 성분', sub: '사전으로 설명되지 않음', rows: [d.unexplained.join(' · '), '구동 계통도(풀리비·기어비)·인접 기계 확인 시 대부분 해소'] });
+    if (d.missing && d.missing.length) negBlk.push({ t: '미입력 메타데이터와 그 영향', sub: '', rows: d.missing });
+    if (d.acq) negBlk.push({ t: '스펙트럼 취득 조건', sub: '', rows: [
+      '창 ' + (d.acq.winSec || 0).toFixed(2) + '초 · 분해능 ' + (d.acq.res || 0).toFixed(2) + ' Hz · ' + (d.acq.window || 'Hann') + ' · 평균 ' + (d.acq.averages || 1) + '회'
+        + ((d.acq.averages || 1) < 2 ? ' (단일 블록 — 충격성 신호에서 진폭이 스파이크에 좌우됨)' : (d.acq.averages || 1) < 8 ? ' (평균 8회 미만 — 측대역·저주파 정밀 진단 기준은 8초 창·0.125 Hz·8평균)' : ''),
+    ].concat(d.acq.isoBlocks ? ['ISO 판정은 ' + d.acq.isoBlocks + '블록 에너지 평균'] : []) });
+    if (negBlk.length) {
+      h.push('<div class="neg-box">');
+      negBlk.forEach(function (b) {
+        h.push('<div class="nb-t">' + esc(b.t) + (b.sub ? ' <span class="nb-s">— ' + esc(b.sub) + '</span>' : '') + '</div>');
+        b.rows.forEach(function (r) { h.push('<div class="nb-r">' + esc(r) + '</div>'); });
+      });
+      h.push('</div>');
     }
 
     // ── 심층 분석 (LLM 소견) ──
     if (p.opinion) {
-      sectionOpen(h, '심층 분석', 'LLM 소견' + (p.opinionModel ? ' · ' + p.opinionModel : ''));
+      sectionOpen(h, '심층 분석', 'LLM 소견' + (p.opinionModel ? ' · ' + p.opinionModel : ''), null, 's-llm');
       h.push('<div class="analysis-content">');
       // 인라인 마크다운 변환: **굵게** → <strong>, `코드` → <code> (먼저 esc 후 마커만 치환)
       var inlineMd = function (s) {
         return esc(s).replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>').replace(/`([^`]+)`/g, '<code>$1</code>');
       };
-      // 줄 단위: ## 소제목 / -·•·* 불릿 / → 결론 / 1. 우선순위 / 그 외 문단 (모두 인라인 마크다운 적용)
-      String(p.opinion).split('\n').forEach(function (ln) {
+      // 색 위계: 소제목(밝음) > 불릿 본문(보통) > 근거 수치(볼드) · 결론(→)은 강조색으로 따로 세운다.
+      // 전부 같은 밝기면 위계가 사라져 "다 중요해 보이는데 아무것도 안 읽히는" 상태가 된다.
+      var pushBullet = function (txt) {
+        // LLM이 "관측 — 판단. → 결론"을 한 줄에 붙여 쓰므로, 화살표에서 잘라 결론을 아래 줄로 내린다
+        // "0.538→1.88"처럼 숫자 사이 화살표는 범위 표기다 — 공백으로 둘러싸인 " → "만 결론 마커로 본다
+        var m = /\s→\s/.exec(txt);
+        var head = m ? txt.slice(0, m.index).trim() : txt;
+        var tail = m ? txt.slice(m.index + m[0].length).trim() : '';
+        h.push('<div class="op-li"><span class="op-dot">•</span><span>' + inlineMd(head) + '</span></div>');
+        if (tail) h.push('<div class="op-arrow">→ ' + inlineMd(tail) + '</div>');
+      };
+      String(p.opinion).split(String.fromCharCode(10)).forEach(function (ln) {
         var t = ln.trim();
         if (!t) return;
         var mh = t.match(/^#{1,3}\s+(.*)/);
-        if (mh) { h.push('<h4 style="font-size:15px;font-weight:700;margin:18px 0 6px;color:var(--text-primary)">' + inlineMd(mh[1].trim()) + '</h4>'); return; }
+        if (mh) { h.push('<div class="op-h">' + inlineMd(mh[1].trim()) + '</div>'); return; }
         var mb = t.match(/^[-*•]\s+(.*)/);
-        if (mb) { h.push('<div style="display:flex;gap:7px;margin:2px 0 2px 6px;line-height:1.6;"><span style="color:var(--text-muted);flex-shrink:0;">•</span><span>' + inlineMd(mb[1]) + '</span></div>'); return; }
-        if (/^→/.test(t)) { h.push('<div style="margin:4px 0 8px 6px;padding-left:8px;border-left:2px solid var(--primary-light);color:var(--text-primary);font-weight:600;line-height:1.6;">' + inlineMd(t) + '</div>'); return; }
+        if (mb) { pushBullet(mb[1]); return; }
+        if (/^→/.test(t)) { h.push('<div class="op-arrow">' + inlineMd(t) + '</div>'); return; }
         var mn = t.match(/^(\d+)\.\s+(.*)/);
-        if (mn) { h.push('<div style="margin:8px 0 3px;font-weight:700;line-height:1.6;">' + inlineMd(t) + '</div>'); return; }
+        if (mn) { pushBullet(t); return; }
         h.push('<p>' + inlineMd(t) + '</p>');
       });
       h.push('</div></div>');
     }
 
     // ── 종합 소견 및 권고사항 ──
-    sectionOpen(h, '종합 소견 및 권고사항');
+    sectionOpen(h, '종합 소견 및 권고사항', null, null, 's-verdict');
     (p.actions || []).forEach(function (a, i) {
       h.push('<div class="rec-item"><span class="no">' + (i + 1) + '.</span>' + esc(a.txt) + '</div>');
     });
-    h.push('<div style="margin-top:14px;padding:11px 14px;border-radius:8px;background:rgba(217,154,43,0.10);border:1px solid rgba(217,154,43,0.30);font-size:12px;line-height:1.6;color:var(--text-secondary)">측정 한계: 본 리포트는 단일 채널·단일 방향 진동 데이터 기반이며 위상(phase) 정보가 없고 회전속도는 명판값 기준입니다. 결함 메커니즘(불평형·정렬불량·풀림 등)은 위상·다축 측정 없이는 구분이 어려워 <b>가설</b>이며, 이상 신호에 대한 <b>조사 필요 플래그</b>로 활용하십시오. 확정 진단에는 다축·위상 측정과 정비 담당자 확인이 필요합니다.</div>');
+    h.push('<div style="margin-top:14px;padding:11px 14px;border-radius:8px;background:rgba(217,154,43,0.10);border:1px solid rgba(217,154,43,0.30);font-size:12px;line-height:1.6;color:var(--text-secondary)">측정 한계: 본 리포트는 단일 채널·단일 방향 진동 데이터 기반이며 위상(phase) 정보가 없고 회전속도는 스펙트럼 실측이 가능하면 실측값을, 불가하면 명판값을 기준으로 합니다(본문 [회전수] 표기 참조). 결함 메커니즘 중 불평형·정렬불량·굽음·소프트풋은 위상·축방향 없이는 원리상 <b>측정 불가</b>이고, 베어링·벨트·베인 등은 품번·제원·날개수 같은 <b>설비 정보가 없어 대조 자체가 불가</b>합니다(둘 다 가능성이 낮은 것이 아니라 볼 수 없는 것입니다). 그 외 후보는 <b>가설</b>이며, 이상 신호에 대한 <b>조사 필요 플래그</b>로 활용하십시오. 확정 진단에는 다축·위상 측정과 정비 담당자 확인이 필요합니다.</div>');
     h.push('</div>');
 
-    h.push('<div class="footer"><span>Machbase Neo 데이터 기반으로 생성 되었습니다.</span><span class="mono">' + esc(p.docNo) + '</span></div>');
+    h.push('</div>'); // #detail 닫기
+    // 재현성 스트립 — 같은 설비의 두 리포트가 다를 때, 데이터가 달라진 건지 엔진이 달라진 건지 가른다.
+    // 지문(fp)은 실제 판정 임계에서 계산되므로 버전을 올리는 걸 잊어도 동작이 바뀌면 달라진다.
+    if (p.build) {
+      // 라벨(작고 흐림) < 값(크고 밝음) < 보조(작고 흐림) — 세 단계로 시선을 태운다
+      h.push('<div class="build-strip">');
+      (p.build.cells || []).filter(function (c) { return c.v; }).forEach(function (c) {
+        h.push('<div class="bs-i' + (c.narrow ? ' narrow' : '') + '"><div class="bs-k">' + esc(c.k) + '</div>'
+          + '<div class="bs-v">' + esc(c.v) + '</div>'
+          + (c.subs || []).map(function (x) { return '<div class="bs-s">' + esc(x) + '</div>'; }).join('') + '</div>');
+      });
+      h.push('</div>');
+    }
+    h.push('<div class="footer"><span>Machbase Neo 데이터 기반으로 생성 되었습니다.</span></div>');
     h.push('</div>');
 
     // ── 차트 엔진 + 데이터 + 부트 (자립 렌더) ──

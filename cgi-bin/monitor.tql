@@ -1,28 +1,71 @@
 SCRIPT({
-var judgeTick = function jr(i,e,t,a,n){var r=[],l;if(!i)l={g:e,since:a,cand:e,candSince:a,lastRe:a,b:t},e>0&&r.push({etype:"threshold",gi:e});else if(e===i.g){var g=i.lastRe||i.since||a;if(l={g:i.g,since:i.since||a,cand:i.g,candSince:i.since||a,lastRe:g,b:t},i.g>0){var u=n.reno[i.g]||0;u>0&&a-g>=u&&(r.push({etype:"sustained",gi:i.g}),l.lastRe=a)}}else{var p=e>i.g?n.escHold:n.recHold,v=i.cand===e&&i.candSince||a;a-v>=p?(l={g:e,since:a,cand:e,candSince:a,lastRe:a,b:t},e>i.g?r.push({etype:"threshold",gi:e}):e===0&&r.push({etype:"recovery",gi:0})):l={g:i.g,since:i.since||a,cand:e,candSince:v,lastRe:i.lastRe||i.since||a,b:t}}return t&&!(i&&i.b)&&r.push({etype:"baseline",gi:Math.max(1,e)}),{next:l,events:r}};
+var judgeTick = function Yn(i,e,t,n,r,a,o){var s=[],u;if(o===!1)return u=i?{g:i.g,since:i.since!=null?i.since:n,cand:i.g,candSince:i.candSince!=null?i.candSince:n,lastRe:i.lastRe!=null?i.lastRe:n,b:i.b,bb:i.bb,alarmG:i.alarmG,imp:i.imp}:{g:0,since:n,cand:0,candSince:n,lastRe:n,b:!1},i&&i.bcs!=null&&(u.bcs=i.bcs),{next:u,events:s,frozen:!0};if(!i)u={g:e,since:n,cand:e,candSince:n,lastRe:n,b:t},e>0&&(s.push({etype:"threshold",gi:e}),u.alarmG=e);else if(e===i.g){var c=i.lastRe!=null?i.lastRe:i.since!=null?i.since:n;if(u={g:i.g,since:i.since!=null?i.since:n,cand:i.g,candSince:i.since||n,lastRe:c,b:t,alarmG:i.alarmG,imp:i.imp},i.g>0){var l=r.reno[i.g]||0;l>0&&n-c>=l&&(s.push({etype:"sustained",gi:i.g}),u.lastRe=n)}}else{var y=e>i.g?r.escHold:r.recHold,h=e<i.g&&i.cand!=null&&e<=i.cand,w=(i.cand===e||h)&&i.candSince!=null?i.candSince:n;if(n-w>=y)if(u={g:e,since:n,cand:e,candSince:n,lastRe:n,b:t,alarmG:i.alarmG,imp:i.imp},e>i.g)s.push({etype:"threshold",gi:e}),u.alarmG=e,u.imp=0;else{var I=i.alarmG||0;e===0&&I>0?(s.push({etype:"recovery",gi:0}),u.alarmG=0,u.imp=0):I>0&&e<I&&!i.imp&&(s.push({etype:"improve",gi:e}),u.imp=1)}else u={g:i.g,since:i.since!=null?i.since:n,cand:e,candSince:w,lastRe:i.lastRe!=null?i.lastRe:i.since!=null?i.since:n,b:t,alarmG:i.alarmG,imp:i.imp}}var v=!!(i&&i.b),z=i?i.bcs:null,R=v;if(t?(R=!0,z=null):v&&(z==null&&(z=n),n-z>=(r.recHold||0)&&(R=!1,z=null)),R&&!v&&s.push({etype:"baseline",gi:Math.max(1,e)}),u.b=R,z!=null&&(u.bcs=z),a){var A=!!(i&&i.bb);a.on&&!A?s.push({etype:"band",gi:a.gi}):!a.on&&A&&s.push({etype:"bandrec",gi:0}),u.bb=a.on}else i&&(u.bb=i.bb);return{next:u,events:s}};
+var baselineLimit = function Ke(m){return m?Math.max(m.mu+(m.k||3)*m.sigma,m.mu*1.2):null};
+var bandJudge = function re(m,T,F){if(!m||!T)return null;var S=["sub","one","fault","high","vhigh"],b={sub:"서브동기",one:"1× 대역",fault:"결함 대역",high:"고주파",vhigh:"초고주파"},g=[1.5,3],B=.9,k=F?B:1,O=[],D=0,pe=!1;if(S.forEach(function(Se){var be=m[Se],Be=T[Se];if(!(!(be>0)||!Be)){var _e=Be?Math.max(Be.mu+(Be.k||3)*Be.sigma,Be.mu*1.2):null;if(_e>0){pe=!0;var je=be/_e;je>D&&(D=je),je>k&&O.push({k:Se,ko:b[Se],v:be,lim:_e,r:je})}}}),!pe)return null;var Z=O.length>0,se=Z?D>g[1]?3:D>g[0]?2:1:0,ge=O.map(function(Se){return Se.k+"="+Se.v.toFixed(3)+"/"+Se.lim.toFixed(3)}).join(" · ");return{on:Z,gi:se,over:O,maxR:D,detail:ge}};
+var windowRms = function ae(m,T){if(!m||!m.length)return null;var F=[],S;for(S=0;S<m.length;S++)m[S]&&m[S].cnt>0&&F.push(m[S].cnt);if(!F.length)return null;F.sort(function(Se,be){return Se-be});var b=F[F.length>>1],g=b*(T==null?.9:T),B=0,k=0,O=0,D=0,pe=!0;for(S=0;S<m.length;S++){var Z=m[S];!Z||!(Z.cnt>0)||!isFinite(Z.rms)||Z.cnt<g||(B+=Z.rms*Z.rms*Z.cnt,k+=Z.cnt,O++,isFinite(Z.sum)?D+=Z.sum:pe=!1)}if(!k)return null;var se=B/k,ge=Math.sqrt(pe?Math.max(0,se-D/k*(D/k)):se);return{rms:ge,used:O,dropped:F.length-O,n:k,ac:pe}};
+var isRunning = function C(m,T){return T>0?m>=T*.2:!0};
+var runRef = function L(m,T){if(m&&m.mu>0)return m.mu;if(!T||!T.length)return 0;var F=T.filter(function(S){return isFinite(S)&&S>=0}).sort(function(S,b){return S-b});return F.length?F[Math.floor(.75*(F.length-1))]:0};
+var __E=(function(){
+function ve(m,T,F,S,b,g){var B=0,k=0,O=0,D=0,pe,Z,se,ge=new Array(g.length);for(pe=0;pe<g.length;pe++)Z=g[pe],se=m*Z+T*B+F*k-S*O-b*D,k=B,B=Z,D=O,O=se,ge[pe]=se;return ge}
+function Ee(m,T,F,S,b){if(!m||!m.length||!(b>0))return null;var g=m,B,k,O,D;for(B=0;B<T/2;B++)k=1/(2*Math.cos(Math.PI*(2*B+1)/(2*T))),O=Math.tan(Math.PI*S/b),D=1+O/k+O*O,g=ve(O*O/D,2*O*O/D,O*O/D,2*(O*O-1)/D,(1-O/k+O*O)/D,g),O=Math.tan(Math.PI*F/b),D=1+O/k+O*O,g=ve(1/D,-2/D,1/D,2*(O*O-1)/D,(1-O/k+O*O)/D,g);return g}
+function ke(m,T){if(!m||m.length<256||!(T>0))return null;var F=m.length,S,b=0;for(S=0;S<F;S++)b+=m[S];b/=F;var g=new Array(F);for(S=0;S<F;S++)g[S]=m[S]-b;var B=Math.min(1e3,T/2*.98),k=Ee(g,4,10,B,T);if(!k)return null;var O=0;for(S=0;S<k.length;S++)O+=k[S]*k[S];return Math.sqrt(O/k.length)}
+function ze(m){return m>0&&m/2>1e3}
+return {isoRms:ke,isoNeeded:ze};
+})();
+var isoRms=__E.isoRms, isoNeeded=__E.isoNeeded;
 function enc(o){return encodeURIComponent(JSON.stringify(o)).replace(/'/g,"%27");}
 function dec(s){try{return JSON.parse(decodeURIComponent(s));}catch(e){return null;}}
 function esc(s){return String(s).replace(/'/g,"''");}
 var GW=["\uC591\uD638","\uC8FC\uC758","\uC704\uD5D8","\uC2EC\uAC01"];
 var db=$.db(), now=Date.now(), nDone=0, roll={};
 function rollupOk(tbl){ if(roll[tbl]===undefined){ var n=0; db.query("select count(*) from M$SYS_TABLES where NAME like '_"+tbl+"_ROLLUP_%'").forEach(function(r){n=r[0];}); roll[tbl]=n>0; } return roll[tbl]; }
-var CFG={"escHold":0,"recHold":300000,"reno":{"1":0,"2":3600000,"3":1800000}};
-var TAGS=[{"tbl":"BEARING","tag":"C1","alias":"c1","unit":"mm/s","zones":[1.12,2.8,7.1],"bl":{"mu":0.9725,"sigma":0.9384,"k":3}},{"tbl":"BEARING","tag":"C2","alias":"c2","unit":"mm/s","zones":[1.12,2.8,7.1],"bl":{"mu":1.0038,"sigma":1.0009,"k":3}},{"tbl":"VIBE_TEST","tag":"SENSOR_FREQ","alias":"1","unit":"mm/s","zones":[1.12,2.8,7.1],"bl":{"mu":2.3243,"sigma":0.4813,"k":3}},{"tbl":"VIBE_TEST","tag":"SENSOR_NORMAL","alias":"2","unit":"mm/s","zones":[1.12,2.8,7.1],"bl":{"mu":1.5818,"sigma":0.0021,"k":3}},{"tbl":"VIBE_TEST","tag":"SENSOR_SPIKE","alias":"3","unit":"mm/s","zones":[1.12,2.8,7.1],"bl":{"mu":1.6855,"sigma":0.031,"k":3}},{"tbl":"VIBE_TEST","tag":"SENSOR_TREND","alias":"4","unit":"mm/s","zones":[1.12,2.8,7.1],"bl":{"mu":3.9516,"sigma":1.3661,"k":3}}];
+var CFG={"escHold":0,"recHold":300000,"reno":{"1":0,"2":0,"3":0}};
+var TAGS=[{"tbl":"BEARING","tag":"C1","alias":"c1","unit":"mm/s","fs":25600,"zones":[1.12,2.8,7.1],"bl":{"mu":0.5331,"sigma":0.0352,"k":3},"bb":null},{"tbl":"BEARING","tag":"C2","alias":"c2","unit":"mm/s","fs":25600,"zones":[2.8,7.1,18],"bl":{"mu":0.5302,"sigma":0.0362,"k":3},"bb":null},{"tbl":"VIBE_TEST","tag":"SENSOR_FREQ","alias":"1","unit":"mm/s","fs":1000,"zones":[1.12,2.8,7.1],"bl":{"mu":2.1716,"sigma":0.0008,"k":3},"bb":{"sub":{"mu":0.0239,"sigma":0.00058,"k":3},"one":{"mu":0.03751,"sigma":0.00069,"k":3},"fault":{"mu":2.00786,"sigma":0.00112,"k":3},"high":{"mu":0.82594,"sigma":0.00104,"k":3}}},{"tbl":"VIBE_TEST","tag":"SENSOR_NORMAL","alias":"2","unit":"mm/s","fs":1000,"zones":[1.12,2.8,7.1],"bl":{"mu":1.5826,"sigma":0.0007,"k":3},"bb":{"sub":{"mu":0.01135,"sigma":0.00032,"k":3},"one":{"mu":0.01747,"sigma":0.00035,"k":3},"fault":{"mu":1.58152,"sigma":0.00043,"k":3},"high":{"mu":0.05615,"sigma":0.00338,"k":3}}},{"tbl":"VIBE_TEST","tag":"SENSOR_SPIKE","alias":"3","unit":"mm/s","fs":1000,"zones":[1.12,2.8,7.1],"bl":{"mu":1.5606,"sigma":0.0006,"k":3},"bb":{"sub":{"mu":0.01493,"sigma":0.00069,"k":3},"one":{"mu":0.16295,"sigma":0.00048,"k":3},"fault":{"mu":1.50801,"sigma":0.00048,"k":3},"high":{"mu":0.35074,"sigma":0.00053,"k":3}}},{"tbl":"VIBE_TEST","tag":"SENSOR_TREND","alias":"4","unit":"mm/s","fs":1000,"zones":[1.12,2.8,7.1],"bl":{"mu":4.2523,"sigma":1.2985,"k":3},"bb":{"sub":{"mu":0.01494,"sigma":0.00077,"k":3},"one":{"mu":0.02361,"sigma":0.0018,"k":3},"fault":{"mu":4.2219,"sigma":1.23705,"k":3},"high":{"mu":0.10489,"sigma":0.0292,"k":3}}}];
 var __NF=(function(){
-function a(u){return String(u==null?"":u).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;")}
-function n(u,p){return'<tr><td style="color:#666">'+a(u)+"</td><td><b>"+a(p)+"</b></td></tr>"}
-function t(u){var p=u.timeText||"",v=(u.val==null?"":Number(u.val).toFixed(3))+(u.unit?" "+u.unit:""),x=u.lim==null?"":Number(u.lim).toFixed(3),f="["+(u.gradeKo||"알람")+"] "+(u.alias||u.tag)+" · "+(u.typeKo||""),T=f+`
+function n(u){return String(u==null?"":u).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;")}
+function r(u,c){return'<tr><td style="color:#666">'+n(u)+"</td><td><b>"+n(c)+"</b></td></tr>"}
+function t(u){var c=u.timeText||"",l=(u.val==null?"":Number(u.val).toFixed(3))+(u.unit?" "+u.unit:""),y=u.lim==null?"":Number(u.lim).toFixed(3),h="["+(u.gradeKo||"알람")+"] "+(u.alias||u.tag)+" · "+(u.typeKo||""),w=h+`
 설비/태그: `+(u.alias||u.tag)+(u.tag&&u.alias&&u.alias!==u.tag?" ("+u.tag+")":"")+`
 등급: `+(u.gradeKo||"-")+"   유형: "+(u.typeKo||"-")+`
-측정값: `+v+"   기준: "+x+`
-발생: `+p,R='<div style="font-family:sans-serif"><h3 style="margin:0 0 8px">'+a(f)+'</h3><table cellpadding="4" style="border-collapse:collapse;font-size:14px">'+n("설비/태그",(u.alias||u.tag)+(u.tag&&u.alias&&u.alias!==u.tag?" ("+u.tag+")":""))+n("등급",u.gradeKo||"-")+n("유형",u.typeKo||"-")+n("측정값",v)+n("기준",x)+n("발생",p)+"</table></div>";return{subject:f,text:T,html:R,event:u}}
-function e(u,p){var v=String(p||"");return/hooks\.slack\.com/i.test(v)?{text:u.text}:/discord(app)?\.com\/api\/webhooks/i.test(v)?{content:u.text}:/webhook\.office\.com|office\.com\/webhookb2|logic\.azure\.com/i.test(v)?{text:u.text}:{text:u.text,content:u.text,subject:u.subject,body:u.html,event:u.event||null}}
-function r(u,p,v,x){x=x||{};var f=(x.channels||{})[v];if(!f||!f.on||!f.to)return!1;var T=x.routes||{},R=function(y){var B=T[y];return!!(B&&B[v]&&B.timing!=="무시")};return p==="recovery"?R("주의")||R("위험")||R("심각"):R(u)}
-return {em:t,pf:e,sn:r};
+측정값: `+l+"   기준: "+y+`
+발생: `+c,I='<div style="font-family:sans-serif"><h3 style="margin:0 0 8px">'+n(h)+'</h3><table cellpadding="4" style="border-collapse:collapse;font-size:14px">'+r("설비/태그",(u.alias||u.tag)+(u.tag&&u.alias&&u.alias!==u.tag?" ("+u.tag+")":""))+r("등급",u.gradeKo||"-")+r("유형",u.typeKo||"-")+r("측정값",l)+r("기준",y)+r("발생",c)+"</table></div>";return{subject:h,text:w,html:I,event:u}}
+function e(u,c){var l=String(c||"");return/hooks\.slack\.com/i.test(l)?{text:u.text}:/discord(app)?\.com\/api\/webhooks/i.test(l)?{content:u.text}:/webhook\.office\.com|office\.com\/webhookb2|logic\.azure\.com/i.test(l)?{text:u.text}:{text:u.text,content:u.text,subject:u.subject,body:u.html,event:u.event||null}}
+function a(u,c,l,y){y=y||{};var h=(y.channels||{})[l];if(!h||!h.on||!h.to)return!1;var w=y.routes||{},I=function(v){var z=w[v];return!!(z&&z[l]&&z.timing!=="무시")};return c==="recovery"||c==="bandrec"?I("주의")||I("위험")||I("심각"):I(u)}
+return {em:t,pf:e,sn:a};
 })();
 var eventMessage=__NF.em, payloadFor=__NF.pf, shouldNotify=__NF.sn;
-var NOTIFY={"channels":{"webhook":{"on":true,"to":"https://webhook.site/dec08226-efad-4bd3-8538-04453dca5170"}},"routes":{"주의":{"webhook":false,"email":false,"sms":false,"timing":"즉시"},"위험":{"webhook":true,"email":false,"sms":false,"timing":"즉시"},"심각":{"webhook":true,"email":false,"sms":false,"timing":"즉시"}}};
-var TYPEKO={"threshold":"임계 초과","sustained":"상태 지속","recovery":"정상 복귀","baseline":"베이스라인 이탈"};
+var NOTIFY={"channels":{"webhook":{"on":false,"to":"https://webhook.site/dec08226-efad-4bd3-8538-04453dca5170"}},"routes":{"주의":{"webhook":false,"email":false,"sms":false,"timing":"즉시"},"위험":{"webhook":true,"email":false,"sms":false,"timing":"즉시"},"심각":{"webhook":true,"email":false,"sms":false,"timing":"즉시"}}};
+var TYPEKO={"threshold":"임계 초과","sustained":"상태 지속","recovery":"정상 복귀","improve":"상태 개선","signal_lost":"신호 두절","baseline":"베이스라인 이탈","band":"대역 이탈","bandrec":"대역 복귀"};
+var BORDER=["sub","one","fault","high","vhigh"];
+function bandNow(t){
+  if(!t.bb) return null;
+  var pre=t.tbl+":"+t.tag+":", ns=[];
+  for(var i=0;i<BORDER.length;i++) ns.push("'"+esc(pre+BORDER[i])+"'");
+  var out=null;
+  try{
+    db.query("select NAME, VALUE from NEO_VIBE_BAND where NAME in ("+ns.join(",")+") and TIME between " + bandFrom() + " and now order by TIME desc limit " + (BORDER.length*5)).forEach(function(r){
+      var k=String(r[0]).slice(pre.length);
+      if(out&&out[k]!==undefined) return;
+      if(!out) out={};
+      out[k]=r[1];
+    });
+  }catch(e){ return null; }
+  return out;
+}
+function bandFrom(){ return "to_date('" + fmtTs(now-3600000) + "')"; }
+function dtms(ms){ var d=new Date(ms); function p(n,w){var s2=""+n;while(s2.length<w)s2="0"+s2;return s2;}
+  return p(d.getFullYear(),4)+"-"+p(d.getMonth()+1,2)+"-"+p(d.getDate(),2)+" "+p(d.getHours(),2)+":"+p(d.getMinutes(),2)+":"+p(d.getSeconds(),2)+" "+p(d.getMilliseconds(),3); }
+function isoValue(t, wide, prev, key){
+  if(!isoNeeded(t.fs)) return wide;
+  if(wide < t.zones[0]) return wide;
+  if(prev && prev.iso!=null && (now-(prev.isoAt||0)) < 30000) return prev.iso;
+  var end = LAST[key]||now, vals=[];
+  try{ db.query("select VALUE from "+t.tbl+" where NAME='"+esc(t.tag)+"' and TIME between to_date('"+dtms(end-1000)+"') and to_date('"+dtms(end)+"') order by TIME")
+    .forEach(function(r){ vals.push(+r[0]); }); }catch(e){ return wide; }
+  var v = isoRms(vals, t.fs);
+  return v==null ? wide : v;
+}
+function durAgo(ms){ if(ms<60000) return Math.round(ms/1000)+"초"; if(ms<3600000) return Math.round(ms/60000)+"분"; return (ms/3600000).toFixed(1)+"시간"; }
 function fmtTs(ms){ var d=new Date(ms); function p(n){return (n<10?"0":"")+n;} return d.getFullYear()+"-"+p(d.getMonth()+1)+"-"+p(d.getDate())+" "+p(d.getHours())+":"+p(d.getMinutes())+":"+p(d.getSeconds()); }
 function notifyEvent(t, ev, v, l){
   if(!NOTIFY.channels) return;
@@ -32,29 +75,87 @@ function notifyEvent(t, ev, v, l){
   var msg=eventMessage({alias:t.alias||t.tag, tag:t.tag, table:t.tbl, typeKo:TYPEKO[ev.etype]||ev.etype, gradeKo:gradeKo, val:v, lim:l, unit:t.unit||"", timeText:fmtTs(now)});
   try{ $.request(to,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payloadFor(msg,to))}).do(function(r){}); }catch(e){}
 }
+var WVAL={};
+function collect(){
+  var byTbl={};
+  TAGS.forEach(function(t){ if(rollupOk(t.tbl)) (byTbl[t.tbl]=byTbl[t.tbl]||[]).push(t.tag); });
+  Object.keys(byTbl).forEach(function(tbl){
+    var ns=byTbl[tbl].map(function(x){return "'"+esc(x)+"'";}).join(",");
+    var q="select NAME, ROLLUP('sec',1,TIME) rt, SUMSQ(VALUE) ss, COUNT(VALUE) cnt, SUM(VALUE) sm from "+tbl
+      +" where NAME in ("+ns+") and TIME between now-14000000000 and now group by NAME, rt order by NAME, rt";
+    try{
+      db.query(q).forEach(function(r){
+        if(!(r[3]>0)) return;
+        var k=tbl+":"+String(r[0]);
+        (WVAL[k]=WVAL[k]||[]).push({rms:Math.sqrt(r[2]/r[3]), cnt:r[3], sum:r[4]});
+      });
+    }catch(e){}
+  });
+}
+var LAST={};
+function tms(v){ var s=String(v); var m=/^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2}):(\d{2})(?:\.(\d+))?/.exec(s); if(!m) return 0;
+  var frac=m[7]?("0."+m[7]):"0";
+  return new Date(+m[1],+m[2]-1,+m[3],+m[4],+m[5],+m[6]).getTime() + Math.round(parseFloat(frac)*1000); }
+function lastSeen(){
+  var byTbl={};
+  TAGS.forEach(function(t){ (byTbl[t.tbl]=byTbl[t.tbl]||[]).push(t.tag); });
+  Object.keys(byTbl).forEach(function(tbl){
+    var ns=byTbl[tbl].map(function(x){return "'"+esc(x)+"'";}).join(",");
+    try{ db.query("select NAME, MAX_TIME from V$"+tbl+"_STAT where NAME in ("+ns+")").forEach(function(r){
+      LAST[tbl+":"+String(r[0])]=tms(r[1]); }); }catch(e){}
+  });
+}
+collect();
+lastSeen();
 TAGS.forEach(function(t){
   if(!rollupOk(t.tbl)) return;
-  var val=NaN;
-  var qs="select ROLLUP('sec',1,TIME) rt, SUMSQ(VALUE) ss, COUNT(VALUE) cnt from "+t.tbl+" where NAME='"+esc(t.tag)+"' and TIME between now-10000000000 and now group by rt order by rt desc limit 1";
-  db.query(qs).forEach(function(r){ if(r[2]>0) val=Math.sqrt(r[1]/r[2]); });
-  if(!(val>=0)) return;
-  var z=t.zones, rg = val<z[0]?0:val<z[1]?1:val<z[2]?2:3;
-  var lim = t.bl ? t.bl.mu+(t.bl.k||3)*t.bl.sigma : null;
-  var breach = lim!=null && val>lim;
   var key=t.tbl+":"+t.tag, prev=null;
   db.query("select VAL from NEO_VIBE_MONSTATE where K='"+esc(key)+"'").forEach(function(r){ prev=dec(r[0]); });
-  var res=judgeTick(prev,rg,breach,now,CFG);
+  var last = LAST[key]||0;
+  var lost = last>0 && (now-last) > 60000;
+  var wr = windowRms(WVAL[key]);
+  if(!wr){
+    if(lost && !(prev&&prev.lost)){
+      var st=prev?{g:prev.g,since:prev.since,cand:prev.cand,candSince:prev.candSince,lastRe:prev.lastRe,b:prev.b,bb:prev.bb}:{g:0,since:now,cand:0,candSince:now,lastRe:now,b:false};
+      st.lost=1;
+      var lev={etype:"signal_lost",gi:1};
+      db.exec("insert into NEO_VIBE_EVENTS values('"+esc(key+":"+now+":signal_lost")+"',"+now+",'"+esc(t.tbl)+"','"+esc(t.tag)+"','signal_lost','"+GW[1]+"',0,0,'"+esc(durAgo(now-last))+" 무수신')");
+      notifyEvent(t, lev, 0, 0);
+      db.exec("delete from NEO_VIBE_MONSTATE where K='"+esc(key)+"'");
+      db.exec("insert into NEO_VIBE_MONSTATE values('"+esc(key)+"','"+enc(st)+"')");
+    }
+    return;
+  }
+  var wide = wr.rms;
+  var z=t.zones;
+  var val = isoValue(t, wide, prev, key);
+  var isoFresh = isoNeeded(t.fs) && wide>=z[0];
+  var rg = val<z[0]?0:val<z[1]?1:val<z[2]?2:3;
+  var lim = baselineLimit(t.bl);
+  var breach = lim!=null && wide>lim;
+  var bj = bandJudge(bandNow(t), t.bb, !!(prev&&prev.bb));
+  var recent=(WVAL[key]||[]).map(function(x){return x.rms;});
+  var run = isRunning(wide, runRef(t.bl, recent));
+  if(lost) run=false;
+  var res=judgeTick(prev,rg,breach,now,CFG,bj,run);
+  res.next.lost = lost?1:0;
+  if(isoFresh){ res.next.iso=val; res.next.isoAt=now; } else if(prev&&prev.iso!=null){ res.next.iso=prev.iso; res.next.isoAt=prev.isoAt; }
   res.events.forEach(function(ev){
-    var l2 = ev.etype=="baseline"?lim:(ev.etype=="recovery"?z[0]:(ev.gi>0?z[ev.gi-1]:z[0]));
+    var isB = ev.etype=="band"||ev.etype=="bandrec";
+    var v2 = isB ? (bj?bj.maxR:0) : (ev.etype=="baseline" ? wide : val);
+    var l2 = isB ? 1 : (ev.etype=="baseline"?lim:(ev.etype=="recovery"?z[0]:(ev.gi>0?z[ev.gi-1]:z[0])));
     l2 = (l2==null?0:l2);
+    var dt = (ev.etype=="band"&&bj) ? bj.detail : "";
     var eid=key+":"+now+":"+ev.etype;
-    db.exec("insert into NEO_VIBE_EVENTS values('"+esc(eid)+"',"+now+",'"+esc(t.tbl)+"','"+esc(t.tag)+"','"+ev.etype+"','"+GW[ev.gi]+"',"+val+","+l2+")");
-    notifyEvent(t, ev, val, l2);
+    db.exec("insert into NEO_VIBE_EVENTS values('"+esc(eid)+"',"+now+",'"+esc(t.tbl)+"','"+esc(t.tag)+"','"+ev.etype+"','"+GW[ev.gi]+"',"+v2+","+l2+",'"+esc(dt)+"')");
+    notifyEvent(t, ev, v2, l2);
   });
   db.exec("delete from NEO_VIBE_MONSTATE where K='"+esc(key)+"'");
   db.exec("insert into NEO_VIBE_MONSTATE values('"+esc(key)+"','"+enc(res.next)+"')");
   nDone++;
 });
+db.exec("delete from NEO_VIBE_MONSTATE where K='__hb'");
+db.exec("insert into NEO_VIBE_MONSTATE values('__hb','"+enc({t:now,n:nDone})+"')");
 $.yield("done", now, nDone);
 })
 CSV()

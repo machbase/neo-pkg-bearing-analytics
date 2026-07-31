@@ -11,93 +11,156 @@ Once setup is done, you work across three main tabs — Monitoring · Detail Ana
 
 ## Monitoring
 
-The at-a-glance view of all equipment.
+The at-a-glance view of every piece of equipment.
 
 ### Summary bar
 
-The top summary bar shows the total equipment count, the count per severity (Good · Warning · Danger · Critical), and the most recent event. Click a severity cell to filter the card grid to that grade; click again to clear the filter.
+The top summary bar shows the total equipment count, counts per severity (Good · Warning · Danger · Critical), and the most recent event. Click a severity cell to filter the card grid to that grade; click again to clear. Clicking the total cell resets the filter.
 
 ### Equipment cards
 
-Each selected tag gets one card showing its alias, latest RMS value with a sparkline, and a severity grade badge. Click a card to open that tag's **Detail Analysis**.
+Each selected tag gets one card, showing its alias and tag name, a severity badge, the latest RMS value with unit, a sparkline, the last-seen time, and its class. Click a card to open **Detail Analysis** for that tag.
+
+- The default sort is **worst grade first**. Drag cards to arrange them however you like; that order is saved and restored next time.
+- The **card size** slider adjusts grid density.
+- A card's grade uses exactly the RMS window defined in **Settings → Alarms** — the grade on screen and the grade the alarm judged are always the same. The active basis is shown to the right of the grid.
+
+### Monitoring status alerts
+
+If monitoring is not running properly, a warning appears at the very top of the screen — the timer stopped, it is running but has nothing to evaluate, or app-side evaluation stalled. Most of these offer a **Re-register** button that fixes them on the spot.
+
+This exists so that "no events" can be told apart: equipment is fine, versus monitoring is dead. See [Alarms & events](./alarms.en.md) for details.
 
 ### Event list
 
-The event list below shows recently recorded events by time · tag · type · metric · grade. Click a row to open Detail Analysis at the moment that event occurred.
+The event list below shows recorded events with time · tag · type · measured value vs. limit · grade. Click any row to open detail analysis at the moment that event occurred.
+
+- Period chips and the **tag** and **type** dropdowns narrow the list.
+- Only the most recent **200** events are rendered. Use export to see beyond that.
+- Beyond threshold exceedances, types include improved, recovered, baseline breach, band breach, and signal lost. What each means is laid out in [How detection works](./detection.en.md).
+
+> The measured value on a band breach event is a **ratio to the limit**, not an absolute value. Bands differ in magnitude, so no single absolute value compares across them.
 
 ### Exporting events
 
-The **Save** button on the event list opens a popup where you choose a period and file format (CSV · JSON). Events in that period are downloaded as a file.
+Press **Save** in the event list to open a dialog for choosing a period and file format (CSV · JSON), then download the events for that period.
 
-## Alarms and events
-
-Click the alarm indicator in the header to turn alarms on or off. This state is persisted and survives reopening the app.
-
-While alarms are on, the app periodically judges the selected tags for as long as it is open.
-
-- **Threshold judgment is always on** — a grade change (e.g. Good→Warning) is recorded as an event.
-- **Baseline judgment applies once learned** — for tags whose normal state has been trained, a baseline deviation is recorded too.
-
-Judgment results accumulate as events in a Neo LOG table (`NEO_VIBE_EVENTS`).
-
-- **Good (normal) is not recorded** — only Warning and above remain.
-- **Events are never auto-deleted** — history is data too, so it is preserved. Use event export to archive it when needed.
-
-> Alarms run only while the app is open. This is lightweight monitoring for the time the screen is open, not a persistent background watcher.
+> How alarm evaluation decides when to create events is covered in [Alarms & events](./alarms.en.md).
 
 ## Detail Analysis
 
 A deep look at a single tag, entered from a monitoring card or an event row.
 
-Detail Analysis is a **snapshot** — it freezes on the data at the moment you enter and does not keep changing live. To see the latest state, re-enter or switch tags.
+Detail analysis is a **snapshot** — it is frozen at the data as of when you entered, and does not keep updating live. To re-capture the latest state, press **Refresh**, or change the tag or period.
 
-### Tag & period selection
+### Tag and period selection
 
 - Use the dropdown at the top to switch the tag being analyzed.
-- Choose the period with a preset — 1 hour · 6 hours · 24 hours · All · Custom. The default is 1 hour.
-- If the tag's data is shorter than a preset's length, that preset is disabled. Clicking it shows a "not enough data" hint; use **All** in that case.
-- **Custom** lets you set start and end down to the minute.
+- Choose the query period from presets — 1 hour · 6 hours · 24 hours · All · Custom. The default is 1 hour.
+- If the tag has less data than a preset's length, that preset is disabled. Clicking it shows "not enough data"; use **All** instead.
+- **Custom** lets you set start and end down to the minute. Switching from a preset to custom pre-fills the range that preset covered.
 
-Chart time axes span the whole selected period. Gaps with no data are left blank, so you see exactly where data actually exists.
+Chart time axes span the whole selected period. Gaps with no data are left empty, so you can see exactly where data actually exists.
+
+### Measurement validity warning
+
+If a measurement anomaly such as clipping (saturation) is detected in the signal, a **Signal anomaly — check the sensor** warning appears at the top and diagnosis enters a **diagnosis withheld** state.
+
+A saturated signal reads lower in amplitude than reality, and a single impulse in the time domain smears across the whole spectrum as broadband content. So while this warning is up, confidence drops for **all** evidence, not just one candidate. Check the sensor, cable, and mounting before suspecting the machine.
+
+### Severity assessment
+
+The top card shows the overall risk grade and a zone-boundary bar, with four headline indicators below it, each with its value, threshold, and change.
+
+### Switching the display unit
+
+The same vibration signal reveals different faults depending on whether you view it as **acceleration (g) · velocity (mm/s) · displacement (μm)**. Switch with the unit buttons at the top; the unit the sensor actually measured is marked `(original)`.
+
+| Unit | What it emphasizes |
+| :--- | :--- |
+| Acceleration `g` | High frequency — bearing and impulsive faults |
+| Velocity `mm/s` | Mid band — the basis for ISO grading |
+| Displacement `μm` | Low frequency — imbalance and misalignment |
+
+If you suspect a bearing fault but the velocity waveform shows little, switch to acceleration. The conversion affects display only; grading stays on the original unit.
+
+### Kurtosis saturation warning
+
+When the kurtosis trend falls back from a peak while RMS holds steady or rises, a warning appears under the chart.
+
+Falling kurtosis normally reads as "getting better", but this combination can mean the fault has progressed to where **impacts have become continuous**. An early bearing fault raises kurtosis with sharp impacts; as the fault spreads, the impacts run together and kurtosis drops again. Don't read kurtosis alone as recovery.
 
 ### Charts
 
 | Chart | What it shows |
 | :--- | :--- |
 | Raw waveform | Time-domain vibration waveform |
-| RMS · Peak-to-Peak · Crest Factor · Kurtosis trends | How the headline metrics change over time |
-| Defect-band energy · band-kurtosis trends | Energy and impulsiveness in the bearing defect band |
-| FFT spectrum | Frequency content; with a bearing registered, 1×/2×/3× and BPFO/BPFI/BSF/FTF markers |
-| Envelope | Modulation produced by impulsive faults |
-| Cepstrum · spectrogram | Periodic components and time–frequency changes |
+| RMS · Peak-to-Peak · Crest Factor · Kurtosis trends | Headline indicators over time (the RMS trend also draws ISO zone reference lines) |
+| Defect-band energy trend | Energy and impulsiveness in the bearing defect band |
+| FFT spectrum | Frequency content. With a bearing registered, markers for 1×/2×/3× and BPFO/BPFI/BSF/FTF |
+| ↳ Frequency range | Defaults to the lower range; switch to **full band** to expand out to the sensor's maximum measurable frequency |
+| Spectrogram | Time-frequency evolution |
+| Fault-band search | Which frequency band is most impulsive — the basis for choosing an envelope band. If a mounting method is specified, bands above its limit are excluded from the search |
+| Envelope | Modulation created by impulsive faults |
+| Cepstrum | Periodic structure in harmonics and sidebands |
 
 ### Diagnosis and recommended actions
 
-Below the charts is a rule-based diagnosis. It judges faults such as imbalance · misalignment · bearing inner/outer race · looseness · gear, and presents the supporting evidence with prioritized recommended actions.
+Expand **Comprehensive analysis** to see the rule-based diagnosis. It calls out faults such as imbalance, misalignment, bearing inner/outer race, looseness, and gear issues, and presents **supporting evidence** (with the indicator each piece came from) alongside **prioritized recommended actions**.
+
+> This verdict is computed from a single-channel, single-direction measurement with no phase information, using nameplate rotational speed. Fault mechanisms are **hypotheses**; a confirmed diagnosis requires multi-axis and phase measurement plus review by a maintenance engineer.
 
 ### LLM opinion (optional)
 
-If an LLM is connected, you can generate a narrative expert opinion grounded in the measured values of every chart in Detail Analysis. Pick the provider from the on-screen dropdown. Without a provider, the rule-based diagnosis is enough on its own.
+With an LLM connected, **Generate LLM opinion** produces a narrative expert opinion grounded only in the measured values shown in the charts. Pick the provider from the dropdown next to the button; the model used is noted beneath the opinion.
+
+The tone and judgment rules — suspect the measurement chain first, try to refute your own hypothesis, distinguish "cannot be measured" from "insufficient evidence", spend grades sparingly — are defined in the package's `persona/` documents. They are reference documents you paste into a prompt, so you can adapt them to your site's practice.
+
+Without an LLM connected, the rule-based diagnosis stands on its own.
 
 ## Report
 
-Where you capture analysis results as a document.
+Where you turn analysis into a document.
 
-1. Select the target tags for the report. (nothing selected by default)
-2. Press **Generate report** to build a vibration analysis report, saved under `vibration-reports/`.
-3. Preview or delete saved reports from the archive.
+1. Select the **target tags** for the report. (nothing is selected by default; select-all is available)
+2. Choose a **period** — the same presets as detail analysis (1 hour · 6 hours · 24 hours · All · Custom). The same range applies to every selected tag.
+3. Optionally turn on **Include LLM opinion** and pick a provider.
+4. Press **Generate report**.
 
-With an LLM connected, the report also includes a sectioned narrative summary. Without one, the metric- and chart-based report is still generated normally.
+Generation runs in four steps — query data → compute indicators → generate opinion → save — with progress shown. If it takes too long, **Cancel generation** stops it. Finished reports are saved to `/vibration-reports`.
+
+### Report structure
+
+| Section | Contents |
+| :--- | :--- |
+| Severity assessment | Grade verdict and position against zones |
+| Overall vibration level | Headline indicator levels |
+| Statistics · indicator summary | Statistics and indicator values for the period |
+| Evidence strength | Evidence score per fault candidate (0–100), highest first = priority |
+| In-depth analysis | LLM opinion (when connected) |
+| Conclusions and recommendations | Verdict and actions |
+
+A switch at the top of the report toggles between **Summary** and **Full**. Summary is built for a 30-second read; Full expands every chart and all evidence. Printing includes the full content.
+
+Saved reports are **self-contained HTML** with no external references, and their charts are live rather than baked images — wheel zoom, drag, and tooltips work, and they redraw to match the theme. Handing over the single file is enough for someone else to explore it the same way.
+
+Each report carries a **ruleset fingerprint**. If the fingerprint matches but the numbers differ, the data changed; if the fingerprint differs, the evaluation criteria changed.
+
+### Archive
+
+The archive on the right lists saved reports by creation time · target tags · period · type (whether an LLM opinion is included). Preview or delete each one, and page through when there are many.
 
 ## Tips
 
-- Start with one or two tags to confirm behavior, then widen the selection.
-- Register RPM and bearing model in **Equipment** to raise diagnostic accuracy.
-- Learn the **normal baseline** while healthy to catch "different from usual" changes.
-- Export events with **Save** periodically to keep an external archive.
+- Start with one or two tags to confirm behavior, then widen the scope.
+- For better diagnostic accuracy, register unit, RPM, and bearing model under **Equipment**. Without a unit, there is no defined threshold row to inherit.
+- To catch "different from usual" changes, run **baseline learning** while the equipment is healthy.
+- If monitoring must continue with the app closed, switch to **server monitoring**.
+- Export events periodically with **Save** for separate archiving.
+- When you see an extreme indicator, check the measurement validity warning first — a large share of misdiagnoses come from the sensor, not the machine.
 
 ## Navigation
 
 - [Previous: First setup](./first-setup.en.md)
 - [Back to contents](./index.en.md)
-- [Next: Troubleshooting](./troubleshooting.en.md)
+- [Next: Alarms & events](./alarms.en.md)
