@@ -1,8 +1,8 @@
 SCRIPT({
-var TAGS=[{"tbl":"BEARING","tag":"C1","fr":30,"fs":25600,"win":32768},{"tbl":"BEARING","tag":"C2","fr":30,"fs":25600,"win":32768},{"tbl":"VIBE_TEST","tag":"SENSOR_FREQ","fr":30,"fs":1000,"win":32768},{"tbl":"VIBE_TEST","tag":"SENSOR_NORMAL","fr":30,"fs":1000,"win":32768},{"tbl":"VIBE_TEST","tag":"SENSOR_SPIKE","fr":30,"fs":1000,"win":32768},{"tbl":"VIBE_TEST","tag":"SENSOR_TREND","fr":30,"fs":1000,"win":32768}];
+var TAGS=[{"tbl":"BEARING","tag":"C1","fr":30,"fs":25641,"win":32768},{"tbl":"BEARING","tag":"C2","fr":30,"fs":25641,"win":32768},{"tbl":"VIBE_TEST","tag":"SENSOR_FREQ","fr":30,"fs":1000,"win":32768},{"tbl":"VIBE_TEST","tag":"SENSOR_NORMAL","fr":30,"fs":1000,"win":32768},{"tbl":"VIBE_TEST","tag":"SENSOR_SPIKE","fr":30,"fs":1000,"win":32768},{"tbl":"VIBE_TEST","tag":"SENSOR_TREND","fr":30,"fs":1000,"win":32768},{"tbl":"VIBE_LOAD","tag":"GATE_CLIP","fr":30,"fs":2049,"win":32768},{"tbl":"VIBE_LOAD","tag":"GATE_DC","fr":30,"fs":2049,"win":32768},{"tbl":"VIBE_LOAD","tag":"GATE_FLAT","fr":30,"fs":2049,"win":32768},{"tbl":"VIBE_LOAD","tag":"GATE_OK","fr":30,"fs":2049,"win":32768},{"tbl":"VIBE_LOAD","tag":"IMPACT_SPIKE","fr":30,"fs":2049,"win":32768},{"tbl":"VIBE_LOAD","tag":"LOAD_01","fr":30,"fs":2049,"win":32768},{"tbl":"VIBE_LOAD","tag":"LOAD_02","fr":30,"fs":2049,"win":32768},{"tbl":"VIBE_LOAD","tag":"LOAD_03","fr":30,"fs":2049,"win":32768},{"tbl":"VIBE_LOAD","tag":"LOAD_04","fr":30,"fs":2049,"win":32768},{"tbl":"VIBE_LOAD","tag":"LOAD_05","fr":30,"fs":2049,"win":32768},{"tbl":"VIBE_LOAD","tag":"LOAD_06","fr":30,"fs":2049,"win":32768},{"tbl":"VIBE_LOAD","tag":"LOAD_07","fr":30,"fs":2049,"win":32768},{"tbl":"VIBE_LOAD","tag":"LOAD_08","fr":30,"fs":2049,"win":32768},{"tbl":"VIBE_LOAD","tag":"LOAD_09","fr":30,"fs":2049,"win":32768},{"tbl":"VIBE_LOAD","tag":"LOAD_10","fr":30,"fs":2049,"win":32768},{"tbl":"VIBE_LOAD","tag":"LOAD_11","fr":30,"fs":2049,"win":32768},{"tbl":"VIBE_LOAD","tag":"LOAD_12","fr":30,"fs":2049,"win":32768},{"tbl":"VIBE_LOAD","tag":"LOAD_13","fr":30,"fs":2049,"win":32768},{"tbl":"VIBE_LOAD","tag":"LOAD_14","fr":30,"fs":2049,"win":32768},{"tbl":"VIBE_LOAD","tag":"LOAD_15","fr":30,"fs":2049,"win":32768},{"tbl":"VIBE_LOAD","tag":"LOAD_16","fr":30,"fs":2049,"win":32768},{"tbl":"VIBE_LOAD","tag":"LOAD_17","fr":30,"fs":2049,"win":32768},{"tbl":"VIBE_LOAD","tag":"LOAD_18","fr":30,"fs":2049,"win":32768},{"tbl":"VIBE_LOAD","tag":"LOAD_19","fr":30,"fs":2049,"win":32768},{"tbl":"VIBE_LOAD","tag":"LOAD_20","fr":30,"fs":2049,"win":32768},{"tbl":"VIBE_LOAD","tag":"LOAD_21","fr":30,"fs":2049,"win":32768},{"tbl":"VIBE_LOAD","tag":"LOAD_22","fr":30,"fs":2049,"win":32768},{"tbl":"VIBE_LOAD","tag":"LOAD_23","fr":30,"fs":2049,"win":32768},{"tbl":"VIBE_LOAD","tag":"LOAD_24","fr":30,"fs":2049,"win":32768},{"tbl":"VIBE_LOAD","tag":"LOAD_25","fr":30,"fs":2049,"win":32768},{"tbl":"VIBE_LOAD","tag":"LOAD_26","fr":30,"fs":2049,"win":32768},{"tbl":"VIBE_LOAD","tag":"LOAD_27","fr":30,"fs":2049,"win":32768},{"tbl":"VIBE_LOAD","tag":"LOAD_28","fr":30,"fs":2049,"win":32768},{"tbl":"VIBE_LOAD","tag":"LOAD_29","fr":30,"fs":2049,"win":32768},{"tbl":"VIBE_LOAD","tag":"LOAD_30","fr":30,"fs":2049,"win":32768},{"tbl":"VIBE_LOAD","tag":"LOAD_31","fr":30,"fs":2049,"win":32768},{"tbl":"VIBE_LOAD","tag":"LOAD_32","fr":30,"fs":2049,"win":32768},{"tbl":"VIBE_LOAD","tag":"LOAD_33","fr":30,"fs":2049,"win":32768},{"tbl":"VIBE_LOAD","tag":"LOAD_34","fr":30,"fs":2049,"win":32768},{"tbl":"VIBE_LOAD","tag":"LOAD_35","fr":30,"fs":2049,"win":32768},{"tbl":"VIBE_LOAD","tag":"LOAD_36","fr":30,"fs":2049,"win":32768},{"tbl":"VIBE_LOAD","tag":"LOAD_37","fr":30,"fs":2049,"win":32768},{"tbl":"VIBE_LOAD","tag":"LOAD_38","fr":30,"fs":2049,"win":32768},{"tbl":"VIBE_LOAD","tag":"LOAD_39","fr":30,"fs":2049,"win":32768},{"tbl":"VIBE_LOAD","tag":"LOAD_40","fr":30,"fs":2049,"win":32768},{"tbl":"VIBE_LOAD","tag":"LOAD_41","fr":30,"fs":128,"win":32768},{"tbl":"VIBE_LOAD","tag":"LOAD_42","fr":30,"fs":128,"win":32768},{"tbl":"VIBE_LOAD","tag":"LOAD_43","fr":30,"fs":128,"win":32768},{"tbl":"VIBE_LOAD","tag":"LOAD_44","fr":30,"fs":128,"win":32768},{"tbl":"VIBE_LOAD","tag":"LOAD_45","fr":30,"fs":128,"win":32768},{"tbl":"VIBE_LOAD","tag":"LOAD_46","fr":30,"fs":128,"win":32768},{"tbl":"VIBE_LOAD","tag":"LOAD_47","fr":30,"fs":128,"win":32768},{"tbl":"VIBE_LOAD","tag":"LOAD_48","fr":30,"fs":128,"win":32768},{"tbl":"VIBE_LOAD","tag":"LOAD_49","fr":30,"fs":128,"win":32768},{"tbl":"VIBE_LOAD","tag":"LOAD_50","fr":30,"fs":128,"win":32768},{"tbl":"VIBE_LOAD","tag":"STOP_IDLE","fr":30,"fs":2049,"win":32768}];
 var NAMES=["sub","one","fault","high","vhigh"];
 var ANCHORS=null;
-var db=$.db(), now=1785485461896, nOk=0;
+var db=$.db(), now=1785830804983, nOk=0;
 function esc(s){return String(s).replace(/'/g,"''");}
 function pad(n,w){var s=""+n;while(s.length<w)s="0"+s;return s;}
 function dt(ms){var d=new Date(ms);return pad(d.getFullYear(),4)+"-"+pad(d.getMonth()+1,2)+"-"+pad(d.getDate(),2)+" "+pad(d.getHours(),2)+":"+pad(d.getMinutes(),2)+":"+pad(d.getSeconds(),2)+" "+pad(d.getMilliseconds(),3);}
@@ -20,6 +20,10 @@ TAGS.forEach(function(t){
     anch=[mx];
   }
   anch.forEach(function(maxMs){
+  var seen=0;
+  try { db.query("select count(*) from NEO_VIBE_BAND where NAME='"+esc(t.tbl+":"+t.tag+":"+NAMES[0])+"' and TIME between to_date('"+dt(maxMs)+"') and to_date('"+dt(maxMs)+"')")
+    .forEach(function(r){ seen=+r[0]; }); } catch(e) { seen=0; }
+  if(seen>0) return;
   var fromMs = maxMs - durMs;
   var vals=[];
   db.query("select VALUE from "+t.tbl+" where NAME='"+esc(t.tag)+"' and TIME between to_date('"+dt(fromMs)+"') and to_date('"+dt(maxMs)+"') order by TIME")
@@ -53,6 +57,37 @@ TAGS.forEach(function(t){
   nOk++;
   });
 });
+var WD_BASE="http://127.0.0.1:5654", WD_AUTH="/work/public/neo-pkg-replication/cgi-bin/config/neo-auth.json";
+var WD_TARGETS=[{"peer":"NEO_VIBE_WD","hb":"__hbwd","key":"__wd_wd","cfg":{"stale":900000,"gap":300000,"max":3,"calm":3600000}}];
+var e=function e(a,i,s,u){return i=i&&typeof i=="object"?{n:i.n||0,at:i.at||0}:{n:0,at:0},i.at&&s-i.at>u.calm&&(i={n:0,at:0}),!a||!(a.t>0)?{act:!1,w:i,why:"nohb"}:s-a.t<=u.stale?{act:!1,w:i,why:"alive"}:i.n>=u.max?{act:!1,w:i,why:"gaveup"}:i.at&&s-i.at<u.gap?{act:!1,w:i,why:"waiting"}:{act:!0,w:{n:i.n+1,at:s},why:"restart"}};
+function wdGet(db,k){ var v=null; try{ db.query("select VAL from NEO_VIBE_MONSTATE where K='"+k+"'")
+  .forEach(function(r){ try{ v=JSON.parse(decodeURIComponent(String(r[0]))); }catch(e){} }); }catch(e){} return v; }
+function wdPut(db,k,o){ try{ var c=0; db.query("select count(*) from NEO_VIBE_MONSTATE where K='"+k+"'").forEach(function(r){ c=+r[0]; });
+  var v=encodeURIComponent(JSON.stringify(o)).replace(/'/g,"%27");
+  if(c>0) db.exec("update NEO_VIBE_MONSTATE set VAL='"+v+"' where K='"+k+"'");
+  else db.exec("insert into NEO_VIBE_MONSTATE values('"+k+"','"+v+"')"); }catch(e){} }
+function wdLogin(){ var u="SYS", p="MANAGER";
+  try{ var fs=require("@jsh/fs"); var a=JSON.parse(String(fs.readFile(WD_AUTH))); if(a&&a.user){ u=a.user; p=a.password||""; } }catch(e){}
+  var tok="";
+  try{ $.request(WD_BASE+"/web/api/login",{method:"POST",headers:{"Content-Type":"application/json"},
+    body:JSON.stringify({loginName:u,password:p})}).do(function(r){ if(r.status===200) r.text(function(t){
+      try{ tok=JSON.parse(String(t)).accessToken||""; }catch(e){} }); }); }catch(e){}
+  return tok; }
+function wdStart(name){ var tok=wdLogin(); if(!tok) return false; var ok=false;
+  try{ $.request(WD_BASE+"/web/api/timers/"+name+"/state",{method:"POST",
+    headers:{"Authorization":"Bearer "+tok,"Content-Type":"application/json"},
+    body:JSON.stringify({state:"start"})}).do(function(r){ ok=(r.status===200); }); }catch(e){}
+  return ok; }
+function wdTick(db){ var out=[];
+  for(var i=0;i<WD_TARGETS.length;i++){ var t=WD_TARGETS[i];
+    try{ var d=e(wdGet(db,t.hb), wdGet(db,t.key), Date.now(), t.cfg);
+      if(!d.act){ out.push(t.peer+":"+d.why); continue; }
+      var ok=wdStart(t.peer); d.w.ok=!!ok; wdPut(db,t.key,d.w);
+      out.push(t.peer+":"+(ok?"restarted":"failed"));
+    }catch(e){ out.push(t.peer+":err"); } }
+  return out.join(","); }
+try{ wdPut(db,"__hbband",{t:Date.now(),n:nOk}); }catch(e){}
+var _wd=wdTick(db);
 $.yield("done", now, nOk);
 })
 CSV()

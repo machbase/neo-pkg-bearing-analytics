@@ -3,8 +3,23 @@
 import DB from '../../../cgi-bin/db/db.js';
 import VC from '../../../cgi-bin/calc/calc.js';
 
-const TAGS_PER_TABLE = 20;   // 테이블당 태그 상한
-const MAX_EQUIPMENT = 40;    // 전체 설비 상한 (쿼리 폭주 방지)
+/* 표시 상한 — 묶는 것은 앱이 아니라 서버 상시감시(monitor.tql)다.
+
+   앱 쪽은 여유롭다(실측, 로컬 Neo): 판정 틱은 배치 조회라 태그당 0.34ms 선형이고 데이터
+   밀도는 거의 무관하다(2,510태그 918ms, 같은 태그 수에서 결과 행이 11배여도 22%만 증가).
+   적재도 배치로 바꾼 뒤 200태그 247ms다.
+
+   서버 TQL은 다르다. 태그마다 문장을 실행하고, 경보 구간의 태그는 ISO 대역제한까지 계산한다
+   (태그당 약 210ms). 예전에는 상태 쓰기가 delete+insert여서 회차가 겹치면 ERR-1418로 감시가
+   통째로 죽었다 — 지금은 배치 읽기·update 쓰기·중복 실행 잠금이 있어, 넘치면 죽는 대신
+   회차를 건너뛰고 경고한다(monitor.js). 그래서 이 값은 "안전 한계"가 아니라 "권장 상한"이다.
+
+   실제 소요는 설치마다·설비 상태마다 다르므로 상수로 못 박지 않는다. 서버가 회차 소요를
+   심박(__hb.ms)에 남기고, 주기의 70%를 넘으면 화면이 경고한다 — 그 값을 보고 조정한다. */
+const TAGS_PER_TABLE = 60;   // 테이블당 태그 상한
+const MAX_EQUIPMENT = 100;   // 전체 설비 상한
+const TAG_SCAN_MAX = 100000; // 상한 판정용 전체 조회 — 상한을 조회 뒤에 적용해야 몇 개가 빠졌는지 셀 수 있다
+export const CAPS = { perTable: TAGS_PER_TABLE, total: MAX_EQUIPMENT };
 const ROLLUP_BUCKETS = 720;  // 트렌드 목표 버킷 수
 const TREND_CHUNKS = 24;     // 첨도·대역에너지 추이 샘플 청크 수
 
@@ -31,10 +46,14 @@ export const insertEvent = DB.insertEvent;
 export const loadMonState = DB.loadMonState;
 export const saveMonState = DB.saveMonState;
 // 서버 상시감시(P5): 판정 TQL을 파일로 저장하고 Neo 타이머로 주기 실행 (앱 없이도 감시)
+export const pkgBase = DB.pkgBase;
 export const createMonitorTimer = DB.createMonitorTimer;
 export const timerStates = DB.timerStates;
 export const MON_TIMER = DB.MON_TIMER;
 export const BAND_TIMER = DB.BAND_TIMER;
+export const WD_TIMER = DB.WD_TIMER;
+export const createWdTimer = DB.createWdTimer;
+export const deleteWdTimer = DB.deleteWdTimer;
 export const createBandTimer = DB.createBandTimer;
 export const deleteBandTimer = DB.deleteBandTimer;
 export const bandTrend = DB.bandTrend;
@@ -42,7 +61,14 @@ export const bandBackfill = DB.bandBackfill;
 export const bandTimes = DB.bandTimes;
 export const bandRaw = DB.bandRaw;
 export const deleteMonitorTimer = DB.deleteMonitorTimer;
-export const pruneEvents = DB.pruneEvents;
+// 데이터 관리(설정) — 패키지가 만든 테이블의 현황·삭제 전 건수
+export const usageStats = DB.usageStats;
+export const countRange = DB.countRange;
+export const deleteEventsRange = DB.deleteEventsRange;
+export const deleteEventsOfTag = DB.deleteEventsOfTag;
+export const deleteBandRange = DB.deleteBandRange;
+export const deleteBandOfTag = DB.deleteBandOfTag;
+export const deleteMonState = DB.deleteMonState;
 // 리포트 파일 저장/목록/미리보기 (워크스페이스 루트 기준 경로)
 export const REPORT_DIR = '/vibration-reports';
 export const ensureDir = DB.ensureDir;
@@ -69,16 +95,31 @@ export async function buildLiveData(E, tables, cfg) {
   cfg = cfg || {};
   const equipment = [];
   let nowMs = 0;
+  /* 상한에 걸려 빠진 태그를 센다. 잘린 사실을 안 올리면 두 가지가 조용히 깨진다:
+     ① 사용자는 화면에 없는 태그를 "감시 중인데 정상"으로 읽는다
+     ② _catalogTick이 잘린 태그를 매번 '새 태그'로 보고 재적재를 무한 반복한다(droppedKeys가 그 판단 근거다).
+     상한은 태그 목록을 다 받은 뒤에 적용한다 — 미리 자르면 전체가 몇 개인지 알 수 없다. */
+  const cap = { perTable: [], dropped: 0, droppedKeys: {}, eligible: 0, shown: 0, byTotal: false };
 
   for (const table of tables) {
-    if (equipment.length >= MAX_EQUIPMENT) break;
     let tags, stats;
-    try { tags = await DB.listTags(table, TAGS_PER_TABLE); } catch (e) { continue; } // META 없으면 스킵
+    try { tags = await DB.listTags(table, TAG_SCAN_MAX); } catch (e) { continue; } // META 없으면 스킵
     try { stats = await DB.tagStats(table); } catch (e) { stats = {}; }
-    for (const tag of tags) {
-      if (equipment.length >= MAX_EQUIPMENT) break;
+    // 데이터가 없는 태그는 상한과 무관하게 원래 빠진다 — 잘린 것으로 세면 헛경고가 된다
+    const cands = tags.filter(t => { const st = stats[t]; return st && st.count && st.maxMs; });
+    const room = Math.max(0, MAX_EQUIPMENT - equipment.length);
+    const take = Math.min(cands.length, TAGS_PER_TABLE, room);
+    cap.eligible += cands.length;
+    cap.shown += take;
+    if (take < cands.length) {
+      const byTotal = room < Math.min(cands.length, TAGS_PER_TABLE); // 테이블당 상한이 아니라 전체 상한에 걸렸다
+      cap.perTable.push({ table, shown: take, total: cands.length, byTotal });
+      cap.dropped += cands.length - take;
+      if (byTotal) cap.byTotal = true;
+      for (const t of cands.slice(take)) cap.droppedKeys[table + ':' + t] = 1;
+    }
+    for (const tag of cands.slice(0, take)) {
       const st = stats[tag];
-      if (!st || !st.count || !st.maxMs) continue;
       nowMs = Math.max(nowMs, st.maxMs);
       const id = table + ':' + tag;
       const spanSec = Math.max(1, (st.maxMs - st.minMs) / 1000);
@@ -102,47 +143,103 @@ export async function buildLiveData(E, tables, cfg) {
       });
     }
   }
-  if (!equipment.length) return { now: 0, equipment: [], events: [], reports: [] };
+  if (!equipment.length) return { now: 0, equipment: [], events: [], reports: [], cap };
 
-  await Promise.all(equipment.map(async eq => {
+  /* 트렌드·스파크는 테이블 단위로 한 번에 받는다.
+     예전에는 태그마다 2회씩 Promise.all로 한꺼번에 던졌다 — 쿼리 자체는 1~3ms로 싸지만
+     동시에 수백 개가 나가면 서버가 직렬로 소화하느라 벽시계가 태그 수에 비례해 늘었다
+     (실측 300태그=600쿼리 5.0초). 같은 범위를 NAME IN 배치로 받으면 133ms다.
+     묶음 단위는 (테이블 × 롤업단위) — 단위는 태그의 데이터 기간에서 정해지므로,
+     한 테이블 안에서도 어제 붙은 태그와 한 달 된 태그는 단위가 다를 수 있다. */
+  const groups = {};
+  const sparkBy = {};   // 테이블별 스파크 기준 시각(가장 최근 데이터) — 초 버킷 36개
+  for (const eq of equipment) {
     const st = eq.stat;
     const spanSec = Math.max(1, (st.maxMs - st.minMs) / 1000);
+    const unit = pickRollupUnit(spanSec);
+    eq._unit = unit;
+    eq._span = spanSec;
     // rollup 미지원(폴백) 테이블은 원본 스캔이라 행 예산(약 5백만)으로 조회 구간을 캡
-    const capSec = Math.max(300, Math.round(5e6 / Math.max(1, eq.fs)));
-    const truncCapMs = capSec * 1000;
-    let unit = pickRollupUnit(spanSec);
-    let stepSec = UNIT_SEC[unit];
-    let fromMs = Math.max(st.minMs, st.maxMs - ROLLUP_BUCKETS * stepSec * 1000);
-    try {
-      eq.rollup = await DB.rollupTrend(eq.table, eq.name, unit, fromMs, st.maxMs, { truncCapMs });
-      // 폴백이 확인되면(스캔 캡 적용) 캡 구간 기준으로 단위 재선정 → 버킷 밀도 복구
-      if (DB.isNoRollup(eq.table)) {
-        const unit2 = pickRollupUnit(Math.min(spanSec, capSec));
-        if (unit2 !== unit) {
-          unit = unit2; stepSec = UNIT_SEC[unit];
-          fromMs = Math.max(st.minMs, st.maxMs - Math.min(capSec, ROLLUP_BUCKETS * stepSec) * 1000);
-          eq.rollup = await DB.rollupTrend(eq.table, eq.name, unit, fromMs, st.maxMs, { truncCapMs });
+    eq._capSec = Math.max(300, Math.round(5e6 / Math.max(1, eq.fs)));
+    eq._from = Math.max(st.minMs, st.maxMs - ROLLUP_BUCKETS * UNIT_SEC[unit] * 1000);
+    const k = eq.table + '|' + unit;
+    const g = groups[k] || (groups[k] = { table: eq.table, unit, eqs: [], from: Infinity, to: 0, capSec: Infinity });
+    g.eqs.push(eq);
+    g.from = Math.min(g.from, eq._from);
+    g.to = Math.max(g.to, st.maxMs);
+    g.capSec = Math.min(g.capSec, eq._capSec);   // 폴백 캡은 묶음에서 가장 빡빡한 값을 따른다
+    sparkBy[eq.table] = Math.max(sparkBy[eq.table] || 0, st.maxMs);
+  }
+
+  const jobs = [];
+  for (const g of Object.values(groups)) {
+    const names = g.eqs.map(e => e.name);
+    jobs.push((async () => {
+      let unit = g.unit, stepSec = UNIT_SEC[unit], from = g.from;
+      let byTag;
+      try {
+        byTag = await DB.rollupBatch(g.table, names, unit, from, g.to, { truncCapMs: g.capSec * 1000 });
+        // 폴백이 확인되면(스캔 캡 적용) 캡 구간 기준으로 단위 재선정 → 버킷 밀도 복구
+        if (DB.isNoRollup(g.table)) {
+          const unit2 = pickRollupUnit(Math.min(g.eqs[0]._span, g.capSec));
+          if (unit2 !== unit) {
+            unit = unit2; stepSec = UNIT_SEC[unit];
+            from = Math.max(g.from, g.to - Math.min(g.capSec, ROLLUP_BUCKETS * stepSec) * 1000);
+            byTag = await DB.rollupBatch(g.table, names, unit, from, g.to, { truncCapMs: g.capSec * 1000 });
+          }
         }
-        eq.rollupLabel = UNIT_LABEL[unit] + ' · 원본 집계';
-      } else {
-        eq.rollupLabel = UNIT_LABEL[unit]; // ' · 자동' 접미는 화면(detSpec)이 붙인다 — 중복 금지
-      }
-      eq.rollupStepSec = stepSec;
-    } catch (e) { eq.rollup = []; }
-    try {
-      const spark = await DB.rollupTrend(eq.table, eq.name, 'sec', st.maxMs - 36000, st.maxMs);
-      eq.sparkVals = spark.map(b => b.rms);
-      // 샘플레이트 추정 개선: 전체 평균(갭 포함, 과소 추정)보다 초당 버킷 건수의 중앙값이 정확
-      const cnts = spark.map(b => b.cnt).filter(c => c > 0).sort((a, b) => a - b);
-      if (cnts.length >= 5) eq.fs = cnts[Math.floor(cnts.length / 2)];
-    } catch (e) { eq.sparkVals = []; }
-    if (!eq.sparkVals.length && eq.rollup.length) eq.sparkVals = eq.rollup.slice(-36).map(b => b.rms);
+      } catch (e) { byTag = {}; }
+      const label = DB.isNoRollup(g.table) ? UNIT_LABEL[unit] + ' · 원본 집계'
+        : UNIT_LABEL[unit];   // ' · 자동' 접미는 화면(detSpec)이 붙인다 — 중복 금지
+      g.eqs.forEach(eq => {
+        // 묶음 창은 태그별 창의 합집합이라, 자기 구간보다 앞선 버킷이 섞여 올 수 있다
+        const cut = Math.max(from, eq._from);
+        eq.rollup = (byTag[eq.name] || []).filter(b => b.ms >= cut);
+        eq.rollupStepSec = stepSec;
+        eq.rollupLabel = label;
+      });
+    })());
+  }
+  for (const table of Object.keys(sparkBy)) {
+    const anchor = sparkBy[table];
+    const eqs = equipment.filter(e => e.table === table);
+    jobs.push((async () => {
+      let byTag;
+      try { byTag = await DB.rollupBatch(table, eqs.map(e => e.name), 'sec', anchor - 36000, anchor, { truncCapMs: 60000 }); }
+      catch (e) { byTag = {}; }
+      /* 샘플레이트 추정 — 표본 간격(Δt)의 중앙값이 1순위다.
+
+         "초당 행 수"는 기록 밀도라 센서가 얼마나 빠르게 재는지와 다른 양이다: 1분에 1초만
+         캡처하면 과소로, 같은 구간이 두 번 적재되면 과대로 나온다. 실측에서 진짜 4,096 Hz인
+         태그가 각각 70 Hz·8,190 Hz로 잡혔다. 70이면 isoNeeded가 false가 되어 ISO 대역제한이
+         통째로 꺼지고, 8,190이면 밴드패스가 실질 20~2000 Hz를 재게 된다.
+
+         Δt를 못 구하면(표본이 얇은 태그) 초당 버킷 건수의 중앙값, 그것도 안 되면 이미 넣어 둔
+         전체 평균(count/span) 순으로 물러난다 — 새 조회가 실패해도 옛 동작을 잃지 않게. */
+      await Promise.all(eqs.map(async eq => {
+        const spark = byTag[eq.name] || [];
+        eq.sparkVals = spark.map(b => b.rms);
+        const st = eq.stat;
+        const fsDt = VC.fsFromTimes(await DB.sampleTimes(eq.table, eq.name, st.maxMs - 1000, st.maxMs, 2000));
+        if (fsDt > 0) { eq.fs = fsDt; return; }
+        const cnts = spark.map(b => b.cnt).filter(c => c > 0).sort((a, b) => a - b);
+        if (cnts.length >= 5) eq.fs = cnts[Math.floor(cnts.length / 2)];
+      }));
+    })());
+  }
+  await Promise.all(jobs);
+
+  /* 마무리는 조회가 없다 — 값 조립만 한다.
+     스파크가 빈 태그(테이블 기준 시각보다 한참 뒤처진 정지 태그)는 트렌드 꼬리로 대신한다. */
+  equipment.forEach(eq => {
+    if (!eq.sparkVals || !eq.sparkVals.length) eq.sparkVals = eq.rollup.slice(-36).map(b => b.rms);
     eq.rms = eq.sparkVals.length ? eq.sparkVals[eq.sparkVals.length - 1] : (eq.rollup.length ? eq.rollup[eq.rollup.length - 1].rms : 0);
     eq.spark = E.sparkPath(eq.sparkVals.length ? eq.sparkVals : [0, 0], 132, 40, 3);
     eq.grade = VC.gradeFor(eq.rms, eq.zones);
-  }));
+    delete eq._unit; delete eq._span; delete eq._capSec; delete eq._from;
+  });
 
-  return { now: nowMs, equipment, events: [], reports: [] };
+  return { now: nowMs, equipment, events: [], reports: [], cap };
 }
 
 function fmtHz(hz) { return hz >= 1000 ? (hz / 1000).toFixed(1) + 'kHz' : Math.round(hz) + 'Hz'; }

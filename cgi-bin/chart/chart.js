@@ -38,8 +38,15 @@
     return Math.round(s / 86400) + '일 전';
   }
 
+  /* 스파크라인은 구간의 최소~최대를 높이에 꽉 채운다. 그래서 변동이 사실상 없는 신호도 잡음이
+     전체 진폭으로 늘어나 살아 있는 것처럼 보인다 — 죽은 센서(상수 출력)가 그렇게 그려지면
+     화면이 정반대를 말하는 셈이다. 변동이 수준 대비 무시할 만하면 평평하게 그린다
+     (기준 0.2%는 계측 게이트의 플랫라인 판정과 같은 값). */
   function sparkPath(vals, w, h, pad) {
-    var mn = Math.min.apply(null, vals), mx = Math.max.apply(null, vals), r = (mx - mn) || 1;
+    var mn = Math.min.apply(null, vals), mx = Math.max.apply(null, vals);
+    var peak = Math.max(Math.abs(mn), Math.abs(mx));
+    if ((mx - mn) <= (peak > 0 ? 0.002 * peak : 0)) mx = mn;   // 전부 같은 값으로 취급 → 가운데 평평한 선
+    var r = (mx - mn) || 1;
     var n = vals.length, step = (w - pad * 2) / (n - 1);
     var pts = vals.map(function (v, i) { return (pad + step * i).toFixed(1) + ',' + (pad + (h - pad * 2) * (1 - (v - mn) / r)).toFixed(1); });
     var line = pts.join(' ');
@@ -305,10 +312,25 @@
     canvas.onmouseleave = function () { tipEl.style.display = 'none'; if (crossEl) crossEl.style.display = 'none'; };
   }
 
-  /* ---- zoom/pan (휠 확대 · 드래그 이동 · 더블클릭 리셋) ---- */
-  function addZoom(canvas, fullLen, drawFn) {
-    if (!canvas) return; if (canvas._zoom) { var z = canvas._zoom; canvas.removeEventListener('wheel', z.w); canvas.removeEventListener('dblclick', z.d); canvas.removeEventListener('mousedown', z.md); window.removeEventListener('mousemove', z.mm); window.removeEventListener('mouseup', z.mu); }
-    var st = { s: 0, e: fullLen };
+  /* ---- zoom/pan (휠 확대 · 드래그 이동 · 더블클릭 리셋) ----
+     확대 구간은 캔버스에 남는다 — 같은 데이터(key·길이)를 다시 그릴 때는 그 구간을 이어받는다.
+     화면은 라이브 갱신 때마다 통째로 다시 그려지므로, 이어받지 않으면 확대한 채로 볼 수가 없다. */
+  function zoomRange(canvas, fullLen, key) {
+    var p = canvas && canvas._zoom;
+    if (p && p.fullLen === fullLen && p.key === key && (p.st.s > 0 || p.st.e < fullLen)) return { s: p.st.s, e: p.st.e };
+    return { s: 0, e: fullLen };
+  }
+  // 그리기 + 확대/이동 부착을 한 번에 — 이어받을 구간이 있으면 전체가 아니라 그 구간으로 그린다
+  function zoomDraw(canvas, fullLen, drawFn, key) {
+    if (!canvas) return;
+    var r = zoomRange(canvas, fullLen, key);
+    drawFn(r.s, r.e);
+    addZoom(canvas, fullLen, drawFn, key);
+  }
+  function addZoom(canvas, fullLen, drawFn, key) {
+    if (!canvas) return;
+    var st = zoomRange(canvas, fullLen, key);
+    if (canvas._zoom) { var z = canvas._zoom; canvas.removeEventListener('wheel', z.w); canvas.removeEventListener('dblclick', z.d); canvas.removeEventListener('mousedown', z.md); window.removeEventListener('mousemove', z.mm); window.removeEventListener('mouseup', z.mu); }
     function onWheel(ev) { ev.preventDefault(); var r = canvas.getBoundingClientRect(), mx = ev.clientX - r.left, cw = r.width - 74, n = st.e - st.s, ratio = Math.max(0, Math.min(1, (mx - 58) / cw)), zf = ev.deltaY > 0 ? 1.3 : 0.75, nn = Math.round(n * zf); if (nn < 6) nn = 6; if (nn >= fullLen) { st.s = 0; st.e = fullLen; drawFn(0, fullLen); return; } var center = st.s + Math.round(n * ratio), ns = Math.round(center - nn * ratio); if (ns < 0) ns = 0; var ne = ns + nn; if (ne > fullLen) { ne = fullLen; ns = ne - nn; } st.s = Math.max(0, ns); st.e = ne; drawFn(st.s, st.e); }
     function onDbl() { st.s = 0; st.e = fullLen; drawFn(0, fullLen); }
     var drag = { on: false };
@@ -316,7 +338,7 @@
     function onMove(ev) { if (!drag.on) return; var r = canvas.getBoundingClientRect(), cw = r.width - 74, n = drag.e - drag.s, shift = Math.round(-(ev.clientX - drag.x) / cw * n), ns = drag.s + shift, ne = drag.e + shift; if (ns < 0) { ns = 0; ne = n; } if (ne > fullLen) { ne = fullLen; ns = fullLen - n; } st.s = ns; st.e = ne; drawFn(ns, ne); }
     function onUp() { drag.on = false; canvas.style.cursor = 'crosshair'; }
     canvas.addEventListener('wheel', onWheel, { passive: false }); canvas.addEventListener('dblclick', onDbl); canvas.addEventListener('mousedown', onDown); window.addEventListener('mousemove', onMove); window.addEventListener('mouseup', onUp);
-    canvas._zoom = { w: onWheel, d: onDbl, md: onDown, mm: onMove, mu: onUp };
+    canvas._zoom = { fullLen: fullLen, key: key, st: st, w: onWheel, d: onDbl, md: onDown, mm: onMove, mu: onUp };
     canvas.style.cursor = 'crosshair';
   }
 
@@ -325,6 +347,6 @@
     fmt: fmt, fmtClock: fmtClock, fmtMD: fmtMD, fmtDT: fmtDT, fmtFull: fmtFull, ago: ago,
     sparkPath: sparkPath,
     drawLine: drawLine, drawBar: drawBar, drawMultiLine: drawMultiLine, drawHeat: drawHeat,
-    drawFFT: drawFFT, drawForecast: drawForecast, addTip: addTip, addZoom: addZoom
+    drawFFT: drawFFT, drawForecast: drawForecast, addTip: addTip, addZoom: addZoom, zoomDraw: zoomDraw
   };
 });

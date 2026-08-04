@@ -69,6 +69,61 @@ const rms = (x) => Math.sqrt(x.reduce((s, v) => s + v * v, 0) / x.length);
   chk(VC.windowRms([{ rms: 2, cnt: 100 }]).rms === 2, 'SUM 없는 옛 버킷은 기존 동작 유지');
 }
 
+// ── 지름길 상한 — 창을 맞춰서 잡는다 ──────────────────────────────────────
+/* 상한 성질은 "같은 표본"일 때만 성립한다. ISO는 최근 1초에서 재고 판정값은 평가창 전체의
+   실효값이라, 평가창 값을 경계에 대면 조용한 9초 뒤 마지막 1초만 튄 경우를 삼킨다.
+   isoSkippable은 구간 안 가장 큰 초 버킷을 본다 — 어떤 1초 창도 그보다 클 수 없다. */
+{
+  const Z0 = 1.12;
+  chk(VC.isoSkippable([{ rms: 0.3, cnt: 1000 }, { rms: 0.4, cnt: 1000 }], Z0) === true,
+    '전 구간이 경계 아래면 건너뛴다');
+  chk(VC.isoSkippable([{ rms: 0.3, cnt: 1000 }, { rms: 3.0, cnt: 1000 }], Z0) === false,
+    '한 초라도 경계를 넘으면 건너뛰지 않는다');
+  chk(VC.isoSkippable([], Z0) === false && VC.isoSkippable(null, Z0) === false,
+    '버킷이 없으면 상한을 못 세우므로 건너뛰지 않는다');
+  chk(VC.isoSkippable([{ rms: 0.3, cnt: 1000 }], 0) === false, '경계가 없으면 건너뛰지 않는다');
+  // 평가창 RMS는 경계 아래인데 그 안의 한 초는 위험 — 옛 지름길(wide 비교)이 놓치던 모양
+  const spike = [];
+  for (let i = 0; i < 9; i++) spike.push({ rms: 0.30, cnt: 1000 });
+  spike.push({ rms: 3.0, cnt: 1000 });
+  const wide = VC.windowRms(spike).rms;
+  chk(wide < Z0 && VC.isoSkippable(spike, Z0) === false,
+    '평가창은 양호인데 한 초가 튀면 계산한다', '평가창 ' + wide.toFixed(4) + ' · 최대 초 3.0');
+}
+
+// ── 샘플레이트 추정 — 표본 간격의 중앙값 ──────────────────────────────────
+/* fs는 대역제한을 걸지 말지를 정하고(isoNeeded) 필터 차단주파수까지 정한다. 이걸 "초당 행 수"로
+   세면 기록 밀도에 끌려간다 — 간헐 캡처면 과소, 중복 적재면 과대. 실측에서 진짜 4,096 Hz인
+   태그가 각각 70·8,190으로 잡혔고, 70이면 대역제한이 통째로 꺼진다.
+   간격을 보면 갭은 정렬 끝으로 밀려 중앙값에 못 닿고, 중복은 간격 0이라 제외된다. */
+{
+  const DT = 39;                                  // 25.6 kHz ≈ 39 μs 간격(BEARING 실측)
+  const cont = (n, dt) => { const a = [1e15]; for (let i = 1; i < n; i++) a.push(a[i-1] + dt); return a; };
+  chk(Math.abs(VC.fsFromTimes(cont(500, DT)) - 25641) < 2, '연속 표본 → 간격의 역수', String(VC.fsFromTimes(cont(500, DT))));
+  chk(VC.fsFromTimes(cont(500, 1000)) === 1000, '1 kHz(1,000 μs 간격)도 그대로', String(VC.fsFromTimes(cont(500, 1000))));
+
+  // 간헐 캡처 — 1초 캡처 6번 사이에 60초 갭. 갭 5개는 중앙값에 닿지 못한다
+  const burst = [];
+  let t = 1e15;
+  for (let b = 0; b < 6; b++) {
+    for (let i = 0; i < 200; i++) { burst.push(t); t += DT; }
+    t += 60e6;                                    // 60초 쉼
+  }
+  chk(Math.abs(VC.fsFromTimes(burst) - 25641) < 2, '간헐 캡처여도 갭에 끌려가지 않는다', String(VC.fsFromTimes(burst)));
+  // 같은 데이터를 "초당 행 수"로 세면 어떻게 나오는지 — 이게 지금 방식이 빠지는 함정이다
+  const rows = burst.length, spanSec = (burst[burst.length-1] - burst[0]) / 1e6;
+  chk(Math.round(rows / spanSec) < 100, '대조: 초당 행 수로 세면 100 Hz 아래로 무너진다',
+    Math.round(rows / spanSec) + ' Hz');
+
+  // 중복 적재 — 같은 시각이 두 번. 간격 0은 제외되므로 값이 두 배로 뛰지 않는다
+  const dup = [];
+  cont(300, DT).forEach((v) => { dup.push(v); dup.push(v); });
+  chk(Math.abs(VC.fsFromTimes(dup) - 25641) < 2, '중복 적재에도 두 배로 뛰지 않는다', String(VC.fsFromTimes(dup)));
+
+  chk(VC.fsFromTimes(cont(10, DT)) === 0 && VC.fsFromTimes([]) === 0 && VC.fsFromTimes(null) === 0,
+    '근거가 얇으면 0 — 호출측이 옛 추정으로 물러난다');
+}
+
 // ── ③ 대역제한이 필요한 샘플레이트 판별 ────────────────────────────────────
 chk(VC.isoNeeded(25600) === true, '25.6 kHz는 대역제한 필요 (Nyquist 12.8 kHz)');
 chk(VC.isoNeeded(1000) === false, '1 kHz는 불필요 — Nyquist 500 Hz라 1 kHz 위가 없다');

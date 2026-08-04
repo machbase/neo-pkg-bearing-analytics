@@ -110,12 +110,163 @@ const cases = [
   ['monitor 되살아남 배너', { tab: 'monitor',
     health: [{ k: 'revived', lv: 'warn', text: 'C1 — 새로 추가된 태그에 예전 학습값이 남아 있습니다. 이전과 같은 설비인지 확인해 주세요', act: '설정에서 확인' }] },
     ['예전 학습값이 남아 있습니다', '설정에서 확인']],
+  /* 표시 상한 — 잘린 태그는 감시 대상이 아니다. 화면에 안 나오면 "정상이라 조용한 것"으로 읽힌다.
+     어느 테이블이 몇 개 잘렸는지까지 나와야 어디 선택을 풀지 판단할 수 있다. */
+  ['settings source 상한 초과', { tab: 'settings', setSection: 'source',
+    srcCap: { perTable: [{ table: 'VIBRATION_RAW', shown: 20, total: 27, byTotal: false }], dropped: 7, droppedKeys: {}, eligible: 27, shown: 20, byTotal: false } },
+    ['27개 중 20개', '7개 제외', '테이블당 상한']],
+  ['settings source 상한 안(안내 없음)', { tab: 'settings', setSection: 'source' }, ['!표시 상한']],
+  /* 별칭 편집 — 감시 상한만큼 나와야 한다(예전엔 db 기본값 20으로 잘려, 상한을 올려도
+     21번째부터는 별칭을 못 달았다). 목록이 길어지므로 검색이 실제로 동작해야 한다.
+     _tagCache를 심어야 필터가 실제로 도는 것을 본다 — 스모크엔 DB가 없어 캐시가 비어 있다. */
+  ['settings source 별칭 목록', { tab: 'settings', setSection: 'source', srcSel: ['VIBRATION_RAW'], _tagCache: { VIBRATION_RAW: ['P1', 'P2', 'MOTOR_A'] } },
+    ['VIBRATION_RAW · P1', 'VIBRATION_RAW · MOTOR_A', '>3개<']],
+  ['settings source 별칭 검색', { tab: 'settings', setSection: 'source', srcSel: ['VIBRATION_RAW'], _tagCache: { VIBRATION_RAW: ['P1', 'P2', 'MOTOR_A'] }, tagQuery: 'motor' },
+    ['VIBRATION_RAW · MOTOR_A', '1 / 3개', '!VIBRATION_RAW · P1']],
+  ['settings source 별칭 검색 무결과', { tab: 'settings', setSection: 'source', srcSel: ['VIBRATION_RAW'], _tagCache: { VIBRATION_RAW: ['P1', 'P2', 'MOTOR_A'] }, tagQuery: 'ZZZNOPE' },
+    ['검색과 일치하는 태그가 없습니다']],
+  /* 목록은 테이블의 전 태그다 — 감시 상한 밖 태그도 나오되 '감시 제외'로 표시한다.
+     한 번에 그리는 줄만 제한하고, 몇 개가 더 있는지는 밝힌다(조용히 자르지 않는다). */
+  ['settings source 별칭 감시제외 표시', { tab: 'settings', setSection: 'source', srcSel: ['VIBRATION_RAW'],
+    _tagCache: { VIBRATION_RAW: ['P1', 'P2'] },
+    srcCap: { perTable: [], dropped: 1, droppedKeys: { 'VIBRATION_RAW:P2': 1 }, eligible: 2, shown: 1, byTotal: false } },
+    ['VIBRATION_RAW · P2', '감시 제외']],
+  ['settings source 별칭 줄 수 제한 고지', { tab: 'settings', setSection: 'source', srcSel: ['VIBRATION_RAW'],
+    _tagCache: { VIBRATION_RAW: Array.from({ length: 260 }, (_, i) => 'T' + i) } },
+    ['260개', '아래로 더 내리면 60개가 이어집니다']],
+  // 바닥까지 내려 이어 붙인 뒤에는 남았다는 안내가 사라진다(끝까지 스크롤로 닿는다)
+  ['settings source 별칭 이어 붙인 뒤', { tab: 'settings', setSection: 'source', srcSel: ['VIBRATION_RAW'],
+    _tagCache: { VIBRATION_RAW: Array.from({ length: 260 }, (_, i) => 'T' + i) }, aliasShown: 400 },
+    ['260개', 'VIBRATION_RAW · T259', '!이어집니다']],
+  ['monitor 상한 배너', { tab: 'monitor',
+    health: [{ k: 'cap', lv: 'warn', text: '태그 7개가 표시 상한(테이블당 20개 · 전체 40개)을 넘어 감시에서 빠져 있습니다 — 감시 중인 태그는 20개입니다', act: '설정에서 확인' }] },
+    ['감시에서 빠져 있습니다', '설정에서 확인']],
+  /* 서버 회차가 주기에 근접하면 곧 겹친다 — 겹친 회차는 잠금에 막혀 통째로 건너뛰므로
+     타이머는 RUNNING인데 실제 판정 간격만 조용히 늘어난다. 그 전에 알린다. */
+  ['monitor 서버 회차 지연 경고', { tab: 'monitor',
+    health: [{ k: 'slowtick', lv: 'warn', text: '서버 감시 1회차가 8.2초 걸립니다 (주기 10s · 태그 120개) — 주기를 늘리는 것을 권합니다.', act: '설정 열기' }] },
+    ['1회차가 8.2초 걸립니다', '설정 열기']],
+  ['monitor 서버 회차 초과(주기 건너뜀)', { tab: 'monitor',
+    health: [{ k: 'slowtick', lv: 'err', text: '서버 감시 1회차가 12.4초 걸립니다 (주기 10s · 태그 200개) — 회차가 겹쳐 일부 주기를 건너뜁니다. 주기를 늘리거나 감시 태그를 줄이세요.', act: '설정 열기' }] },
+    ['회차가 겹쳐 일부 주기를 건너뜁니다']],
+  /* 계측 이상 배지 — 정지보다 먼저 뜬다. 플랫라인은 값이 낮아 정지처럼 보이지만 뜻이 정반대다:
+     정지는 설비가 선 것이고, 플랫라인은 센서가 죽어 그 태그가 무기한 무감시가 된 상태다. */
+  ['monitor 계측 이상 배지', { tab: 'monitor',
+    _runState: { [eq0.table + ':' + eq0.name]: { lost: false, run: false, age: 1000, gate: { label: '플랫라인', detail: 'σ 0.00001 / peak 2.400' } } } },
+    ['계측 이상', 'codicon-warning', '플랫라인', '헛경보', '센서·케이블·마운팅', '!codicon-debug-pause']],
+  // 두절이 계측 이상보다 우선한다 — 데이터가 아예 없으면 볼 파형도 없다
+  ['monitor 두절이 계측 이상보다 우선', { tab: 'monitor',
+    _runState: { [eq0.table + ':' + eq0.name]: { lost: true, run: false, age: 7200000, gate: { label: '플랫라인', detail: 'x' } } } },
+    // '계측 이상'이라는 말은 이벤트 유형 필터에도 있으므로 배지 툴팁 문구로 부재를 본다
+    ['신호 두절', '!센서·케이블·마운팅']],
+  /* 판정 보류 — 계측 이상·신호 두절·정지 셋 다 지금 등급을 매기지 않는 상태다.
+     카드 숫자가 그 설비를 대표하지 않으므로 등급 칩을 대체하고 등급 집계에서도 뺀다.
+     "계측 이상인데 양호"처럼 화면이 자기 모순을 말하는 것을 막는 자리다. */
+  ['monitor 판정 보류 칩(계측 이상)', { tab: 'monitor',
+    _runState: { [eq0.table + ':' + eq0.name]: { lost: false, run: true, age: 1000, gate: { label: '플랫라인', detail: 'x' } } } },
+    // 색도 중립이어야 한다 — 칩만 회색이고 테두리·스파크가 등급색이면 화면이 정상이라고 말한다
+    ['판정 보류', '지금 등급을 매기지 않습니다', '플랫라인', 'border-left: 3px solid var(--text-muted)']],
+  ['monitor 판정 보류 칩(정지)', { tab: 'monitor',
+    _runState: { [eq0.table + ':' + eq0.name]: { lost: false, run: false, age: 1000 } } },
+    ['판정 보류', '정지']],
+  ['monitor 판정 보류 칩(두절)', { tab: 'monitor',
+    _runState: { [eq0.table + ':' + eq0.name]: { lost: true, run: false, age: 7200000 } } },
+    ['판정 보류', '신호 두절']],
+  // 보류가 아니면 등급 칩이 그대로 나와야 한다 — 전 카드가 보류로 덮이면 안 된다
+  // '판정 보류'는 KPI 칸 라벨에도 늘 있으므로, 칩 툴팁 문구로 부재를 본다
+  ['monitor 정상은 등급 칩 유지', { tab: 'monitor', _runState: {} }, ['!지금 등급을 매기지 않습니다']],
+  // KPI 칸 — 내역은 호버로 내린다(칸을 늘리면 난잡해진다)
+  ['monitor KPI 판정 보류 칸', { tab: 'monitor',
+    _runState: {
+      [sorted[0].table + ':' + sorted[0].name]: { lost: true, run: false, age: 7200000 },
+      [sorted[1].table + ':' + sorted[1].name]: { lost: false, run: true, age: 1000, gate: { label: '클리핑', detail: 'x' } },
+      [sorted[2].table + ':' + sorted[2].name]: { lost: false, run: false, age: 1000 },
+    } },
+    ['판정 보류', '계측 이상 1대', '신호 두절 1대', '정지 1대']],
+  /* 상세 통계 요약 — 리포트와 같은 지표를 쓴다. COUNT/AVG/MIN/MAX는 진동에서 오해를 만든다:
+     MIN은 정지 구간 값이고, MAX는 계측 스파이크 하나에 좌우되며, AVG는 간헐 고진동을 평탄화한다. */
+  ['detail 통계 요약(중앙값·P95)', { tab: 'detail' },
+    ['중앙값 RMS', 'P95 RMS', 'B/C 초과 버킷', 'Crest P95', '변화율', '관측 창',
+      '!건수 (COUNT)', '!평균 (AVG)', '!최솟값 (MIN)', '!최댓값 (MAX)']],
+  /* 카드 숫자 = 판정값(항상 ISO 대역제한). 라벨은 "어느 대역에서 잰 값인가"를 주파수로 적어
+     원인으로 오해되지 않게 한다. 나머지 두 축의 값은 카드에 안 적는다 — 신규 설치에서는
+     대부분 미학습이라 거의 모든 카드가 "베이스라인 — 대역 —"이 되어 잡음이 된다.
+     "왜 이 등급인가"는 등급 칩의 원인 표시가 답하고, "얼마나"는 호버·상세분석의 몫이다. */
+  ['monitor 카드 판정값·대역 라벨', { tab: 'monitor',
+    _gradeState: { [eq0.table + ':' + eq0.name]: { gi: 2, src: 'band', iso: 2.38, wide: 3.55, limited: true, basis: 'iso', blR: 5.5, bandR: 2.3 } } },
+    ['2.38', '10~1000 Hz', '베이스라인 한계 대비 ×5.5', '대역 최대 ×2.3']],
+  ['monitor 카드에 축 값을 안 적는다', { tab: 'monitor',
+    _gradeState: { [eq0.table + ':' + eq0.name]: { gi: 1, src: 'baseline', iso: 1.5, wide: 1.6, limited: true, basis: 'iso', blR: null, bandR: null } } },
+    ['1.50', '!베이스라인 —', '!대역 —']],
   ['report 기본', { tab: 'report' }],
   ['report 생성중+미리보기모달', { tab: 'report', genRunning: true, genStep: 2, viewReport: { rec: {}, url: 'report.html?x=1', fname: 'RPT_TEST.html' } }],
   ['report 커스텀 기간', { tab: 'report', genPeriod: 'custom' }],
   ['report 대상 태그 미선택(기간 없음)', { tab: 'report', genTags: [], genPeriod: '', genFrom: '', genTo: '' }],
   ['report 빈 소스', { tab: 'report', srcSel: [] }],
   ['settings source+dirty+이동확인모달', { tab: 'settings', setSection: 'source', dirty: true, pendingNav: 'monitor' }],
+  // 데이터 관리 — 현황 조회 전/중/후, 그리고 삭제 2단계(날짜 고르기 → 건수 확인) 각각의 분기
+  ['settings data 현황 읽는 중', { tab: 'settings', setSection: 'data', usageBusy: true }, ['현황을 읽는 중']],
+  // usageBusy를 명시로 끈다 — 케이스가 한 state를 이어 쓰므로 앞 케이스의 true가 남는다
+  ['settings data 현황 실패', { tab: 'settings', setSection: 'data', usage: null, usageBusy: false }, ['현황을 읽지 못했습니다']],
+  ['settings data 현황', { tab: 'settings', setSection: 'data', usage: {
+    events: { rows: 7730, span: { from: d.now - 11 * 86400000, to: d.now } },
+    band: { rows: 39120, keys: 396, span: { from: d.now - 30 * 86400000, to: d.now } },
+    monstate: { rows: 269 }, baseline: { rows: 26 },
+  } }, ['이벤트 이력', 'NEO_VIBE_EVENTS', '>TAG<', '>LOOKUP<', '대역 에너지 추이', '판정 상태', '7,730건',
+    '기간 삭제…', '태그 단위 삭제도 가능', '학습 구간 포함 주의',
+    // 이벤트가 TAG가 되면서 설비 단위 삭제가 가능해졌다 — 옛 LOG 제약 문구가 남아 있으면 안 된다
+    '!LOG 테이블이라 중간을 지울 수 없어', '태그의 이력만 따로',
+    // 학습값은 행이 아니라 각주다 — 늘지 않는 데이터라 정리 대상이 아니다
+    '!학습값 (베이스라인)', '재학습이 같은 자리를 덮어써 늘지 않습니다', '판정 기준으로 이동',
+    // 학습값은 덮어쓰기라 행이 안 늘어난다 — 정리 대상이 아니라는 것을 화면이 말해야 한다
+    ]],
+  /* 기간 고르기 — 기본값을 두지 않는다(빈칸 + 버튼 잠금).
+     기본값을 넣었더니 보관 기간이 하루뿐일 때 시작＞종료로 뒤집혔고(사용자 보고),
+     넓게 잡으면 기본이 사실상 전체 삭제가 됐다. 되돌릴 수 없는 동작이라 둘 다 안 된다. */
+  // 기본은 보관 중인 전체 구간(min~max) — 사용자는 여기서 좁힌다
+  ['settings data 날짜 고르기(기본=전체 구간)', { tab: 'settings', setSection: 'data', usage: {
+    events: { rows: 100, span: { from: d.now - 30 * 86400000, to: d.now } }, band: { rows: 0, keys: 0, span: null }, monstate: { rows: 0 }, baseline: { rows: 0 },
+  }, purgePick: 'events', purgeFrom: null, purgeTo: null },
+    ['이벤트 이력 삭제', '>선택<', '지울 기간을 정하세요', '보관 중:',
+      'value="' + E.fmtDT(d.now - 30 * 86400000).slice(0, 10) + '"', 'value="' + E.fmtDT(d.now).slice(0, 10) + '"']],
+  // 보관 정보가 없으면 지울 것이 없다 — 빈칸 + 잠금
+  ['settings data 날짜 고르기(데이터 없음·잠금)', { tab: 'settings', setSection: 'data', usage: {
+    events: { rows: 0, span: null }, band: { rows: 0, keys: 0, span: null }, monstate: { rows: 0 }, baseline: { rows: 0 },
+  }, purgePick: 'events', purgeFrom: null, purgeTo: null },
+    ['!value="20', 'not-allowed']],
+  ['settings data 날짜 고르면 잠금 해제', { tab: 'settings', setSection: 'data', usage: {
+    events: { rows: 100, span: { from: d.now - 30 * 86400000, to: d.now } }, band: { rows: 0, keys: 0, span: null }, monstate: { rows: 0 }, baseline: { rows: 0 },
+  }, purgePick: 'events', purgeFrom: '2026-07-01', purgeTo: '2026-07-15' },
+    ['value="2026-07-01"', 'value="2026-07-15"', '!not-allowed']],
+  ['settings data 확인(세는 중)', { tab: 'settings', setSection: 'data', usage: {
+    events: { rows: 7730, span: null }, band: { rows: 0, keys: 0, span: null }, monstate: { rows: 0 }, baseline: { rows: 0 },
+  }, purge: { kind: 'events', fromMs: d.now - 86400000, toMs: d.now, counting: true, n: null } }, ['세는 중', '건수 확인 중']],
+  ['settings data 확인(건수 나옴)', { tab: 'settings', setSection: 'data', usage: {
+    events: { rows: 7730, span: null }, band: { rows: 0, keys: 0, span: null }, monstate: { rows: 0 }, baseline: { rows: 0 },
+  }, purge: { kind: 'events', fromMs: d.now - 86400000, toMs: d.now, counting: false, n: 5102, keep: 2628 } },
+    ['정말 삭제하시겠습니까?', '5,102건 삭제', '삭제 후 남는 데이터 2,628건', '영구 삭제되며 복구할 수 없습니다',
+      '이 기간을 다룬 리포트는 다시 만들 수 없습니다', '내보내기로 저장한 뒤 제거하는 것을 권장',
+      // 표 이름을 치기 전에는 삭제 버튼이 잠긴다
+      '계속하려면 테이블 이름', 'not-allowed']],
+  // 표 이름을 정확히 입력하면 열린다(대소문자 무시)
+  ['settings data 확인(이름 입력 완료)', { tab: 'settings', setSection: 'data', usage: {
+    events: { rows: 7730, span: null }, band: { rows: 0, keys: 0, span: null }, monstate: { rows: 0 }, baseline: { rows: 0 },
+  }, purge: { kind: 'events', fromMs: d.now - 86400000, toMs: d.now, counting: false, n: 5102, keep: 2628 }, purgeTyped: 'neo_vibe_events' },
+    ['5,102건 삭제', '!not-allowed']],
+  // 삭제 실행 중 — 버튼이 잠기고 라벨이 바뀐다(중복 실행 방지)
+  ['settings data 삭제 실행 중', { tab: 'settings', setSection: 'data', usage: {
+    events: { rows: 7730, span: null }, band: { rows: 0, keys: 0, span: null }, monstate: { rows: 0 }, baseline: { rows: 0 },
+  }, purge: { kind: 'events', fromMs: d.now - 86400000, toMs: d.now, counting: false, n: 5102, keep: 2628, running: true } },
+    ['삭제 중…', 'not-allowed']],
+  ['settings data 확인(지울 것 없음)', { tab: 'settings', setSection: 'data', usage: {
+    events: { rows: 10, span: null }, band: { rows: 0, keys: 0, span: null }, monstate: { rows: 0 }, baseline: { rows: 0 },
+  }, purge: { kind: 'events', fromMs: d.now - 86400000, toMs: d.now, counting: false, n: 0, keep: 10 } }, ['지울 데이터 없음']],
+  ['settings data 대역 확인', { tab: 'settings', setSection: 'data', usage: {
+    events: { rows: 0, span: null }, band: { rows: 39120, keys: 396, span: null }, monstate: { rows: 0 }, baseline: { rows: 0 },
+  }, purge: { kind: 'band', fromMs: d.now - 86400000, toMs: d.now, counting: false, n: 14418, keep: 24702 } },
+    ['NEO_VIBE_BAND', '14,418행 삭제', '대역 베이스라인을 다시 학습', '추세 차트에서 이 구간이 비어 보입니다',
+      // 대역은 내보내기 경로가 없다 — 이벤트 전용 안내가 새면 안 된다
+      '!내보내기로 저장한 뒤']],
   ['settings equip+펼침+커스텀베어링', { tab: 'settings', setSection: 'equip', equipAdv: { [eq0.id]: true }, equipBearing: { [eq0.id]: '직접 입력' } }],
   ['settings equip 슬리브', { tab: 'settings', setSection: 'equip', equipAdv: { [eq0.id]: true }, equipBearing: { [eq0.id]: 'sleeve' } }],
   ['settings equip 계측·구동 전부 입력', { tab: 'settings', setSection: 'equip', equipAdv: { [eq0.id]: true }, equipRpm: { [eq0.id]: '1800' },
@@ -130,9 +281,32 @@ const cases = [
   ['settings equip 항목 툴팁(계측·구동 펼침)', { tab: 'settings', setSection: 'equip', equipAdv: { [eq0.id]: true },
     equipMeta: { [eq0.id]: { drive: 'belt', belt: { d1: 120, d2: 300 } } } },
     ['스터드 10, 접착 5, 자석 2, 프로브 1 kHz', '벨트 옆면의 각인', '마우스를 올리면 설명']],
+  // 접힌 버튼 이름은 행마다 같다 — 직접 입력이라는 사실은 옆의 베어링 모델 셀렉트가 말한다
+  ['settings equip 직접 입력도 버튼 라벨은 설정', { tab: 'settings', setSection: 'equip', equipBearing: { [eq0.id]: '직접 입력' } },
+    ['</span>설정<span']],
   // 직접 입력(커스텀 베어링) 형상 4칸에도 툴팁이 붙어야 한다 — 사용자 보고로 추가된 회귀 케이스
   ['settings equip 직접 입력 형상 툴팁', { tab: 'settings', setSection: 'equip', equipAdv: { [eq0.id]: true }, equipBearing: { [eq0.id]: '직접 입력' } },
     ['전동체(볼 또는 롤러)의 개수', 'ball diameter', 'pitch diameter', '깊은홈 볼베어링은 0°', '형상 제원 표']],
+  /* 목록 필터·일괄 적용 — 감시 태그는 상한(100개)까지 늘어난다. 목록에 자체 스크롤을 두지 않는
+     대신(행이 펼쳐지므로 고정 높이 안에 가두면 펼친 내용이 갇힌다) 손댈 줄만 남기는 필터와,
+     한 행을 채워 같은 설비로 퍼뜨리는 일괄 적용을 둔다. 값 검사는 test-equipbulk.mjs. */
+  // 필터는 전체/미설정 둘뿐 — "설정 미완료"는 필터가 아니라 각 행의 n/N 배지가 짚는다
+  ['settings equip 목록 필터', { tab: 'settings', setSection: 'equip' },
+    ['미설정', '기본값(Class II · 1800 rpm · mm/s)으로 판정 중', '!설정 미완료']],
+  ['settings equip 필터 빈 상태', { tab: 'settings', setSection: 'equip', equipFilter: 'unset',
+    equipCls: Object.fromEntries(d.equipment.map((e) => [e.id, 'II'])) },
+    ['조건에 맞는 태그가 없습니다', '전체 보기']],
+  ['settings equip 일괄 적용 패널', { tab: 'settings', setSection: 'equip',
+    equipCls: { [eq0.id]: 'III' }, equipRpm: { [eq0.id]: '3600' }, equipBearing: { [eq0.id]: '6205' },
+    equipMeta: { [eq0.id]: { mount: 'stud', drive: 'belt', belt: { d1: 120, d2: 300 }, vanes: 7 } },
+    equipBulk: { id: eq0.id, scope: '', fields: {} } },
+    // 칩 하나 = 입력칸 하나 — 묶으면 값이 다 안 보이고 일부만 켜는 선택도 사라진다
+    ['복사할 항목', '3600 rpm', '6205', '>계측<', '스터드', '>구동<', '벨트·풀리',
+      '풀리 D1', '120 mm', '풀리 D2', '300 mm', '>날개수<', '7매',
+      '개에 적용', '덮어씁니다', '같은 테이블']],
+  ['settings equip 일괄 적용 — 복사할 값 없음', { tab: 'settings', setSection: 'equip',
+    equipBulk: { id: eq0.id, scope: '', fields: {} } },
+    ['복사할 값이 없습니다']],
   // 1800 rpm은 60Hz 4극 동기속도 → 50Hz로 설정돼 있으면 "60Hz 쪽에 맞다"고 경고해야 한다
   ['settings equip 계통 불일치 경고(1800rpm인데 50Hz 설정)', { tab: 'settings', setSection: 'equip', lineHz: '50', equipRpm: { [eq0.id]: '1800' } },
     ['60 Hz 계통 동기속도에 맞습니다', '전기적 결함 100 Hz']],
@@ -234,12 +408,21 @@ const cases = [
          제거된 설정, 생성 코드 없는 이벤트 유형, 옛 라벨 */
       '!다른 구간 기준입니다', '!← 지금', '!집계 방식', '!스펙트럼 변화', '!평가 윈도우',
       '!대역 에너지 추세']],
-  // 부하 문구는 문제일 때만 — 여유로우면 표시하지 않는다(3%를 알릴 이유가 없다)
-  ['settings monitor 부하 경고', { tab: 'settings', setSection: 'monitor', monitorInterval: '1s',
-    srcSel: ['VIBRATION_RAW', 'SENSOR_DATA', 'MOTOR_CURRENT', 'GEARBOX_VIB', 'BEARING_TEMP'] },
-    ['주기의', '%를 씁니다']],
-  ['settings monitor 부하 여유(문구 없음)', { tab: 'settings', setSection: 'monitor', monitorInterval: '1m' },
+  /* 부하 문구는 문제일 때만 — 여유로우면 표시하지 않는다(3%를 알릴 이유가 없다).
+     값은 판정 틱이 실제로 잰 소요를 쓴다(_tickCostMs). 상수 추정이던 시절엔 태그 20개·주기 1초가
+     경고 대상이었지만, 실측하면 그 조건은 실제로 여유롭다 — 경고는 정말 밀릴 때만 떠야 한다. */
+  ['settings monitor 부하 경고(실측)', { tab: 'settings', setSection: 'monitor', monitorInterval: '1s',
+    _tickCostMs: 780 },
+    ['780ms(실측)', '주기의 78%를 씁니다']],
+  ['settings monitor 부하 초과(회차 밀림)', { tab: 'settings', setSection: 'monitor', monitorInterval: '1s',
+    _tickCostMs: 1400 },
+    ['다음 회차를 밀어냅니다']],
+  ['settings monitor 부하 여유(문구 없음)', { tab: 'settings', setSection: 'monitor', monitorInterval: '1m',
+    _tickCostMs: 130 },
     ['!%를 씁니다']],
+  // 첫 틱 전에는 잰 값이 없다 — 모델 추정으로 채우되 실측이 아님을 밝힌다
+  ['settings monitor 부하 미측정(예상)', { tab: 'settings', setSection: 'monitor', monitorInterval: '1s',
+    _tickCostMs: null }, ['!(실측)']],
   // RMS 구간 < 판정 주기는 데이터에 구멍을 만든다 — 화면에서 경고하고 선택지도 잠근다
   ['settings monitor RMS구간 부족 경고', { tab: 'settings', setSection: 'monitor', monitorInterval: '30s', evalWindow: '3s' },
     ['RMS 구간이 판정 주기보다 짧습니다', '주기보다 짧음']],
@@ -353,7 +536,7 @@ for (const [label, patch, expect] of cases) {
        중간값(_runState·_flap 등)은 state에 없어서, state에만 넣으면 화면에 아무 영향이 없다. */
     const inst = {}, st = {};
     for (const [k, v] of Object.entries(patch)) (k[0] === '_' ? inst : st)[k] = v;
-    app._runState = null; app._flap = null;   // 케이스 간 이월 방지
+    app._runState = null; app._flap = null; app._gradeState = null;   // 케이스 간 이월 방지
     Object.assign(app, inst);
     Object.assign(app.state, JSON.parse(JSON.stringify(baseState)), st);
     const out = renderToString(view(app.renderVals()));

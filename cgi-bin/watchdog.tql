@@ -1,0 +1,35 @@
+SCRIPT({
+var db=$.db();
+var WD_BASE="http://127.0.0.1:5654", WD_AUTH="/work/public/neo-pkg-replication/cgi-bin/config/neo-auth.json";
+var WD_TARGETS=[{"peer":"NEO_VIBE_MONITOR","hb":"__hb","key":"__wd_mon","cfg":{"stale":60000,"gap":300000,"max":3,"calm":3600000}},{"peer":"NEO_VIBE_BAND","hb":"__hbband","key":"__wd_band","cfg":{"stale":1800000,"gap":300000,"max":3,"calm":3600000}}];
+var e=function e(a,i,s,u){return i=i&&typeof i=="object"?{n:i.n||0,at:i.at||0}:{n:0,at:0},i.at&&s-i.at>u.calm&&(i={n:0,at:0}),!a||!(a.t>0)?{act:!1,w:i,why:"nohb"}:s-a.t<=u.stale?{act:!1,w:i,why:"alive"}:i.n>=u.max?{act:!1,w:i,why:"gaveup"}:i.at&&s-i.at<u.gap?{act:!1,w:i,why:"waiting"}:{act:!0,w:{n:i.n+1,at:s},why:"restart"}};
+function wdGet(db,k){ var v=null; try{ db.query("select VAL from NEO_VIBE_MONSTATE where K='"+k+"'")
+  .forEach(function(r){ try{ v=JSON.parse(decodeURIComponent(String(r[0]))); }catch(e){} }); }catch(e){} return v; }
+function wdPut(db,k,o){ try{ var c=0; db.query("select count(*) from NEO_VIBE_MONSTATE where K='"+k+"'").forEach(function(r){ c=+r[0]; });
+  var v=encodeURIComponent(JSON.stringify(o)).replace(/'/g,"%27");
+  if(c>0) db.exec("update NEO_VIBE_MONSTATE set VAL='"+v+"' where K='"+k+"'");
+  else db.exec("insert into NEO_VIBE_MONSTATE values('"+k+"','"+v+"')"); }catch(e){} }
+function wdLogin(){ var u="SYS", p="MANAGER";
+  try{ var fs=require("@jsh/fs"); var a=JSON.parse(String(fs.readFile(WD_AUTH))); if(a&&a.user){ u=a.user; p=a.password||""; } }catch(e){}
+  var tok="";
+  try{ $.request(WD_BASE+"/web/api/login",{method:"POST",headers:{"Content-Type":"application/json"},
+    body:JSON.stringify({loginName:u,password:p})}).do(function(r){ if(r.status===200) r.text(function(t){
+      try{ tok=JSON.parse(String(t)).accessToken||""; }catch(e){} }); }); }catch(e){}
+  return tok; }
+function wdStart(name){ var tok=wdLogin(); if(!tok) return false; var ok=false;
+  try{ $.request(WD_BASE+"/web/api/timers/"+name+"/state",{method:"POST",
+    headers:{"Authorization":"Bearer "+tok,"Content-Type":"application/json"},
+    body:JSON.stringify({state:"start"})}).do(function(r){ ok=(r.status===200); }); }catch(e){}
+  return ok; }
+function wdTick(db){ var out=[];
+  for(var i=0;i<WD_TARGETS.length;i++){ var t=WD_TARGETS[i];
+    try{ var d=e(wdGet(db,t.hb), wdGet(db,t.key), Date.now(), t.cfg);
+      if(!d.act){ out.push(t.peer+":"+d.why); continue; }
+      var ok=wdStart(t.peer); d.w.ok=!!ok; wdPut(db,t.key,d.w);
+      out.push(t.peer+":"+(ok?"restarted":"failed"));
+    }catch(e){ out.push(t.peer+":err"); } }
+  return out.join(","); }
+try{ wdPut(db,"__hbwd",{t:Date.now(),n:0}); }catch(e){}
+$.yield("wd", wdTick(db));
+})
+CSV()

@@ -12,7 +12,7 @@
 // 6. rollupBatch   : 테이블 단위 다태그 롤업 — GROUP BY NAME, RT (모니터링 5초 갱신용)
 // 7. rawWindow     : 원시 파형 구간 — TIME BETWEEN to_date(초 단위)
 // 8. fftTql        : 서버 FFT — TQL: SQL(raw)→MAPKEY('fft')→GROUPBYKEY()→FFT(minHz,maxHz)→CSV
-// 9. 상시감시(P6) : NEO_VIBE_EVENTS(LOG — 이벤트 이력, append 전용·무한증가) +
+// 9. 상시감시(P6) : NEO_VIBE_EVENTS(TAG — 이벤트 이력, NAME='<테이블>:<태그>'라 설비 단위 삭제 가능) +
 //                    MONSTATE/BASELINE(LOOKUP — 직전 판정/μ·σ, UPSERT 필요).
 //                    판정은 앱이 열려 있는 동안 앱(app._judgeLive)이 수행 — 타이머/서버 상주 없음.
 //                    KV류(MONSTATE/BASELINE) VAL은 encodeURIComponent(JSON)+('→%27) 관례.
@@ -91,6 +91,13 @@
       + sqlDate(fromMs) + ' and ' + sqlDate(toMs) + ' order by TIME';
   }
 
+  /* 샘플레이트 추정용 — 값은 필요 없고 연속한 표본의 시각만 있으면 된다.
+     LIMIT으로 건수를 묶어 25.6 kHz 태그라도 비용이 고정된다(간격은 표본 수보다 하나 적다). */
+  function sampleTimes(table, tag, fromMs, toMs, limit) {
+    return 'select TIME from ' + ident(table) + " where NAME='" + esc(tag) + "' and TIME between "
+      + sqlDate(fromMs) + ' and ' + sqlDate(toMs) + ' order by TIME limit ' + (Number(limit) || 2000);
+  }
+
   function fftTql(table, tag, fromMs, toMs, minHz, maxHz) {
     return 'SQL(`select time, value from ' + ident(table) + " where name = '" + esc(tag) + "' and time between "
       + sqlDate(fromMs) + ' and ' + sqlDate(toMs) + ' order by time`)\n'
@@ -100,8 +107,11 @@
   /* ---- 상시감시(P6) ---- */
   function monCreateTables() {
     return [
-      // EVENTS는 LOG 테이블(디스크·append 전용·무한증가 친화) — 이벤트는 확인/삭제가 없는 순수 이력이라 LOOKUP(메모리) 부적합
-      'CREATE TABLE NEO_VIBE_EVENTS (EID VARCHAR(120), TS LONG, TBL VARCHAR(80), TAG VARCHAR(100), ETYPE VARCHAR(16), GRADE VARCHAR(8), VAL DOUBLE, LIM DOUBLE, DETAIL VARCHAR(400))',
+      /* EVENTS는 TAG 테이블 — NAME='<테이블>:<태그>', TIME=이벤트 시각.
+         LOG였을 때는 설비 하나만 지울 수가 없었다(가장 오래된 쪽부터 연속 삭제만 지원).
+         설비를 철거해도 그 이력만 지우려면 전체를 날리거나 오래된 것부터 잘라야 했다.
+         SUMMARIZED를 붙이지 않아 롤업·통계는 만들지 않는다 — 이벤트는 집계 대상이 아니다. */
+      'CREATE TAG TABLE NEO_VIBE_EVENTS (NAME VARCHAR(200) PRIMARY KEY, TIME DATETIME BASETIME, VALUE DOUBLE, ETYPE VARCHAR(16), GRADE VARCHAR(8), LIM DOUBLE, DETAIL VARCHAR(400), EID VARCHAR(120))',
       'CREATE LOOKUP TABLE NEO_VIBE_MONSTATE (K VARCHAR(200) PRIMARY KEY, VAL VARCHAR(1000))',
       'CREATE LOOKUP TABLE NEO_VIBE_BASELINE (K VARCHAR(200) PRIMARY KEY, VAL VARCHAR(1000))',
       /* 대역 에너지 추세 — TAG 테이블로 만든다. 전용 스키마를 새로 짜지 않는 이유:
@@ -134,28 +144,73 @@
       + ' order by TIME';
   }
   // 기존 설치 마이그레이션 — 이미 있으면 에러가 나지만 호출측이 삼킨다(멱등 취급)
-  function eventsAddDetail() { return 'ALTER TABLE NEO_VIBE_EVENTS ADD COLUMN (DETAIL VARCHAR(400))'; }
+  /* 컬럼 순서는 TAG 테이블 규약(NAME·TIME·VALUE 먼저) — 읽는 쪽이 인덱스로 집으므로 여기서만 정한다.
+     앱이 보는 객체 모양({eid, ts, tbl, tag, …})은 db.js가 맞춰 주므로 화면 코드는 이 순서를 모른다. */
+  var EV_COLS = 'NAME, TIME, VALUE, ETYPE, GRADE, LIM, DETAIL, EID';
   function eventsSelect(limit) {
-    return 'select EID, TS, TBL, TAG, ETYPE, GRADE, VAL, LIM, DETAIL from NEO_VIBE_EVENTS order by TS desc limit ' + (Number(limit) || 300);
+    return 'select ' + EV_COLS + ' from NEO_VIBE_EVENTS order by TIME desc limit ' + (Number(limit) || 300);
   }
-  // 기간 지정 조회(CSV/JSON 내보내기용) — TS(ms) 범위, 최신순
+  // 기간 지정 조회(CSV/JSON 내보내기용) — 최신순
   function eventsRange(fromMs, toMs, limit) {
-    return 'select EID, TS, TBL, TAG, ETYPE, GRADE, VAL, LIM, DETAIL from NEO_VIBE_EVENTS where TS between ' +
-      Number(fromMs) + ' and ' + Number(toMs) + ' order by TS desc limit ' + (Number(limit) || 100000);
+    return 'select ' + EV_COLS + ' from NEO_VIBE_EVENTS where TIME between ' +
+      sqlDate(fromMs) + ' and ' + sqlDate(toMs) + ' order by TIME desc limit ' + (Number(limit) || 100000);
   }
   // 기간·필터 내 총 건수 — 목록은 최근 N건만 렌더하므로 개수는 별도 COUNT로 정확히 센다
   function eventsCount(fromMs, toMs, etype, tbl, tag) {
-    var w = 'TS between ' + Number(fromMs) + ' and ' + Number(toMs);
+    var w = 'TIME between ' + sqlDate(fromMs) + ' and ' + sqlDate(toMs);
+    if (tbl && tag) w += " and NAME='" + esc(tbl + ':' + tag) + "'";
     if (etype) w += " and ETYPE='" + esc(etype) + "'";
-    if (tbl && tag) w += " and TBL='" + esc(tbl) + "' and TAG='" + esc(tag) + "'";
     return 'select count(*) from NEO_VIBE_EVENTS where ' + w;
   }
   function eventInsert(e) {
     // GRADE는 단어(양호/주의/위험/심각) 저장 — raw 테이블 가독성. 앱은 로드 시 인덱스로 역매핑.
     return 'insert into NEO_VIBE_EVENTS values(' +
-      "'" + esc(e.eid) + "', " + Number(e.ts) + ", '" + esc(e.tbl) + "', '" + esc(e.tag) + "', '" + esc(e.etype) + "', '" +
-      esc(e.grade) + "', " + Number(e.val) + ', ' + Number(e.lim) + ", '" + esc(e.detail || '') + "')";
+      "'" + esc(e.tbl + ':' + e.tag) + "', " + sqlDate(e.ts) + ', ' + Number(e.val) + ", '" + esc(e.etype) + "', '" +
+      esc(e.grade) + "', " + Number(e.lim) + ", '" + esc(e.detail || '') + "', '" + esc(e.eid) + "')";
   }
+  /* 삭제 — TAG 테이블이라 태그별·기간별로 지울 수 있다(LOG였을 때는 둘 다 불가능했다).
+     '설비 하나 철거' 같은 정리가 이 두 문장으로 끝난다. */
+  function eventsDeleteTag(tbl, tag) {
+    return "delete from NEO_VIBE_EVENTS where NAME='" + esc(tbl + ':' + tag) + "'";
+  }
+  function eventsDeleteRange(fromMs, toMs) {
+    return 'delete from NEO_VIBE_EVENTS where TIME between ' + sqlDate(fromMs) + ' and ' + sqlDate(toMs);
+  }
+  /* 대역 데이터 삭제 — 이벤트와 같은 규칙(TAG 표).
+     한 태그는 6키(대역 5 + fr)라 태그 단위 삭제는 부르는 쪽이 키마다 한 번씩 돈다. */
+  function bandDeleteRange(fromMs, toMs) {
+    return 'delete from NEO_VIBE_BAND where TIME between ' + sqlDate(fromMs) + ' and ' + sqlDate(toMs);
+  }
+  function bandDeleteKey(key) { return "delete from NEO_VIBE_BAND where NAME='" + esc(key) + "'"; }
+  // 옛 LOG 테이블에서 옮겨 담기 위한 전체 조회 — 마이그레이션 전용
+  function eventsLegacySelect() {
+    return 'select EID, TS, TBL, TAG, ETYPE, GRADE, VAL, LIM, DETAIL from NEO_VIBE_EVENTS order by TS';
+  }
+  function tableTypeOf(name) {
+    return "select TYPE from M$SYS_TABLES where NAME = '" + esc(String(name).toUpperCase()) + "'";
+  }
+  function dropTable(name) { return 'DROP TABLE ' + ident(name); }
+  /* ---- 데이터 관리(설정) ----
+     패키지가 만든 테이블의 현황을 읽는다. 삭제는 유형마다 되는 범위가 다르다:
+      · EVENTS/BAND(TAG)          — 태그별·기간별 자유롭게
+      · MONSTATE/BASELINE(LOOKUP) — 키 단위
+     화면 버튼은 이 제약을 그대로 따른다(안 되는 걸 내놓으면 눌렀을 때 에러가 난다). */
+  function usageCount(table) { return 'select count(*) from ' + ident(table); }
+  // 이벤트 보관 범위 — 표시용. TIME은 timeformat=ms라 숫자로 온다(대역 표와 같은 규약)
+  function eventsSpan() { return 'select min(TIME), max(TIME) from NEO_VIBE_EVENTS'; }
+  // 대역 데이터 보관 범위 — TAG 테이블이라 시각 컬럼(TIME) 기준
+  function bandSpan() { return 'select min(TIME), max(TIME) from NEO_VIBE_BAND'; }
+  function bandKeyCount() { return 'select count(*) from (select NAME from NEO_VIBE_BAND group by NAME)'; }
+  // 특정 시각 이전 건수 — 삭제 전에 "몇 건이 지워지는지" 세어 보여주기 위한 조회
+  /* 구간 건수·삭제 — 전체 태그의 시간 범위 지정이 된다(8.0.50+ 확장 구문, 라이브 검증 완료).
+     문서의 제약 절("특정 시간 범위 삭제 미지원")은 레거시 BEFORE 구문 기준이라 지금은 해당 없다. */
+  function eventsCountRange(fromMs, toMs) {
+    return 'select count(*) from NEO_VIBE_EVENTS where TIME between ' + sqlDate(fromMs) + ' and ' + sqlDate(toMs);
+  }
+  function bandCountRange(fromMs, toMs) {
+    return 'select count(*) from NEO_VIBE_BAND where TIME between ' + sqlDate(fromMs) + ' and ' + sqlDate(toMs);
+  }
+
   function kvSelect(table) { return 'select K, VAL from ' + ident(table); }
   function kvExists(table, key) { return 'select count(*) from ' + ident(table) + " where K='" + esc(key) + "'"; }
   function kvInsert(table, key, val) { return 'insert into ' + ident(table) + " values('" + esc(key) + "', '" + val + "')"; }
@@ -166,9 +221,14 @@
     esc: esc, ident: ident, sqlDate: sqlDate,
     catalogTables: catalogTables, catalogCount: catalogCount,
     tagList: tagList, tagStats: tagStats,
-    rollupTrend: rollupTrend, rollupBatch: rollupBatch, rawWindow: rawWindow, fftTql: fftTql,
+    rollupTrend: rollupTrend, rollupBatch: rollupBatch, rawWindow: rawWindow, sampleTimes: sampleTimes, fftTql: fftTql,
     monCreateTables: monCreateTables, bandTrend: bandTrend, bandRaw: bandRaw, bandTimes: bandTimes, eventsSelect: eventsSelect, eventsRange: eventsRange,
-    eventsCount: eventsCount, eventInsert: eventInsert, eventsAddDetail: eventsAddDetail,
-    kvSelect: kvSelect, kvExists: kvExists, kvInsert: kvInsert, kvUpdate: kvUpdate, kvDelete: kvDelete
+    eventsCount: eventsCount, eventInsert: eventInsert,
+    eventsDeleteTag: eventsDeleteTag, eventsDeleteRange: eventsDeleteRange,
+    bandDeleteRange: bandDeleteRange, bandDeleteKey: bandDeleteKey,
+    eventsLegacySelect: eventsLegacySelect, tableTypeOf: tableTypeOf, dropTable: dropTable,
+    kvSelect: kvSelect, kvExists: kvExists, kvInsert: kvInsert, kvUpdate: kvUpdate, kvDelete: kvDelete,
+    usageCount: usageCount, eventsSpan: eventsSpan, bandSpan: bandSpan, bandKeyCount: bandKeyCount,
+    eventsCountRange: eventsCountRange, bandCountRange: bandCountRange
   };
 });

@@ -21,12 +21,22 @@ const BLS = {
 };
 
 // ── ② DETAIL 컬럼 ──────────────────────────────────────────────────────────
+// 이벤트 표는 TAG 테이블이다 — NAME='<테이블>:<태그>'라 설비 단위로 지울 수 있다(LOG는 불가능했다).
 chk(/DETAIL VARCHAR\(400\)/.test(SQL.monCreateTables().join('')), 'CREATE에 DETAIL 컬럼');
-chk(/ADD COLUMN \(DETAIL/.test(SQL.eventsAddDetail()), '기존 설치용 ALTER 제공');
-chk(/GRADE, VAL, LIM, DETAIL/.test(SQL.eventsSelect(10)), 'SELECT가 DETAIL 포함');
+chk(/CREATE TAG TABLE NEO_VIBE_EVENTS/.test(SQL.monCreateTables().join('')), '이벤트 표가 TAG 테이블');
+chk(!/SUMMARIZED/.test(SQL.monCreateTables()[0]), '이벤트는 SUMMARIZED 없음(롤업 미생성)');
+chk(/GRADE, LIM, DETAIL/.test(SQL.eventsSelect(10)), 'SELECT가 DETAIL 포함');
 {
   const ins = SQL.eventInsert({ eid: 'e', ts: 1, tbl: 'T', tag: 'A', etype: 'band', grade: '주의', val: 1.34, lim: 1, detail: "fault=1.783/1.440 · o'x" });
-  chk(/'fault=1.783\/1.440 · o''x'\)$/.test(ins), 'INSERT가 DETAIL을 이스케이프해 담음');
+  chk(/'fault=1.783\/1.440 · o''x'/.test(ins), 'INSERT가 DETAIL을 이스케이프해 담음');
+  chk(/values\('T:A', to_date\(/.test(ins), 'INSERT의 NAME이 <테이블>:<태그>');
+}
+{
+  // 태그별 삭제 — TAG로 바꾼 이유 그 자체
+  chk(/where NAME='T:A'$/.test(SQL.eventsDeleteTag('T', 'A')), '태그별 삭제 SQL');
+  // 구간 삭제 — 전체 태그의 시간 범위 지정(8.0.50+ 확장 구문). 라이브에서 동작 확인함
+  chk(/where TIME between to_date\(.*\) and to_date\(/.test(SQL.eventsDeleteRange(1, 2)), '기간 삭제 SQL');
+  chk(/where TIME between to_date\(/.test(SQL.bandDeleteRange(1, 2)), '대역 기간 삭제 SQL');
 }
 
 // ── ③ 배수 등급 ────────────────────────────────────────────────────────────
@@ -127,17 +137,19 @@ chk(VC.bandJudge({ fault: 1.0 }, { one: BLS.one }, false) === null, '겹치는 �
   const decl = /NEO_VIBE_EVENTS \(([\s\S]*)\)/.exec(SQL.monCreateTables().find((s) => /NEO_VIBE_EVENTS/.test(s)))[1];
   const cols = decl.replace(/\([^)]*\)/g, '').split(',').length;
   // 생성 식이 참조하는 이름을 전부 채워 실제로 평가한다(문자열 조립이라 정적 검사로는 자릿수를 못 센다)
-  const NAMES = ['esc', 'eid', 't', 'now', 'ev', 'GW', 'v2', 'l2', 'dt', 'key', 'last', 'durAgo'];
+  // dtms — TAG 표가 되면서 TIME을 to_date 문자열로 찍는다(monitor.js가 자체 정의)
+  const NAMES = ['esc', 'eid', 't', 'now', 'ev', 'GW', 'v2', 'l2', 'dt', 'key', 'last', 'durAgo', 'dtms'];
   const VALS = [String, 'T:A:1:band', { tbl: 'T', tag: 'A' }, 1, { etype: 'band', gi: 1 },
-    ['양호', '주의'], 1.3, 1, 'fault=1/2', 'T:A', 0, () => '2시간'];
+    ['양호', '주의'], 1.3, 1, 'fault=1/2', 'T:A', 0, () => '2시간', () => '2026-08-04 10:30:45 123'];
   let detailOk = false;
   inserts.forEach((src, i) => {
     const sqlStr = new Function(...NAMES, 'return ' + src)(...VALS);
     const args = sqlStr.replace(/^.*?values\(/, '').replace(/\)$/, '').split(',').length;
     chk(args === cols, 'INSERT#' + (i + 1) + ' 인자 수 == EVENTS 컬럼 수 (ERR-2026 회귀 방지)', args + '/' + cols);
-    if (/'fault=1\/2'\)$/.test(sqlStr)) detailOk = true;
+    chk(/values\('T:A', to_date\('\d{4}-/.test(sqlStr), 'INSERT#' + (i + 1) + ' NAME·TIME이 TAG 규약');
+    if (/'fault=1\/2', '[^']*'\)$/.test(sqlStr)) detailOk = true;   // DETAIL 다음 EID가 마지막
   });
-  chk(detailOk, 'DETAIL이 마지막 인자로 들어감');
+  chk(detailOk, 'DETAIL이 EID 앞 인자로 들어감');
 }
 
 // ── 알림 라우팅 ────────────────────────────────────────────────────────────

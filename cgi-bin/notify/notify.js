@@ -54,7 +54,9 @@
     if (!c || !c.on || !c.to) return false;
     var routes = cfg.routes || {};
     var routed = function (k) { var r = routes[k]; return !!(r && r[ch] && r.timing !== '무시'); };
-    if (etype === 'recovery' || etype === 'bandrec') return routed('주의') || routed('위험') || routed('심각');
+    /* 해제 통지는 등급이 '양호'라 라우팅 표에 행이 없다 — 예외를 두지 않으면 이탈 알림만 가고
+       해제는 영영 안 간다. 계측 복귀도 같은 이유로 여기 들어간다. */
+    if (etype === 'recovery' || etype === 'bandrec' || etype === 'sensor_ok') return routed('주의') || routed('위험') || routed('심각');
     return routed(gradeKo);
   }
 

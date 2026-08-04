@@ -83,9 +83,69 @@
     if (!cnt) return null;
     var rms = Math.sqrt(Math.max(0, r[1]) / cnt);
     var mn = r[3], mx = r[4];
-    var b = { ms: r[0], rms: rms, p2p: mx - mn, crest: rms > 0 ? Math.max(Math.abs(mn), Math.abs(mx)) / rms : 0, cnt: cnt };
+    var b = { ms: r[0], rms: rms, p2p: mx - mn, crest: rms > 0 ? Math.max(Math.abs(mn), Math.abs(mx)) / rms : 0, cnt: cnt, mn: mn, mx: mx };
     if (r.length > 5 && isFinite(r[5])) b.sum = r[5];
     return b;
+  }
+
+  /* 기간 지표 4종 — 상세분석 화면과 리포트가 같은 값·같은 등급을 쓰도록 한 곳에서 낸다.
+     화면과 리포트가 각자 계산하면 같은 설비가 두 등급으로 보인다.
+
+     규칙:
+      · 대표값은 최댓값이 아니라 백분위(P95) — N개 버킷의 최댓값은 단일 극단치에 좌우된다.
+        최댓값은 값과 초과 횟수만 싣고 등급을 매기지 않는다(n.wMax·n.overBC).
+      · Crest 기준은 상수가 아니라 샘플 수의 함수 — N샘플 백색잡음의 기대 최대 = √(2·ln N).
+        3.0 같은 상수를 쓰면 정상 기계(3~5)가 전부 경보가 된다. 15 초과는 결함이 아니라
+        계측 아티팩트(단발 스파이크)라 등급 대신 그 사실을 badge로 낸다.
+      · 변화율은 관측 창이 짧으면 등급을 매기지 않는다 — ISO Criterion II는 정상상태·동일
+        계측조건 전제이고, 짧은 창에서는 운전 변동이 그대로 악화로 읽힌다.
+      · 계측 게이트가 켜져 있으면 RMS 계열 등급은 '잠정' — 파형을 믿을 수 없는 상태다.
+
+     반환의 badge가 비어 있지 않으면 등급어 대신 그 문구를 쓴다. 라벨·서식은 부르는 쪽 몫이다. */
+  function sevMetrics(roll, o) {
+    o = o || {}; roll = roll || [];
+    var zones = o.zones || [0, 0, 0], gate = !!o.gate, i;
+    /* 버킷 rms는 √(Σx²/N)이라 DC를 포함한다. 진동은 정의상 평균 주위의 흔들림이므로
+       평균을 빼야 한다 — 오프셋 9.0에 진동 0.72인 센서가 9.03으로 보이면 12배 과대다.
+       Crest도 같다: peak을 평균 기준으로 재야 오프셋이 분자·분모를 동시에 부풀리지 않는다. */
+    var rms = [], crestA = [], cnt = 0;
+    for (i = 0; i < roll.length; i++) {
+      var b0 = roll[i];
+      var m0 = (b0 && b0.cnt > 0 && isFinite(b0.sum)) ? b0.sum / b0.cnt : 0;
+      var ac0 = Math.sqrt(Math.max(0, b0.rms * b0.rms - m0 * m0));
+      if (!isFinite(ac0) || (!isFinite(b0.sum) && ac0 === 0)) ac0 = b0.rms;   // SUM 없는 옛 버킷은 그대로
+      rms.push(ac0);
+      var pk0 = (isFinite(b0.mn) && isFinite(b0.mx)) ? Math.max(Math.abs(b0.mn - m0), Math.abs(b0.mx - m0)) : null;
+      crestA.push(pk0 != null && ac0 > 1e-12 ? pk0 / ac0 : b0.crest);
+      cnt += (b0.cnt || 0);
+    }
+    var mean = function (a) { return a.length ? a.reduce(function (x, y) { return x + y; }, 0) / a.length : 0; };
+    var pctl = function (a, p) { var s = a.slice().sort(function (x, y) { return x - y; }); return s.length ? s[Math.min(s.length - 1, Math.floor(p * (s.length - 1)))] : 0; };
+    var q4 = Math.max(1, Math.floor(rms.length / 4));
+    var prevQ = mean(rms.slice(-2 * q4, -q4));
+    var wTrend = prevQ > 0 ? mean(rms.slice(-q4)) / prevQ : 1;
+    var wAvg = mean(rms), rP95 = pctl(rms, 0.95), cP95 = pctl(crestA, 0.95);
+    var wMax = rms.length ? Math.max.apply(null, rms) : 0;
+    var wMin = rms.length ? Math.min.apply(null, rms) : 0;
+    var wCrest = crestA.length ? Math.max.apply(null, crestA) : 0;
+    var overBC = 0;
+    for (i = 0; i < rms.length; i++) if (rms[i] > zones[1]) overBC++;
+    var perBucket = Math.max(2, roll.length ? Math.round((cnt || roll.length * (o.fs || 1)) / roll.length) : (o.fs || 1));
+    var cExp = Math.sqrt(2 * Math.log(perBucket));
+    var durMin = roll.length > 1 ? (roll[roll.length - 1].ms - roll[0].ms) / 60000 : 0;
+    var graded = durMin >= 60;
+    // 계측을 못 믿는 동안은 어느 지표도 등급어를 쓰지 않는다 — 자기 배지가 이미 있으면 그게 우선이다
+    var hold = function (own) { return own || (gate ? '잠정' : ''); };
+    return {
+      avg: { value: wAvg, thr: zones[1], grade: gradeFor(wAvg, zones), badge: hold('') },
+      p95: { value: rP95, thr: zones[1], grade: gradeFor(rP95, zones), badge: hold('') },
+      crest: { value: cP95, thr: cExp, grade: cP95 < cExp ? 0 : cP95 < 8 ? 1 : cP95 < 15 ? 2 : 3,
+        badge: hold(cP95 > 15 ? '계측 아티팩트 의심' : '') },
+      trend: { value: wTrend, thr: 2.0, graded: graded,
+        grade: graded ? (wTrend < 1.3 ? 0 : wTrend < 2 ? 1 : 3) : 0, badge: hold(graded ? '' : '참고') },
+      n: { cnt: cnt, buckets: roll.length, perBucket: perBucket, cExp: cExp, durMin: durMin,
+        overBC: overBC, wAvg: wAvg, wMin: wMin, wMax: wMax, wCrest: wCrest, wTrend: wTrend, rMed: pctl(rms, 0.5) },
+    };
   }
 
   function kurtosis(values) {
@@ -206,7 +266,11 @@
       return { ok: false, issues: issues, severe: true, gate: true }; // 나머지 검사 무의미
     }
     // clip: 최고치 밴드가 바로 아래 밴드보다 과밀 = 평평한 꼭대기(잘림). 매끈한 사인은 밀도비 ≈2.4라 안 걸림.
-    var b = range * 0.005;
+    /* 밴드폭은 range와 σ 중 좁은 쪽으로 잡는다. range만 쓰면 단발 스파이크 하나가 range를
+       수십 배로 늘려, 나머지 신호 전체가 "평평한 바닥"으로 뭉쳐 클리핑으로 오분류된다
+       (실측: 진폭 0.05 정현파 + 스파이크 20 → 밴드폭 0.10이 신호를 통째로 삼켰다).
+       진짜 포화는 σ가 큰 상태에서 꼭대기만 평평하므로 좁은 밴드로도 그대로 잡힌다. */
+    var b = Math.min(range * 0.005, std * 0.05) || range * 0.005;
     function inBand(lo, hi) { var c = 0; for (var j = 0; j < n; j++) if (values[j] >= lo && values[j] < hi) c++; return c; }
     var topMax = inBand(mx - b, mx + 1e-9), nextMax = inBand(mx - 2 * b, mx - b);
     var topMin = inBand(mn - 1e-9, mn + b), nextMin = inBand(mn + b, mn + 2 * b);
@@ -219,8 +283,16 @@
     // (ESD·케이블 흔들림·커넥터 접촉) 시그니처에 가깝다 → gate=true면 "진단 보류·계측 검증 필요"
     var peakAC = Math.max(Math.abs(mx - mean), Math.abs(mn - mean));
     var crest = std > 1e-12 ? peakAC / std : 0, kurt = kurtosis(values), gate = false;
-    if (crest > 15) { issues.push({ key: 'spike', label: '단발 스파이크 의심', detail: 'Crest ' + crest.toFixed(1) + ' — 결함 신호(통상 <10)보다 스파이크성 잡음(ESD·케이블·접촉) 시그니처에 가깝습니다' }); gate = true; }
-    if (kurt > 25) { issues.push({ key: 'kurtx', label: '극단 첨도', detail: 'Kurtosis ' + kurt.toFixed(1) + ' — 소수 샘플이 지배하는 신호, 계측 아티팩트 가능성 — 센서·마운팅 확인 필요' }); gate = true; }
+    if (crest > 15) { issues.push({ key: 'spike', label: '단발 스파이크 의심', detail: 'Crest ' + crest.toFixed(1) + ' — 결함 신호(통상 <10)보다 스파이크성 잡음(ESD·케이블·접촉) 시그니처에 가깝습니다' }); }
+    if (kurt > 25) { issues.push({ key: 'kurtx', label: '극단 첨도', detail: 'Kurtosis ' + kurt.toFixed(1) + ' — 소수 샘플이 지배하는 신호, 계측 아티팩트 가능성 — 센서·마운팅 확인 필요' }); }
+    /* 판정을 막는 사유 — 감시(gateFromBuckets·gateFromRaw)와 같은 목록이어야 한다.
+       한쪽만 세면 같은 태그가 모니터링에서는 판정 보류, 상세분석에서는 확정 등급으로 갈린다.
+       클리핑은 진폭이 과소로 나오고(Crest까지 낮아진다) DC 드리프트는 RMS가 부풀려지므로,
+       둘 다 "값이 틀린 방향을 아는" 상태다 — 경고로 두고 등급을 확정하면 그 등급이 거짓말이 된다.
+       ⚠배열은 함수 안에 둔다 — 이 함수는 소스가 서버 TQL에 문자열로 박혀 바깥 이름을 쓸 수 없다
+       (모듈 상수 GATE_BLOCK과 갈라지지 않는지는 test-gate.mjs가 확인한다). */
+    var BLOCK = ['flatline', 'sparse', 'spike', 'kurtx', 'clip', 'dc'];
+    for (i = 0; i < issues.length; i++) if (BLOCK.indexOf(issues[i].key) >= 0) gate = true;
     return { ok: issues.length === 0, issues: issues, severe: false, gate: gate };
   }
 
@@ -558,6 +630,24 @@
        이 값이 BL_IDLE_FRAC과 어긋나지 않는지 확인한다. */
     return val >= ref * 0.2;
   }
+  /* 버킷의 AC 실효값 배열 — 정지 판별의 참조값을 판정값과 같은 양으로 맞춘다.
+
+     버킷 rms는 √(Σx²/N)이라 DC를 포함하고, 판정값(windowRms)은 평균을 뺀 AC다. 둘을 섞어
+     비교하면 오프셋이 있는 센서에서 "판정값 0.72 vs 참조 9.03"이 되어 항상 정지로 읽힌다
+     (실측: DC 9.0인 태그가 운전 중인데 정지 배지가 떴다). */
+  function acVals(buckets) {
+    var out = [];
+    for (var i = 0; i < (buckets || []).length; i++) {
+      var b = buckets[i];
+      if (!b || !(b.cnt > 0) || !isFinite(b.rms)) continue;
+      if (isFinite(b.sum)) {
+        var mean = b.sum / b.cnt;
+        out.push(Math.sqrt(Math.max(0, b.rms * b.rms - mean * mean)));
+      } else out.push(b.rms);
+    }
+    return out;
+  }
+
   // 정지 판별 기준값 — 학습 μ 우선, 없으면 최근값들의 P75
   function runRef(bl, recent) {
     if (bl && bl.mu > 0) return bl.mu;
@@ -647,10 +737,192 @@
     for (i = 0; i < y.length; i++) ss += y[i] * y[i];
     return Math.sqrt(ss / y.length);
   }
+  /* ── 계측 게이트 ─────────────────────────────────────────────────────────
+
+     들어온 파형이 기계 신호인지 계측 문제인지 판별한다. 이게 판정 앞에 없으면 커넥터 접촉이
+     "심각"으로, 클리핑(포화)이 "양호"로 나간다 — 틀리는 방향이 일정하지도 않다.
+
+     둘로 나눈 이유는 비용이다. 플랫라인·DC는 롤업 집계만으로 나오므로 매 판정마다 공짜로
+     본다. 클리핑·스파이크·첨도는 파형 모양이라 원본이 필요해서, 알람이 날 조건이 섰을 때만
+     본다(그때는 ISO 계산 때문에 원본이 이미 와 있다).
+
+     반환 null(이상 없음) 또는 { key, label, detail, gi }. gi는 이벤트 등급 —
+     플랫라인은 감시가 통째로 죽은 상태라 위험(2), 나머지는 주의(1)로 둔다. */
+
+  var GATE_FLAT_RATIO = 0.002;   // σ가 peak의 0.2% 미만이면 상수나 다름없다
+  var GATE_DC_RATIO = 3;         // 평균이 σ의 3배를 넘으면 기준선이 어긋난 것
+  /* 판정을 막는 계측 사유 — 감시·상세분석·리포트가 모두 이 목록을 본다. 심각한 것부터.
+     signalQuality·gateFromRaw는 서버 TQL에 박히느라 같은 배열을 함수 안에 다시 갖는다.
+     그 사본이 이 상수와 갈라지지 않는지는 test-gate.mjs가 확인한다. */
+  var GATE_BLOCK = ['flatline', 'sparse', 'spike', 'kurtx', 'clip', 'dc'];
+
+  /* 롤업 버킷만으로 보는 게이트 — 추가 조회 0회.
+     σ는 windowRms가 이미 내는 AC 실효값이고, peak은 버킷의 MIN/MAX에서 나온다. */
+  function gateFromBuckets(buckets, ac) {
+    if (!buckets || !buckets.length || !(ac >= 0)) return null;
+    /* 상수를 안에서 다시 선언한다 — 이 함수는 소스가 서버 TQL에 문자열로 박히므로 바깥 이름을
+       쓸 수 없다(압축되면 이름이 어긋나 ReferenceError). 모듈 상수와 갈라지지 않는지는
+       test-gate.mjs가 확인한다. */
+    var FLAT = 0.002, DCR = 3;
+    var peak = 0, sum = 0, n = 0, i, b, haveSum = true;
+    for (i = 0; i < buckets.length; i++) {
+      b = buckets[i];
+      if (!b || !(b.cnt > 0)) continue;
+      if (isFinite(b.mn)) peak = Math.max(peak, Math.abs(b.mn));
+      if (isFinite(b.mx)) peak = Math.max(peak, Math.abs(b.mx));
+      if (isFinite(b.sum)) sum += b.sum; else haveSum = false;
+      n += b.cnt;
+    }
+    if (!n) return null;
+    /* 플랫라인 — 값이 거의 안 변한다. 설비 정지와 다르다: 정지는 값이 작아도 흔들리고,
+       죽은 센서는 상수를 뱉는다. 이걸 정지로 읽으면 그 태그는 영구 무감시가 된다. */
+    if (peak === 0 || ac < 1e-9 || ac < FLAT * peak) {
+      return { key: 'flatline', label: '플랫라인', gi: 2,
+        detail: 'σ ' + ac.toFixed(5) + ' / peak ' + peak.toFixed(3) + ' — 값이 거의 변하지 않음, 센서 정지·케이블 탈락 의심' };
+    }
+    if (haveSum) {
+      var mean = sum / n;
+      if (Math.abs(mean) > DCR * ac) {
+        return { key: 'dc', label: 'DC 드리프트', gi: 1,
+          detail: '평균 ' + mean.toFixed(3) + ' / σ ' + ac.toFixed(3) + ' — 기준선이 0에서 크게 벗어남' };
+      }
+    }
+    return null;
+  }
+
+  /* 원본 파형이 있을 때만 볼 수 있는 게이트 — signalQuality의 판정을 이벤트 형태로 옮긴다.
+     같은 임계를 쓰므로 화면(상세분석)과 알람이 같은 기준으로 계측을 본다. */
+  function gateFromRaw(values, fs) {
+    var q = signalQuality(values, fs);
+    if (!q) return null;
+    var issues = q.issues || [], i, j;
+    /* 판정을 막아야 하는 사유만, 심각한 것부터 고른다 — signalQuality는 참고용 지적도 같은 배열에
+       담으므로 첫 항목을 그대로 쓰면 엉뚱한 사유가 보고된다.
+       목록은 GATE_BLOCK에서 dc만 뺀 것이다 — DC 드리프트는 롤업 게이트(gateFromBuckets)가
+       먼저 보므로 여기서 또 내면 같은 사유로 이벤트가 두 번 난다.
+       ⚠배열을 함수 안에 두는 이유는 signalQuality와 같다(서버 TQL 임베드). */
+    /* 판정을 막는 것은 "기계가 만들 수 없는 파형"뿐이다 — 상수(플랫라인)·잘린 꼭대기(클리핑)·
+       표본 부족. 그 값으로 등급을 매기면 반드시 틀린다.
+
+       Crest·첨도는 뺐다. 그건 "충격성이 강하다"는 사실이고 기계 결함(베어링 스폴)일 수도
+       계측 문제(커넥터 접촉)일 수도 있다. 정도의 문제라 경계가 임의적인데 판정까지 막으면
+       저속 기계의 초기 결함을 계측 문제로 오해하고 그동안 감시가 빈다.
+       대신 impactEvidence로 이벤트에 근거로 붙인다 — 결론을 막지 않고 재료를 준다. */
+    var order = ['flatline', 'sparse', 'clip'];
+    for (i = 0; i < order.length; i++) {
+      for (j = 0; j < issues.length; j++) {
+        if (issues[j].key === order[i]) {
+          var sev = order[i] === 'flatline' || order[i] === 'sparse';
+          return { key: issues[j].key, label: issues[j].label, gi: sev ? 2 : 1, detail: issues[j].detail };
+        }
+      }
+    }
+    return null;
+  }
+
+  /* 충격성 근거 — 진동 이벤트에 붙이는 설명이지 판정이 아니다.
+
+     대역 에너지가 올랐을 때 그게 임펄스 때문인지(베어링·기어 결함) 넓게 퍼진 잡음인지
+     (캐비테이션·유동·마운팅 이완) RMS 계열로는 구분이 안 된다. Crest와 첨도가 그걸 가른다.
+
+     경계 8은 물리에서 온다: 정상 랜덤 신호의 기대 최대 Crest가 창 크기에 따라 3.9~4.5이고,
+     베어링 결함은 충격이 회전마다 반복되며 RMS도 같이 올려 대개 5~10에서 포화한다.
+     15를 넘으면 수천 샘플 중 하나가 지배하는 모양이라 기계 충격으로는 잘 안 나온다 —
+     그때는 계측 확인을 권한다(막지는 않는다). */
+  function impactEvidence(values, fs) {
+    var n = (values || []).length;
+    if (n < 64) return null;
+    var i, sum = 0;
+    for (i = 0; i < n; i++) sum += values[i];
+    var mean = sum / n, ss = 0, pk = 0;
+    for (i = 0; i < n; i++) { var d = values[i] - mean; ss += d * d; if (Math.abs(d) > pk) pk = Math.abs(d); }
+    var sd = Math.sqrt(ss / n);
+    if (!(sd > 1e-12)) return null;
+    var crest = pk / sd, kurt = kurtosis(values);
+    var kind = (crest >= 8 || kurt >= 8) ? '충격성' : '광대역';
+    var txt = 'Crest ' + crest.toFixed(1) + ' · 첨도 ' + kurt.toFixed(1) + ' → ' + kind;
+    if (crest > 15 || kurt > 25) txt += ' (단발성이 강함 — 마운팅·커넥터도 확인)';
+    return { crest: crest, kurt: kurt, kind: kind, text: txt };
+  }
+
+  /* 계측 이상 상태기 — 진동 판정과 같은 홀드 규칙을 쓴다.
+     단발 스파이크 한 번으로 알리면 그것도 폭주다(escHold). 해제도 지속을 요구한다(recHold) —
+     없으면 경계에서 오가는 신호가 매번 새 이벤트가 된다. */
+  function sensorTick(prev, bad, now, cfg) {
+    cfg = cfg || {};
+    var p = prev || {}, events = [];
+    var on = !!p.sf, since = p.sfs != null ? p.sfs : null, clr = p.sfc != null ? p.sfc : null;
+    if (bad) {
+      clr = null;
+      if (!on) {
+        if (since == null) since = now;
+        if (now - since >= (cfg.escHold || 0)) {
+          on = true;
+          events.push({ etype: 'sensor_fault', gi: bad.gi, detail: bad.label + ' — ' + bad.detail });
+        }
+      }
+    } else {
+      since = null;
+      if (on) {
+        if (clr == null) clr = now;
+        if (now - clr >= (cfg.recHold || 0)) { on = false; clr = null; events.push({ etype: 'sensor_ok', gi: 0, detail: '계측 정상 복귀' }); }
+      }
+    }
+    var next = { sf: on ? 1 : 0 };
+    if (since != null) next.sfs = since;
+    if (clr != null) next.sfc = clr;
+    return { on: on, next: next, events: events };
+  }
+
   /* 이 샘플레이트에서 대역제한이 의미가 있는가. Nyquist가 1000 Hz 이하면 1 kHz 위가
      애초에 측정되지 않으므로 전대역이 곧 ISO 대역이다(현장 1 kHz 센서가 여기 해당).
      그런 태그는 필터를 돌릴 이유가 없다. */
   function isoNeeded(fs) { return fs > 0 && fs / 2 > 1000; }
+  /* ISO 계산을 건너뛰어도 되는가 — 상한 성질을 쓰되 비교하는 창을 맞춘다.
+
+     ISO는 최근 1초 원본에서 재고 판정값(wide)은 평가창 전체(기본 10초)의 실효값이다.
+     wide를 존 경계에 대고 "양호 확정"으로 끝내면 서로 다른 양을 비교하게 된다 —
+     조용한 9초 뒤 마지막 1초만 튀면 wide는 경계 아래인데 그 1초의 ISO는 위험까지 간다.
+
+     그래서 구간 안 가장 큰 초 버킷을 상한으로 쓴다. 어떤 1초 창의 RMS도 그보다 클 수 없고
+     (RMS는 부분들의 cnt 가중 이차평균이라 최대 부분을 넘지 못한다), 대역제한은 에너지를
+     빼기만 하므로 ISO는 그보다도 작다. 버킷이 없으면 상한을 못 세우므로 건너뛰지 않는다. */
+  function isoSkippable(buckets, zone0) {
+    if (!(zone0 > 0) || !buckets || !buckets.length) return false;
+    var mx = 0;
+    for (var i = 0; i < buckets.length; i++) {
+      var b = buckets[i];
+      if (b && isFinite(b.rms) && b.rms > mx) mx = b.rms;
+    }
+    return mx > 0 && mx < zone0;
+  }
+
+  /* 샘플레이트 = 표본 간격의 역수. 이웃 표본의 시각 차이(Δt) 중앙값으로 낸다.
+
+     "초당 행 수"로 세면 두 방향으로 틀린다. 센서가 쉬면(1분에 1초만 캡처하는 주기 기록)
+     쉰 시간이 평균에 섞여 과소 추정되고, 같은 구간을 두 번 적재하면 과대 추정된다.
+     둘 다 기록 밀도가 바뀐 것이지 센서가 빨라지거나 느려진 게 아니다.
+
+     간격을 보면 둘 다 사라진다. 쉬는 구간은 큰 간격 하나로 잡히는데 정렬하면 끝으로 밀려
+     중앙값에 닿지 못하고(갭 개수는 캡처 수만큼뿐이다), 중복은 간격 0이라 아예 제외된다.
+     이 방법이 깨지는 건 캡처당 표본이 갭 개수와 비슷할 만큼 짧을 때인데, 그런 태그는
+     애초에 스펙트럼 분석 대상이 아니다.
+
+     tsUs: 시각 오름차순 정수 마이크로초. ms로는 25.6 kHz의 39 μs 간격이 전부 0으로 뭉개지고,
+     ns는 자바스크립트 안전 정수(9e15)를 넘는다 — μs가 유일하게 맞는 단위다.
+     근거가 얇으면(간격 30개 미만) 0을 돌려 호출측이 다른 방법으로 넘어가게 한다. */
+  function fsFromTimes(tsUs) {
+    if (!tsUs || tsUs.length < 2) return 0;
+    var d = [], i, v;
+    for (i = 1; i < tsUs.length; i++) {
+      v = tsUs[i] - tsUs[i - 1];
+      if (v > 0 && isFinite(v)) d.push(v);
+    }
+    if (d.length < 30) return 0;
+    d.sort(function (a, b) { return a - b; });
+    var m = d[Math.floor(d.length / 2)];
+    return m > 0 ? Math.round(1e6 / m) : 0;
+  }
 
   /* 서로를 부르는 함수들을 TQL에 임베드할 소스로 묶는다.
 
@@ -669,9 +941,33 @@
     parts.push('var ' + keys.map(function (k) { return k + '=__E.' + k; }).join(', ') + ';');
     return parts.join('\n');
   }
-  // ISO 판정 3종 — isoRms → bandpass → biquad로 서로를 부른다
+  // ISO 판정 — isoRms → bandpass → biquad로 서로를 부른다. isoNeeded·isoSkippable은 지름길 판단.
   function isoSrc() {
-    return embedSrc([biquad, bandpass, isoRms, isoNeeded], { isoRms: isoRms, isoNeeded: isoNeeded });
+    return embedSrc([biquad, bandpass, isoRms, isoNeeded, isoSkippable],
+      { isoRms: isoRms, isoNeeded: isoNeeded, isoSkippable: isoSkippable });
+  }
+  /* 계측 게이트 임베드 — gateFromRaw가 signalQuality를, signalQuality가 kurtosis를 이름으로
+     부른다. 압축되면 그 이름들이 바뀌므로 한 스코프에 같이 넣어야 한다(embedSrc가 그 일을 한다). */
+  function gateSrc() {
+    return embedSrc([kurtosis, signalQuality, gateFromBuckets, gateFromRaw, sensorTick, impactEvidence],
+      { gateFromBuckets: gateFromBuckets, gateFromRaw: gateFromRaw, sensorTick: sensorTick, impactEvidence: impactEvidence });
+  }
+
+  /* 판정을 막은 사유 하나 — 심각한 것부터. 화면이 "무엇 때문에 보류인지" 적을 때 쓴다.
+     감시가 이미 사유를 알고 있으면(mon) 그걸 우선한다 — 감시는 1초 창, 상세는 분석 창이라
+     같은 순간에도 서로 다른 것을 볼 수 있고, 화면에 붙는 문구는 감시가 멈춘 이유여야 한다. */
+  function gateReason(quality, mon) {
+    if (mon && mon.key) return { key: mon.key, label: mon.label, detail: mon.detail, src: 'mon' };
+    if (!quality || !quality.gate) return null;
+    var issues = quality.issues || [], i, j;
+    for (i = 0; i < GATE_BLOCK.length; i++) {
+      for (j = 0; j < issues.length; j++) {
+        if (issues[j].key === GATE_BLOCK[i]) {
+          return { key: issues[j].key, label: issues[j].label, detail: issues[j].detail, src: 'det' };
+        }
+      }
+    }
+    return null;
   }
 
   /* 표시 등급 — 세 판정 중 가장 나쁜 것. ISO 존만 쓰면 고주파가 지배하는 센서에서
@@ -1057,14 +1353,16 @@
   return {
     ISO_ZONES: ISO_ZONES, UNIT_ZONES: UNIT_ZONES, zonesFor: zonesFor, gradeFor: gradeFor,
     BEARINGS: BEARINGS, bearingFreqs: bearingFreqs, faultFreqSummary: faultFreqSummary,
-    toBucket: toBucket, kurtosis: kurtosis, fmt: fmt, timeIndics: timeIndics,
+    toBucket: toBucket, sevMetrics: sevMetrics, kurtosis: kurtosis, fmt: fmt, timeIndics: timeIndics,
     fftComplex: fftComplex, bandKurtosis: bandKurtosis, amplitudeSpectrum: amplitudeSpectrum, envelopeSpectrum: envelopeSpectrum,
     bandpassSignal: bandpassSignal, kurtogram: kurtogram,
     MOUNT_FMAX: MOUNT_FMAX, mountFmax: mountFmax, beltFreqs: beltFreqs,
     RULESET: RULESET, rulesetFingerprint: rulesetFingerprint,
     bandRms: bandRms, bandRmsMulti: bandRmsMulti, measuredOneX: measuredOneX, envelopeQuant: envelopeQuant, bearingMatch: bearingMatch,
     bearingFsOk: bearingFsOk, BEARING_FS_RATIO: BEARING_FS_RATIO,
-    isoRms: isoRms, bandpass: bandpass, biquad: biquad, isoNeeded: isoNeeded, isoSrc: isoSrc, embedSrc: embedSrc, worstGrade: worstGrade,
+    isoRms: isoRms, bandpass: bandpass, biquad: biquad, isoNeeded: isoNeeded, isoSkippable: isoSkippable, fsFromTimes: fsFromTimes, isoSrc: isoSrc, embedSrc: embedSrc, worstGrade: worstGrade,
+    acVals: acVals, gateFromBuckets: gateFromBuckets, gateFromRaw: gateFromRaw, sensorTick: sensorTick, impactEvidence: impactEvidence, gateSrc: gateSrc,
+    GATE_BLOCK: GATE_BLOCK, gateReason: gateReason,
     bandJudge: bandJudge, bandJudgeSrc: bandJudgeSrc, bandParse: bandParse, evenSample: evenSample, bandAnchors: bandAnchors, bandEdges: bandEdges, bandMeasurable: bandMeasurable, windowRms: windowRms, windowSeries: windowSeries, isRunning: isRunning, runRef: runRef, detectFlap: detectFlap,
     BAND_KO: BAND_KO, BAND_ORDER: BAND_ORDER, BAND_GRADE: BAND_GRADE, BAND_HYST: BAND_HYST, BL_IDLE_FRAC: BL_IDLE_FRAC,
     bandRmsAveraged: bandRmsAveraged, welchSpectrum: welchSpectrum, decimate: decimate,

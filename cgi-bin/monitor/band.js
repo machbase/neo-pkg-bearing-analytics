@@ -6,9 +6,10 @@
 // 왜 알람 타이머와 분리하나: 판정은 10초 주기가 좋고 대역 추출은 FFT라 40대면 20초가 든다.
 //   주기를 묶으면 둘 다 나빠지고, 한쪽이 죽으면 다른 쪽도 멈춘다.
 (function (root, factory) {
-  if (typeof module === 'object' && module.exports) module.exports = factory();
-  else root.VibeBand = factory();
-})(typeof self !== 'undefined' ? self : this, function () {
+  if (typeof module === 'object' && module.exports) module.exports = factory(
+    typeof require === 'function' ? require('./watchdog.js') : root.VibeWatchdog);
+  else root.VibeBand = factory(root.VibeWatchdog);
+})(typeof self !== 'undefined' ? self : this, function (WD) {
   'use strict';
 
   var BAND_NAMES = ['sub', 'one', 'fault', 'high', 'vhigh'];
@@ -71,6 +72,22 @@
       '    anch=[mx];',
       '  }',
       '  anch.forEach(function(maxMs){',
+      /* 이 앵커를 이미 저장했으면 통째로 건너뛴다 — 원본 읽기·FFT·저장 전부.
+
+         소스에 새 데이터가 안 들어오면 MAX_TIME이 그 자리에 멈추는데, 타이머는 계속 돈다.
+         그러면 매 회차 같은 시각에 같은 값을 다시 계산해 넣는다(적재가 끝난 정적 테이블은
+         영원히). 저장이 늘어나는 것보다 학습이 망가지는 게 크다 — 같은 값이 반복되면
+         대역 베이스라인의 σ가 0으로 붕괴해 한계가 μ에 붙고, 값이 조금만 움직여도 이탈이 된다.
+
+         앵커 하나당 6키(대역 5 + fr)를 함께 쓰므로 대표로 첫 키만 확인하면 된다.
+         백필 경로는 앱이 bandTimes로 이미 걸러 보내지만, 여기서도 막아 두 경로가 같게 동작한다. */
+      /* dry run은 쓰지 않으므로 이 검사를 하지 않는다 — 하면 이미 저장된 앵커에서
+         미리보기가 빈 결과로 나와 검증이 통과 여부를 못 가린다. */
+      dry ? '' : '  var seen=0;',
+      dry ? '' : '  try { db.query("select count(*) from NEO_VIBE_BAND where NAME=\'"+esc(t.tbl+":"+t.tag+":"+NAMES[0])+"\' and TIME between to_date(\'"+dt(maxMs)+"\') and to_date(\'"+dt(maxMs)+"\')")',
+      // 표가 아직 없거나 조회가 실패하면 중복을 감수하고 진행한다 — 감시가 통째로 죽는 것보다 낫다
+      dry ? '' : '    .forEach(function(r){ seen=+r[0]; }); } catch(e) { seen=0; }',
+      dry ? '' : '  if(seen>0) return;',
       '  var fromMs = maxMs - durMs;',
       '  var vals=[];',
       '  db.query("select VALUE from "+t.tbl+" where NAME=\'"+esc(t.tag)+"\' and TIME between to_date(\'"+dt(fromMs)+"\') and to_date(\'"+dt(maxMs)+"\') order by TIME")',
@@ -114,6 +131,11 @@
       '  nOk++;',
       '  });',
       '});',
+      /* 심박과 상호 감시 — 타이머로 돌 때만 붙인다(백필·미리보기는 타이머가 아니다).
+         대역 값이 안 쌓이는 회차에도 심박은 남긴다: 상대가 보는 것은 "돌았는가"지 "일했는가"가 아니다. */
+      (!dry && spec.wd) ? WD.wdSrc(spec.wd).join('\n') : '',
+      (!dry && spec.wd) ? WD.hbSrc(spec.wd.selfHb, 'nOk') : '',
+      (!dry && spec.wd) ? 'var _wd=wdTick(db);' : '',
       '$.yield("done", now, nOk);',
       '})',
       'CSV()',

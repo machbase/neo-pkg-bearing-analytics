@@ -1,3 +1,5 @@
+/* view.js의 class="vhovN"에 대응하는 :hover 규칙. 인라인 style로는 :hover를 못 쓰기 때문에 여기로 뺀다.
+   새 hover가 필요하면 다음 번호를 여기 추가하고 템플릿에서 그 클래스를 쓴다. */
 .vhov1:hover { background: rgba(255,255,255,.04); }
 .vhov2:hover { border-color: var(--primary-light); }
 .vhov3:hover { background: rgba(255,255,255,.06); }

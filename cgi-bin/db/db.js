@@ -77,7 +77,8 @@
     });
   }
 
-  function rollupBatch(table, tags, unit, fromMs, toMs) {
+  function rollupBatch(table, tags, unit, fromMs, toMs, opts) {
+    opts = opts || {};
     function parse(rows) {
       var out = {};
       rows.forEach(function (r) {
@@ -86,7 +87,12 @@
       });
       return out;
     }
-    function run(useTrunc) { return q(SQL.rollupBatch(table, tags, unit, fromMs, toMs, useTrunc)).then(parse); }
+    // rollupTrend와 같은 규약 — DATE_TRUNC 폴백은 원본 전체 스캔이라 구간을 캡해야 한다
+    function run(useTrunc) {
+      var f = fromMs;
+      if (useTrunc && opts.truncCapMs) f = Math.max(fromMs, toMs - opts.truncCapMs);
+      return q(SQL.rollupBatch(table, tags, unit, f, toMs, useTrunc)).then(parse);
+    }
     if (_noRollup[table]) return run(true);
     return run(false).catch(function (e) {
       if (!isRollupErr(e)) throw e;
@@ -127,6 +133,29 @@
       }
       return { times_ms: times_ms, values: values, n: n };
     });
+  }
+
+  /* 샘플레이트 추정용 표본 시각 — 마이크로초 정수 배열.
+
+     rawWindow는 timeformat=ms라 25.6 kHz의 39 μs 간격이 전부 0으로 뭉개진다. ns는 자바스크립트
+     안전 정수(9e15)를 넘어 값이 망가진다. μs만 두 조건을 모두 만족한다(2026년 기준 1.76e15).
+     실패하면 빈 배열 — 호출측이 옛 추정으로 넘어간다. */
+  function sampleTimes(table, tag, fromMs, toMs, limit) {
+    var sql = SQL.sampleTimes(table, tag, fromMs, toMs, limit);
+    var url = '/db/query?q=' + encodeURIComponent(sql) + '&format=csv&timeformat=us&heading=false';
+    return fetch(url).then(function (r) {
+      if (!r.ok) throw new Error('db/query HTTP ' + r.status);
+      return r.text();
+    }).then(function (txt) {
+      if (txt.charAt(0) === '{') return [];
+      var out = [];
+      txt.split('\n').forEach(function (l) {
+        if (!l) return;
+        var v = +l;
+        if (isFinite(v) && v > 0) out.push(v);
+      });
+      return out;
+    }).catch(function () { return []; });
   }
 
   // 서버측 FFT (Neo TQL 내장 FFT)
@@ -311,17 +340,97 @@
   function decVal(s) { try { return JSON.parse(decodeURIComponent(s)); } catch (e) { return null; } }
 
   function ensureMonTables() {
-    // CREATE는 이미 있으면 실패하는 게 정상이라 전부 삼킨다. 그 뒤 기존 설치용 컬럼 추가를 시도한다
-    // (신규 설치는 CREATE에 DETAIL이 이미 있어 ALTER가 실패하지만 역시 무해 — 멱등하게 취급).
-    return Promise.all(SQL.monCreateTables().map(function (s) { return q(s).catch(function () { }); }))
-      .then(function () { return q(SQL.eventsAddDetail()).catch(function () { }); });
+    // 옛 LOG 이벤트 표를 먼저 TAG로 옮긴다 — 옮기기 전에 CREATE를 돌리면 이름이 겹쳐 실패한다
+    return migrateEventsToTag()
+      // CREATE는 이미 있으면 실패하는 게 정상이라 전부 삼킨다(멱등하게 취급)
+      .then(function () { return Promise.all(SQL.monCreateTables().map(function (s) { return q(s).catch(function () { }); })); });
+  }
+  /* 이벤트 표 LOG → TAG 이관 (1회성, 멱등).
+
+     LOG는 가장 오래된 쪽부터 연속으로만 지워져서 "이 설비 이력만 삭제"가 불가능했다.
+     TAG로 바꾸면 NAME='<테이블>:<태그>' 단위로 지워진다. 롤업은 SUMMARIZED를 빼서 안 만든다.
+
+     순서가 중요하다 — 다 읽어서 손에 쥔 뒤에만 DROP한다. 읽기가 실패하면 아무것도 하지 않는다
+     (반쯤 지우고 실패하면 이력이 사라진다). 표가 없거나 이미 TAG면 조용히 지나간다. */
+  var EV_TYPE_LOG = 0;
+  function migrateEventsToTag() {
+    return q(SQL.tableTypeOf('NEO_VIBE_EVENTS')).then(function (rows) {
+      if (!rows.length || Number(rows[0][0]) !== EV_TYPE_LOG) return null;   // 없거나 이미 TAG
+      return q(SQL.eventsLegacySelect()).then(function (old) {
+        return q(SQL.dropTable('NEO_VIBE_EVENTS'))
+          .then(function () { return q(SQL.monCreateTables()[0]); })
+          .then(function () {
+            // 한 건씩 넣는다 — Machbase INSERT는 단일 행이고, 이관 건수는 이력 규모라 크지 않다
+            return old.reduce(function (p, r) {
+              return p.then(function () {
+                return q(SQL.eventInsert({
+                  eid: r[0], ts: Number(r[1]), tbl: r[2], tag: r[3], etype: r[4],
+                  grade: r[5], val: Number(r[6]), lim: Number(r[7]), detail: r[8] || '',
+                })).catch(function () { });   // 한 건이 깨져도 나머지는 옮긴다
+              });
+            }, Promise.resolve());
+          })
+          .then(function () { return { migrated: old.length }; });
+      });
+    }).catch(function () { return null; });   // 이관 실패로 앱이 못 뜨게 하지 않는다
+  }
+  /* TAG 행 → 앱이 쓰는 이벤트 객체. NAME('<테이블>:<태그>')을 첫 콜론에서 가른다 —
+     테이블명에는 콜론이 없고 태그명에는 있을 수 있으므로 뒤쪽을 통째로 태그로 본다. */
+  function evRow(r) {
+    var nm = String(r[0] || ''), i = nm.indexOf(':');
+    return {
+      eid: r[7], ts: Number(r[1]), tbl: i < 0 ? nm : nm.slice(0, i), tag: i < 0 ? '' : nm.slice(i + 1),
+      etype: r[3], grade: r[4], val: Number(r[2]), lim: Number(r[5]), detail: r[6] || '',
+    };
   }
   function loadEvents(limit) {
-    return q(SQL.eventsSelect(limit)).then(function (rows) {
-      return rows.map(function (r) {
-        return { eid: r[0], ts: Number(r[1]), tbl: r[2], tag: r[3], etype: r[4], grade: r[5], val: Number(r[6]), lim: Number(r[7]), detail: r[8] || '' };
-      });
+    return q(SQL.eventsSelect(limit)).then(function (rows) { return rows.map(evRow); });
+  }
+  // 태그 단위 이벤트 삭제 — TAG 표가 되면서 가능해진 것(설비 철거 시 그 이력만 정리)
+  function deleteEventsOfTag(tbl, tag) { return q(SQL.eventsDeleteTag(tbl, tag)); }
+  function deleteEventsRange(fromMs, toMs) { return q(SQL.eventsDeleteRange(fromMs, toMs)); }
+  function deleteBandRange(fromMs, toMs) { return q(SQL.bandDeleteRange(fromMs, toMs)); }
+  /* 태그 하나의 대역 데이터 — 6키(대역 5 + fr)를 차례로 지운다.
+     한 키가 실패해도 나머지는 지운다: 일부만 남는 편이 "정리를 눌렀는데 아무것도 안 지워짐"보다 낫고,
+     남은 키는 다시 눌러 지울 수 있다. */
+  var BAND_KEYS = ['sub', 'one', 'fault', 'high', 'vhigh', 'fr'];
+  function deleteBandOfTag(tbl, tag) {
+    return BAND_KEYS.reduce(function (p, b) {
+      return p.then(function () { return q(SQL.bandDeleteKey(tbl + ':' + tag + ':' + b)).catch(function () { }); });
+    }, Promise.resolve());
+  }
+  // 판정 상태·학습값 — LOOKUP이라 키 단위. 되살릴 수 있는 것(상태)과 아닌 것(학습값)을 부르는 쪽이 구분한다
+  function deleteMonState(key) { return q(SQL.kvDelete('NEO_VIBE_MONSTATE', key)); }
+  /* 데이터 관리 현황 — 설정 화면이 "지금 얼마나 쌓였나"를 보여주기 위한 조회.
+     한 번에 다 받는다(테이블 4개 · 조회 7건 · 전부 count/min/max라 가볍다).
+     한 테이블이 없거나 조회에 실패해도 나머지는 살린다 — 화면이 통째로 비면 원인을 알 수 없다. */
+  function usageStats() {
+    var one = function (sql, pick) {
+      return q(sql).then(function (rows) { return rows.length ? pick(rows[0]) : null; }).catch(function () { return null; });
+    };
+    var num = function (r) { return Number(r[0]); };
+    return Promise.all([
+      one(SQL.usageCount('NEO_VIBE_EVENTS'), num),
+      one(SQL.eventsSpan(), function (r) { return { from: Number(r[0]), to: Number(r[1]) }; }),
+      one(SQL.usageCount('NEO_VIBE_BAND'), num),
+      // TIME은 timeformat=ms라 이미 밀리초 숫자로 온다 — Date.parse를 태우면 NaN이 된다
+      one(SQL.bandSpan(), function (r) { return { from: Number(r[0]), to: Number(r[1]) }; }),
+      one(SQL.bandKeyCount(), num),
+      one(SQL.usageCount('NEO_VIBE_MONSTATE'), num),
+      one(SQL.usageCount('NEO_VIBE_BASELINE'), num),
+    ]).then(function (r) {
+      return {
+        events: { rows: r[0], span: r[1] },
+        band: { rows: r[2], span: r[3], keys: r[4] },
+        monstate: { rows: r[5] },
+        baseline: { rows: r[6] },
+      };
     });
+  }
+  // 삭제 전 건수 — "몇 건이 지워지는지" 세어 보여준 뒤 확인받기 위한 조회
+  function countRange(kind, fromMs, toMs) {
+    var sql = kind === 'band' ? SQL.bandCountRange(fromMs, toMs) : SQL.eventsCountRange(fromMs, toMs);
+    return q(sql).then(function (rows) { return rows.length ? Number(rows[0][0]) : 0; });
   }
   function kvUpsert(table, key, obj) {
     var val = encVal(obj);
@@ -355,11 +464,7 @@
   }
   // 기간 지정 이벤트 조회 (CSV/JSON 내보내기용)
   function loadEventsRange(fromMs, toMs, limit) {
-    return q(SQL.eventsRange(fromMs, toMs, limit)).then(function (rows) {
-      return rows.map(function (r) {
-        return { eid: r[0], ts: Number(r[1]), tbl: r[2], tag: r[3], etype: r[4], grade: r[5], val: Number(r[6]), lim: Number(r[7]), detail: r[8] || '' };
-      });
-    });
+    return q(SQL.eventsRange(fromMs, toMs, limit)).then(function (rows) { return rows.map(evRow); });
   }
 
   /* ---------------- 서버 상시감시 타이머 (Neo /web/api/timers) ----------------
@@ -397,6 +502,25 @@
   /* 대역 추출 타이머 — 판정 타이머와 이름·파일·주기를 분리한다.
      판정은 10초가 좋고 대역 추출은 FFT라 태그당 0.5~1초가 든다. 한 타이머에 묶으면
      둘 다 나빠지고, 한쪽 실패가 다른 쪽을 멈춘다. */
+  /* 감시자 — 하는 일은 남의 심박을 보는 것뿐이다. 감시·대역 추출과 별개 타이머로 두는 이유는
+     감시가 살아있는지가 대역 추출 같은 선택 기능의 on/off에 걸리면 안 되기 때문이다. */
+  var WD_TIMER = 'NEO_VIBE_WD';
+  function wdTqlPath() { return pkgBase() + '/cgi-bin/watchdog.tql'; }
+  function deleteWdTimer() {
+    return authedTimer('/' + WD_TIMER, { method: 'DELETE' }).then(function () { return true; }).catch(function () { return true; });
+  }
+  function createWdTimer(tqlSource, schedule) {
+    return saveFile(wdTqlPath(), tqlSource, 'text/plain')
+      .then(function () { return deleteWdTimer(); })
+      .then(function () {
+        return authedTimer('', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name: WD_TIMER, autoStart: true, schedule: schedule, path: wdTqlPath() }),
+        });
+      })
+      .then(function (r) { return r.json().catch(function () { return { success: r.ok }; }); })
+      .then(function (j) { if (j.success === false) throw new Error('감시자 타이머 생성 실패: ' + (j.reason || '')); return true; });
+  }
   var BAND_TIMER = 'NEO_VIBE_BAND';
   function bandTqlPath() { return pkgBase() + '/cgi-bin/band.tql'; }
   function deleteBandTimer() {
@@ -461,13 +585,17 @@
     q: q, tql: tql, SQL: SQL, pkgBase: pkgBase, login: login,
     createMonitorTimer: createMonitorTimer, deleteMonitorTimer: deleteMonitorTimer,
     timerStates: timerStates, MON_TIMER: MON_TIMER, BAND_TIMER: BAND_TIMER,
+    WD_TIMER: WD_TIMER, createWdTimer: createWdTimer, deleteWdTimer: deleteWdTimer,
     createBandTimer: createBandTimer, deleteBandTimer: deleteBandTimer, bandTrend: bandTrend, bandRaw: bandRaw, bandBackfill: bandBackfill, bandTimes: bandTimes,
     ensureDir: ensureDir, saveFile: saveFile, listDir: listDir, deleteFile: deleteFile, readFileBlob: readFileBlob,
     listTagTables: listTagTables, listTags: listTags, tagStats: tagStats, isNoRollup: isNoRollup,
-    rollupTrend: rollupTrend, rollupBatch: rollupBatch, rawWindow: rawWindow, fftSpectrum: fftSpectrum,
+    rollupTrend: rollupTrend, rollupBatch: rollupBatch, rawWindow: rawWindow, sampleTimes: sampleTimes, fftSpectrum: fftSpectrum,
     loadConfig: loadConfig, saveConfig: saveConfig, saveConfigPartial: saveConfigPartial,
     ensureMonTables: ensureMonTables, loadEvents: loadEvents, loadEventsRange: loadEventsRange, countEvents: countEvents,
     loadBaselines: loadBaselines, saveBaseline: saveBaseline, deleteBaseline: deleteBaseline,
-    insertEvent: insertEvent, loadMonState: loadMonState, saveMonState: saveMonState
+    insertEvent: insertEvent, loadMonState: loadMonState, saveMonState: saveMonState,
+    usageStats: usageStats, countRange: countRange,
+    deleteEventsOfTag: deleteEventsOfTag, deleteEventsRange: deleteEventsRange, migrateEventsToTag: migrateEventsToTag,
+    deleteBandRange: deleteBandRange, deleteBandOfTag: deleteBandOfTag, deleteMonState: deleteMonState
   };
 });

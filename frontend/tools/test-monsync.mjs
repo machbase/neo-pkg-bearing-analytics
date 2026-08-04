@@ -154,6 +154,10 @@ function instrument(app) {
     app.setState = function (st) { Object.assign(this.state, st); };
     app._scheduleDraw = function () {};
     app.live = true;
+    // 자동 복구가 실제로 타이머를 다시 등록하므로 테스트에서는 호출만 세어 둔다
+    app.resyncs = 0;
+    app._syncMonitorTimer = function () { this.resyncs++; return Promise.resolve(); };
+    app._toast = function () {};
     Object.assign(app.state, { monitorOn: true, monMode: 'server', monitorInterval: '3s', bandOn: false }, patch || {});
     return app;
   };
@@ -209,6 +213,129 @@ function instrument(app) {
   a._applyHealth(RUN, { t: NOW - 4000, n: 4 });
   a._applyHealth(RUN, { t: NOW - 3000, n: 4 });
   chk(n <= 1, '상태가 그대로면 setState를 반복하지 않는다', `setState ${n}회`);
+}
+
+/* ── 자동 복구 ───────────────────────────────────────────────────────────────
+   Neo 타이머는 스크립트가 한 번 던지면 STOP으로 두고 재시도하지 않는다. 실제로 순간적인
+   소켓 고갈(WSAENOBUFS) 하나로 감시가 1.4시간 꺼져 있었다. 그 자리를 사람의 클릭이 아니라
+   앱이 메우되, 스크립트가 깨진 경우까지 무한히 되살리려 들지 않는 것이 이 판정부의 몫이다. */
+{
+  const mk = (patch) => {
+    const app = new App({ seed: 1, equipmentCount: 1 });
+    app.setState = function (st) { Object.assign(this.state, st); };
+    app._scheduleDraw = function () {};
+    app.live = true;
+    app.resyncs = 0; app.bandResyncs = 0;
+    app._syncMonitorTimer = function () { this.resyncs++; return Promise.resolve(); };
+    app._syncBandTimer = function () { this.bandResyncs++; return Promise.resolve(); };
+    app._toast = function () {};
+    Object.assign(app.state, { monitorOn: true, monMode: 'server', monitorInterval: '10s', bandOn: false }, patch || {});
+    return app;
+  };
+  const warn = (app) => (app.state.health || [])[0] || {};
+  const kinds = (app) => (app.state.health || []).map((w) => w.k).sort().join(',');
+  const NOW = Date.now();
+  const DEAD = { NEO_VIBE_MONITOR: { state: 'STOP, MACHCLI dial tcp 127.0.0.1:5656: bind: ... buffer space ...' } };
+  const RUN = { NEO_VIBE_MONITOR: { state: 'RUNNING', schedule: '@every 10s' } };
+
+  // 죽은 것을 보면 즉시 다시 등록한다 — 클릭을 기다리지 않는다
+  let a = mk();
+  a._applyHealth(DEAD, { t: NOW - 5000, n: 4 });
+  chk(a.resyncs === 1, '멈춘 것을 보면 스스로 다시 등록한다', `${a.resyncs}회`);
+  chk(warn(a).lv === 'warn' && /자동으로 다시 등록/.test(warn(a).text || ''), '복구를 시도했다고 알린다', warn(a).text);
+  chk(/buffer space/.test(warn(a).text || ''), '사유는 그대로 남긴다');
+
+  // 결과를 기다리는 동안은 다시 시도하지 않는다 — 10초 주기로 재등록을 퍼부으면 안 된다
+  a._recover.mon.at = Date.now();
+  a._applyHealth(DEAD, { t: NOW - 5000, n: 4 });
+  chk(a.resyncs === 1, '간격 안에서는 다시 시도하지 않는다', `${a.resyncs}회`);
+  chk(/기다리는 중/.test(warn(a).text || ''), '기다리는 중임을 밝힌다', warn(a).text);
+
+  /* 스크립트가 깨진 경우 — 몇 번을 등록해도 같은 자리에서 죽는다. 상한에서 손을 떼고
+     사유를 그대로 보여줘야 한다. 계속 "복구했습니다"로 덮으면 진짜 고장이 가려진다. */
+  a = mk();
+  for (let i = 0; i < 6; i++) {
+    a._applyHealth(DEAD, { t: NOW - 5000, n: 4 });
+    if (a._recover && a._recover.mon) a._recover.mon.at -= 200000;    // 간격을 넘긴 것으로 둔다
+  }
+  chk(a.resyncs === 3, '상한(3회)을 넘겨 되살리려 들지 않는다', `${a.resyncs}회`);
+  chk(warn(a).lv === 'err' && /살아나지 않았습니다/.test(warn(a).text || ''), '포기하면 오류로 되돌린다', warn(a).text);
+  chk(warn(a).act === '다시 등록', '사람이 직접 시도할 길은 남긴다');
+
+  // 살아난 뒤 — 조용히 지우지 않는다. 감시가 없던 구간은 데이터에 구멍으로 남는다
+  a = mk();
+  a._applyHealth(DEAD, { t: NOW - 5000, n: 4 });
+  a._applyHealth(RUN, { t: Date.now() - 5000, n: 4 });
+  chk(warn(a).k === 'recovered', '복구된 뒤에도 멈췄었다는 사실을 남긴다', JSON.stringify(warn(a).k));
+  chk(/확인된 것이 아닙니다/.test(warn(a).text || ''), '그 구간의 "이상 없음"이 확인이 아님을 밝힌다');
+
+  // 오래 조용하면 시도 횟수를 처음부터 — 몇 달에 한 번 나는 장애까지 누적하면 안 된다
+  a._recover.mon.at = Date.now() - 2 * 3600e3;
+  a._applyHealth(RUN, { t: Date.now() - 5000, n: 4 });
+  chk(a.state.health === null, '오래 조용하면 흔적을 지운다', JSON.stringify(a.state.health));
+  a._applyHealth(DEAD, { t: Date.now() - 5000, n: 4 });
+  chk(a.resyncs === 2, '카운터가 리셋돼 다시 복구를 시도한다', `${a.resyncs}회`);
+
+  // 앱 모드에는 서버 타이머가 없다 — 되살릴 대상 자체가 없다
+  a = mk();
+  a.state.monMode = 'app';
+  a._applyHealth(DEAD, { t: NOW - 5000, n: 4 });
+  chk(a.resyncs === 0, '앱 모드에서는 재등록하지 않는다', `${a.resyncs}회`);
+
+  /* 상태를 못 읽은 것(Neo 연결 실패)은 "살아났다"가 아니다.
+     모르는 것을 복구됐다고 적으면 배너가 거짓말을 한다. */
+  a = mk();
+  a._applyHealth(DEAD, { t: NOW - 5000, n: 4 });
+  a._applyHealth(null, null);
+  chk(kinds(a) === 'unknown', '상태를 못 읽으면 복구 판단을 하지 않는다', kinds(a));
+
+  /* 대역 추출도 켜둔 설정이다 — 멈추면 대역 기준이 판정에서 조용히 빠진다.
+     감시만 되살리고 이건 두면 세 축 중 하나가 없는 채로 "정상"처럼 보인다. */
+  const BDEAD = { NEO_VIBE_MONITOR: { state: 'RUNNING' }, NEO_VIBE_BAND: { state: 'STOP, dial tcp ...' } };
+  const BRUN = { NEO_VIBE_MONITOR: { state: 'RUNNING' }, NEO_VIBE_BAND: { state: 'RUNNING' } };
+  a = mk({ bandOn: true });
+  a._applyHealth(BDEAD, { t: NOW - 5000, n: 4 });
+  chk(a.bandResyncs === 1, '대역 추출이 멈추면 그것도 스스로 다시 등록한다', `${a.bandResyncs}회`);
+  chk(a.resyncs === 0, '감시가 멀쩡하면 감시는 건드리지 않는다', `${a.resyncs}회`);
+  chk(/자동으로 다시 등록/.test((a.state.health[0] || {}).text || ''), '대역 복구도 알린다', (a.state.health[0] || {}).text);
+
+  a._applyHealth(BRUN, { t: Date.now() - 5000, n: 4 });
+  chk((a.state.health[0] || {}).k === 'bandrecovered', '대역도 멈췄었다는 사실을 남긴다', JSON.stringify((a.state.health[0] || {}).k));
+  chk(/대역 기준이 판정에서 빠져/.test((a.state.health[0] || {}).text || ''), '대역은 결과가 다르다 — 축 하나가 빠져 있었다고 적는다');
+
+  // 두 타이머가 같이 죽으면 각자의 카운터로 각자 복구한다
+  a = mk({ bandOn: true });
+  a._applyHealth({ NEO_VIBE_MONITOR: { state: 'STOP, x' }, NEO_VIBE_BAND: { state: 'STOP, y' } }, { t: NOW - 5000, n: 4 });
+  chk(a.resyncs === 1 && a.bandResyncs === 1, '둘 다 죽으면 둘 다 되살린다', `감시 ${a.resyncs} · 대역 ${a.bandResyncs}`);
+
+  /* 대역 추출은 앱 감시 모드에서도 서버 타이머로 돈다 — 추세는 앱이 닫혀도 이어져야 하니까.
+     그런데 확인이 서버 분기 안에 있으면 앱 모드 사용자는 대역이 죽어도 모른 채,
+     세 축 중 하나가 빠진 판정을 "이상 없음"으로 보게 된다. */
+  a = mk({ bandOn: true, monMode: "app" });
+  a._applyHealth(BDEAD, null);
+  chk(a.bandResyncs === 1, "앱 감시 모드에서도 대역 추출은 되살린다", a.bandResyncs + "회");
+  chk(a.resyncs === 0, "앱 모드에서 감시 타이머는 여전히 건드리지 않는다", a.resyncs + "회");
+  a._applyHealth(BRUN, null);
+  chk(kinds(a) === "bandrecovered", "앱 모드에서도 멈췄었다는 사실을 남긴다", kinds(a));
+
+  // 앱 모드에서 대역이 멀쩡하면 조용하다 — 감시 타이머가 없는 것은 이상이 아니다
+  a = mk({ bandOn: true, monMode: "app" });
+  a._applyHealth({ NEO_VIBE_BAND: { state: "RUNNING" } }, null);
+  chk(a.state.health === null, "앱 모드에서 감시 타이머 부재는 이상이 아니다", JSON.stringify(a.state.health));
+
+  /* 꺼둔 기능을 복구가 켜지 않는다 — 대역 추출을 끈 채로 남은 옛 타이머가 STOP이어도
+     그건 되살릴 대상이 아니라 지울 대상이다. 사용자가 끈 것을 앱이 되켜면 안 된다. */
+  a = mk({ bandOn: false });
+  a._applyHealth(BDEAD, { t: NOW - 5000, n: 4 });
+  chk(a.bandResyncs === 0, '대역 추출이 꺼져 있으면 되살리지 않는다', a.bandResyncs + '회');
+  chk(!/대역/.test(JSON.stringify(a.state.health || [])), '꺼둔 기능으로 배너도 내지 않는다');
+
+  // 대역 추출을 꺼두면 흔적도 남기지 않는다 — 꺼둔 기능으로 배너를 내면 안 된다
+  a = mk({ bandOn: true });
+  a._applyHealth(BDEAD, { t: NOW - 5000, n: 4 });
+  a.state.bandOn = false;
+  a._applyHealth(BRUN, { t: Date.now() - 5000, n: 4 });
+  chk(a.state.health === null, '대역 추출을 끄면 대역 복구 흔적도 사라진다', JSON.stringify(a.state.health));
 }
 
 console.log(fail ? `\n=== FAIL ${fail}건 ===` : '\n=== 전부 통과 ===');
