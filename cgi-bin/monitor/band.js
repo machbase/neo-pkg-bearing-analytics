@@ -12,7 +12,11 @@
 })(typeof self !== 'undefined' ? self : this, function (WD) {
   'use strict';
 
-  var BAND_NAMES = ['sub', 'one', 'fault', 'high', 'vhigh'];
+  /* 1 kHz 위는 옥타브로 쪼갠다. 통짜로 두면 25.6 kHz 센서에서 1~12.8 kHz가 한 칸이라
+     3.7 옥타브가 섞인다 — 베어링 공진(보통 2~5 kHz)이 두 배로 커져도 넓은 통에 희석돼
+     배수가 안 올라간다. 이름은 샘플레이트와 무관하게 고정이고, Nyquist를 넘어 잴 수 없는
+     칸은 0으로 저장된다(학습이 전부 0인 대역을 거부하고 판정은 한계 0인 대역을 건너뛴다). */
+  var BAND_NAMES = ['sub', 'one', 'fault', 'high', 'vh1', 'vh2', 'vh3', 'vh4'];
   // 창은 2의 거듭제곱 샘플이 되게 잡는다 — FFT가 그 길이를 쓰고, 클라이언트 계산과도 일치한다.
   var WIN_POW = 15; // 2^15 = 32,768 샘플 (25.6 kHz에서 1.28초 · 1 kHz에서 32.8초)
 
@@ -23,8 +27,81 @@
       [Math.max(2, 0.5 * fr), 1.5 * fr],
       [1.5 * fr, Math.min(1000, 10 * fr)],
       [Math.min(1000, 10 * fr), 1000],
-      [1000, nyq],
+      [1000, 2000],
+      [2000, 4000],
+      [4000, 8000],
+      [8000, nyq],
     ];
+  }
+
+  /* 대역 RMS 계산 — 이 함수 하나가 값의 정의다. TQL에 소스로 박히므로 바깥 이름을
+     참조하지 않는다(참조하면 타이머 첫 회차에서 ReferenceError로 죽는다).
+
+     Welch: 창을 겹쳐 나눠 FFT한 뒤 평균한다. FFT 한 번의 스펙트럼은 자체 분산이 100%라
+     — 같은 정상 신호를 두 번 재도 대역값이 눈에 띄게 다르다 — 그 흔들림이 대역 베이스라인의
+     σ를 부풀려 한계를 느슨하게 만든다. K블록 평균은 분산을 √K배 줄여, 같은 σ로 더 작은
+     변화를 잡게 한다.
+
+     Hann 창: FFT는 창의 양끝이 이어진다고 가정한다. 안 이어지면 그 불연속이 모든 주파수로
+     번져(누설), 1×의 큰 성분이 베어링 대역까지 들어올린다. 창으로 양끝을 0으로 눕히면
+     누설이 줄지만 신호를 깎으므로, 잡음대역폭 NG=Σw²/L로 나눠 크기를 되돌린다
+     (사각창이면 NG=1이라 옛 식과 같아진다 — 정의가 이어진다는 확인점이다).
+
+     대가는 분해능이다: 블록이 짧아진 만큼 df가 커진다. 대역이 넓어 선 스펙트럼이 아니라
+     통과대역 에너지를 보는 용도라 감당 가능하지만, 짧은 창(m<4096)에서는 블록을 쪼개지
+     않고 창만 씌운다 — 거기서 더 쪼개면 최저 대역에 빈이 남지 않는다. */
+  function bandEnergy(vals, fs, fr, nyq) {
+    var m = 1; while (m * 2 <= vals.length) m *= 2;
+    if (m < 256 || !(fs > 0)) return null;
+    var L = m;
+    var i, W = new Array(L), wss = 0;
+    for (i = 0; i < L; i++) { W[i] = 0.5 - 0.5 * Math.cos(2 * Math.PI * i / L); wss += W[i] * W[i]; }
+    var NG = wss / L;
+    var B = [
+      [2, Math.max(3, 0.5 * fr)],
+      [Math.max(2, 0.5 * fr), 1.5 * fr],
+      [1.5 * fr, Math.min(1000, 10 * fr)],
+      [Math.min(1000, 10 * fr), 1000],
+      [1000, 2000],
+      [2000, 4000],
+      [4000, 8000],
+      [8000, nyq],
+    ];
+    var half = L / 2, df = fs / L, acc = [0, 0, 0, 0, 0, 0, 0, 0];
+    var re = new Array(L), im = new Array(L);
+    function fft(re, im) {
+      var n = re.length, j = 0, bit, len, i2;
+      for (i2 = 1; i2 < n; i2++) {
+        for (bit = n >> 1; j & bit; bit >>= 1) j ^= bit;
+        j |= bit;
+        if (i2 < j) { var tr = re[i2]; re[i2] = re[j]; re[j] = tr; var ti = im[i2]; im[i2] = im[j]; im[j] = ti; }
+      }
+      for (len = 2; len <= n; len <<= 1) {
+        var ang = -2 * Math.PI / len, wr = Math.cos(ang), wi = Math.sin(ang);
+        for (var st = 0; st < n; st += len) {
+          var cr = 1, ci = 0;
+          for (var k = 0; k < len / 2; k++) {
+            var a = st + k, b = st + k + len / 2;
+            var vr = re[b] * cr - im[b] * ci, vi = re[b] * ci + im[b] * cr;
+            re[b] = re[a] - vr; im[b] = im[a] - vi; re[a] += vr; im[a] += vi;
+            var ncr = cr * wr - ci * wi; ci = cr * wi + ci * wr; cr = ncr;
+          }
+        }
+      }
+    }
+    var mean = 0;
+    for (i = 0; i < L; i++) mean += vals[i];
+    mean /= L;
+    // 평균을 뺀 뒤 창을 씌운다 — 순서가 바뀌면 직류가 창 모양 그대로 저주파에 실린다
+    for (i = 0; i < L; i++) { re[i] = (vals[i] - mean) * W[i]; im[i] = 0; }
+    fft(re, im);
+    for (var k = 1; k <= half - 1; k++) {
+      var f = k * df, pw = re[k] * re[k] + im[k] * im[k];
+      for (var b = 0; b < B.length; b++) if (f >= B[b][0] && f < B[b][1]) { acc[b] += pw; break; }
+    }
+    var out = [];
+    for (var b2 = 0; b2 < acc.length; b2++) out.push(Math.sqrt(2 * acc[b2] / (L * L * NG)));
+    return out;
   }
 
   /* spec: { tags:[{tbl,tag,fr,fs}], nowMs, anchors } → 자체 완결형 TQL 문자열.
@@ -47,6 +124,7 @@
         return { tbl: t.tbl, tag: t.tag, fr: t.fr, fs: t.fs, win: Math.pow(2, WIN_POW) };
       })) + ';',
       'var NAMES=' + JSON.stringify(BAND_NAMES) + ';',
+      'var ' + bandEnergy.name + '=' + bandEnergy.toString() + ';',
       // null이면 태그마다 MAX_TIME 하나(타이머), 배열이면 그 시각들을 창 끝으로 반복(백필)
       'var ANCHORS=' + (spec.anchors && spec.anchors.length ? JSON.stringify(spec.anchors.map(Number)) : 'null') + ';',
       'var db=$.db(), now=' + (Number(spec.nowMs) || Date.now()) + ', nOk=0;',
@@ -93,34 +171,18 @@
       '  db.query("select VALUE from "+t.tbl+" where NAME=\'"+esc(t.tag)+"\' and TIME between to_date(\'"+dt(fromMs)+"\') and to_date(\'"+dt(maxMs)+"\') order by TIME")',
       '    .forEach(function(r){ vals.push(+r[0]); });',
       '  if(vals.length < 1024) return;',
-      // 2의 거듭제곱으로 맞춘 뒤 실수 FFT(반복 radix-2)
-      '  var m=1; while(m*2<=vals.length) m*=2;',
-      '  var re=new Array(m), im=new Array(m), i, mean=0;',
-      '  for(i=0;i<m;i++) mean+=vals[i]; mean/=m;',
-      '  for(i=0;i<m;i++){ re[i]=vals[i]-mean; im[i]=0; }',
-      '  (function(){',
-      '    var n=re.length,j=0,bit,len;',
-      '    for(i=1;i<n;i++){ for(bit=n>>1; j&bit; bit>>=1) j^=bit; j|=bit; if(i<j){var tr=re[i];re[i]=re[j];re[j]=tr;var ti=im[i];im[i]=im[j];im[j]=ti;} }',
-      '    for(len=2;len<=n;len<<=1){ var ang=-2*Math.PI/len, wr=Math.cos(ang), wi=Math.sin(ang);',
-      '      for(var s=0;s<n;s+=len){ var cr=1,ci=0;',
-      '        for(var k=0;k<len/2;k++){ var i1=s+k,i2=s+k+len/2;',
-      '          var vr=re[i2]*cr-im[i2]*ci, vi=re[i2]*ci+im[i2]*cr;',
-      '          re[i2]=re[i1]-vr; im[i2]=im[i1]-vi; re[i1]+=vr; im[i1]+=vi;',
-      '          var ncr=cr*wr-ci*wi; ci=cr*wi+ci*wr; cr=ncr; } } }',
-      '  })();',
-      '  var nyq=t.fs/2, fr=t.fr;',
-      '  var B=[[2,Math.max(3,0.5*fr)],[Math.max(2,0.5*fr),1.5*fr],[1.5*fr,Math.min(1000,10*fr)],[Math.min(1000,10*fr),1000],[1000,nyq]];',
-      '  var half=m/2, df=t.fs/m, acc=[0,0,0,0,0];',
-      '  for(var k=1;k<=half-1;k++){ var f=k*df, p=re[k]*re[k]+im[k]*im[k];',
-      '    for(var b=0;b<B.length;b++) if(f>=B[b][0] && f<B[b][1]) { acc[b]+=p; break; } }',
+      // 대역값의 정의는 bandEnergy 하나뿐 — 앱·서버·테스트가 같은 소스를 쓴다
+      '  var vv=bandEnergy(vals, t.fs, t.fr, t.fs/2);',
+      '  if(!vv) return;',
+      '  var fr=t.fr;',
       '  var ts=dt(maxMs);',
       /* 측정 불가 대역(하한이 Nyquist 이상)도 0으로 저장한다 — 행을 빼면 "측정 불가"인지
          "타이머가 안 돌았는지" 구분이 안 된다. 정확히 0은 그 대역에 FFT 빈이 하나도 없다는
          뜻이라(성분이 있으면 아주 작아도 0이 아니다) 빈 대역의 신뢰할 만한 표시가 된다.
          0을 정상으로 오해하는 것은 저장이 아니라 학습·판정에서 막는다:
          학습은 전부 0인 대역을 거부하고, bandJudge는 한계 0인 대역을 건너뛴다. */
-      '  for(var b=0;b<acc.length;b++){',
-      '    var v=Math.sqrt(2*acc[b]/(m*m));',
+      '  for(var b=0;b<vv.length;b++){',
+      '    var v=vv[b];',
       dry
         ? '    $.yield("band", t.tbl+":"+t.tag+":"+NAMES[b], v);'
         : '    db.exec("insert into NEO_VIBE_BAND values(\'"+esc(t.tbl+":"+t.tag+":"+NAMES[b])+"\', to_date(\'"+ts+"\'), "+v+")");',
@@ -143,5 +205,5 @@
     return body.join('\n');
   }
 
-  return { buildBandTql: buildBandTql, BAND_NAMES: BAND_NAMES, WIN_POW: WIN_POW, bandsFor: bandsFor };
+  return { buildBandTql: buildBandTql, BAND_NAMES: BAND_NAMES, WIN_POW: WIN_POW, bandsFor: bandsFor, bandEnergy: bandEnergy };
 });

@@ -520,8 +520,11 @@
      (fault+high+vhigh는 한 결함의 세 표현)을 따로 알리면 알람이 배로 늘어 피로해지므로,
      설비 단위로 하나로 합성한다 — 어느 대역이 함께 올랐는지가 오히려 진단 정보다.
      복귀는 ×0.9로 히스테리시스를 둔다(한계 근처 진동으로 이벤트가 반복되는 것을 막음). */
-  var BAND_KO = { sub: '서브동기', one: '1× 대역', fault: '결함 대역', high: '고주파', vhigh: '초고주파' };
-  var BAND_ORDER = ['sub', 'one', 'fault', 'high', 'vhigh'];
+  var BAND_KO = { sub: '서브동기', one: '1× 대역', fault: '결함 대역', high: '고주파', vh1: '1~2 kHz', vh2: '2~4 kHz', vh3: '4~8 kHz', vh4: '8 kHz+' };
+  var BAND_ORDER = ['sub', 'one', 'fault', 'high', 'vh1', 'vh2', 'vh3', 'vh4'];
+  /* 이름이 바뀌기 전 학습값 — 삭제 경로에서만 쓴다. 목록에서 빠진 뒤에도 표에 남으면
+     아무도 안 보는 행이 영영 쌓인다. */
+  var BAND_LEGACY = ['vhigh'];
   var BAND_GRADE = [1.5, 3.0];   // ×1.0~1.5 주의 · 1.5~3.0 위험 · 3.0~ 심각
   var BAND_HYST = 0.9;           // 복귀 판정 배수
   /* now: {대역:값} · bls: {대역:{mu,sigma,k}} · wasOn: 직전 이탈 여부(히스테리시스용)
@@ -533,8 +536,8 @@
      baselineLimit과 값이 어긋나지 않는지 확인한다. */
   function bandJudge(now, bls, wasOn) {
     if (!now || !bls) return null;
-    var ORDER = ['sub', 'one', 'fault', 'high', 'vhigh'];
-    var KO = { sub: '서브동기', one: '1× 대역', fault: '결함 대역', high: '고주파', vhigh: '초고주파' };
+    var ORDER = ['sub', 'one', 'fault', 'high', 'vh1', 'vh2', 'vh3', 'vh4'];
+    var KO = { sub: '서브동기', one: '1× 대역', fault: '결함 대역', high: '고주파', vh1: '1~2 kHz', vh2: '2~4 kHz', vh3: '4~8 kHz', vh4: '8 kHz+' };
     var GRADE = [1.5, 3.0], HYST = 0.9;
     var thr = wasOn ? HYST : 1.0;
     var over = [], maxR = 0, any = false;
@@ -569,7 +572,10 @@
       [Math.max(2, 0.5 * fr), 1.5 * fr],
       [1.5 * fr, Math.min(1000, 10 * fr)],
       [Math.min(1000, 10 * fr), 1000],
-      [1000, nyq],
+      [1000, 2000],
+      [2000, 4000],
+      [4000, 8000],
+      [8000, nyq],
     ];
   }
   // 그 대역이 이 샘플레이트로 측정 가능한지 — 하한이 Nyquist 이상이면 빈 대역이다
@@ -1020,7 +1026,8 @@
   function bandParse(detail) {
     if (!detail) return [];
     return String(detail).split('·').map(function (s) {
-      var m = /^\s*([a-z]+)\s*=\s*([\d.]+)\s*\/\s*([\d.]+)/.exec(s);
+      // 대역 이름에 숫자가 들어간다(vh1~vh4) — [a-z]만 받으면 옥타브 대역이 통째로 안 읽힌다
+      var m = /^\s*([a-z][a-z0-9]*)\s*=\s*([\d.]+)\s*\/\s*([\d.]+)/.exec(s);
       if (!m) return null;
       var v = parseFloat(m[2]), lim = parseFloat(m[3]);
       return { k: m[1], ko: BAND_KO[m[1]] || m[1], v: v, lim: lim, r: lim > 0 ? v / lim : 0 };
@@ -1191,18 +1198,6 @@
   }
 
   // 대역 에너지: 1× 대역 / 결함 대역(2~10×) / 고주파 대역 — 스펙트럼에서 RMS 합산
-  function bandEnergies(spec, fr, fs) {
-    var b = [0, 0, 0];
-    var hi = Math.min(10 * fr, fs * 0.4);
-    for (var i = 0; i < spec.freqs.length; i++) {
-      var f = spec.freqs[i], e = spec.mags[i] * spec.mags[i];
-      if (f >= 0.5 * fr && f <= 1.5 * fr) b[0] += e;
-      else if (f > 1.5 * fr && f <= hi) b[1] += e;
-      else if (f > hi) b[2] += e;
-    }
-    return [Math.sqrt(b[0]), Math.sqrt(b[1]), Math.sqrt(b[2])];
-  }
-
   // 특정 주파수의 하모닉 열 에너지 — f0, 2f0, … nf0 (±tol)에서 유의 진폭(≥minMag)만 합산·계수
   function harmonicEnergy(freqs, mags, f0, nHarm, minMag) {
     if (!(f0 > 0) || !freqs.length) return { energy: 0, count: 0 };
@@ -1364,11 +1359,11 @@
     acVals: acVals, gateFromBuckets: gateFromBuckets, gateFromRaw: gateFromRaw, sensorTick: sensorTick, impactEvidence: impactEvidence, gateSrc: gateSrc,
     GATE_BLOCK: GATE_BLOCK, gateReason: gateReason,
     bandJudge: bandJudge, bandJudgeSrc: bandJudgeSrc, bandParse: bandParse, evenSample: evenSample, bandAnchors: bandAnchors, bandEdges: bandEdges, bandMeasurable: bandMeasurable, windowRms: windowRms, windowSeries: windowSeries, isRunning: isRunning, runRef: runRef, detectFlap: detectFlap,
-    BAND_KO: BAND_KO, BAND_ORDER: BAND_ORDER, BAND_GRADE: BAND_GRADE, BAND_HYST: BAND_HYST, BL_IDLE_FRAC: BL_IDLE_FRAC,
+    BAND_KO: BAND_KO, BAND_ORDER: BAND_ORDER, BAND_LEGACY: BAND_LEGACY, BAND_GRADE: BAND_GRADE, BAND_HYST: BAND_HYST, BL_IDLE_FRAC: BL_IDLE_FRAC,
     bandRmsAveraged: bandRmsAveraged, welchSpectrum: welchSpectrum, decimate: decimate,
     convertDomain: convertDomain, convertSpectrumMags: convertSpectrumMags,
     signalQuality: signalQuality, kurtosisSaturation: kurtosisSaturation,
-    cepstrumFromSpectrum: cepstrumFromSpectrum, stftGrid: stftGrid, bandEnergies: bandEnergies,
+    cepstrumFromSpectrum: cepstrumFromSpectrum, stftGrid: stftGrid,
     diagnoseDominant: diagnoseDominant, analyzeSpectrum: analyzeSpectrum, harmonicEnergy: harmonicEnergy,
     baselineFit: baselineFit, baselineLimit: baselineLimit,
     steadyStateFilter: steadyStateFilter, median: median,

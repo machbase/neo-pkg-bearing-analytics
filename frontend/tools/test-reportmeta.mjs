@@ -51,5 +51,22 @@ const genOne = appSrc.slice(appSrc.indexOf('_genOne'), appSrc.indexOf('_reportMe
 chk(!/summary: \(function \(\)/.test(genOne), '_genOne에 인라인 summary 조립 없음');
 chk(!/_dataOld/.test(appSrc), '임시 비교용 코드(_dataOld) 제거됨');
 
+/* 대역 범례 토글 — 계열이 8개면 큰 값이 작은 값을 눌러 버려서, 끄고 봐야 작은 대역의
+   변화가 보인다. 범례를 고정으로 적으면 대역 구성이 바뀔 때 그림과 글이 어긋나므로
+   계열 목록에서 만든다. */
+{
+  const Report = (await import('../../cgi-bin/report/report.js')).default;
+  const bands = ['서브동기', '결함 대역', '2~4 kHz'].map((l, i) => ({ label: l, color: '#abc' + i, vals: [1, 2, 3] }));
+  const html = Report.buildReportHTML({ alias: 'T', name: 'A', data: { bands, kxl: ['a', 'b', 'c'] } });
+  const n = (html.match(/data-series=/g) || []).length;
+  chk(n === bands.length, '범례가 계열 수만큼 나온다', n + '/' + bands.length);
+  chk(/data-toggle="cBand"/.test(html), '대역 차트 범례에 토글이 붙는다');
+  chk(/filter\(function\(sr\)\{return !hid\[sr.label\]/.test(html), '꺼진 계열은 그리지 않는다 — 축 범위도 다시 잡힌다');
+  chk(/rng=\[s,e\]/.test(html), '확대해 둔 구간이 토글로 풀리지 않는다');
+  // 토글이 없는 차트는 범례가 눌리지 않아야 한다 — 누를 수 있게 보이는데 반응이 없으면 고장으로 읽힌다
+  const only = html.slice(html.indexOf('cCrest'), html.indexOf('cBand'));
+  chk(!/data-series=/.test(only), '토글 안 준 차트에는 안 붙는다');
+}
+
 console.log(fail ? `\n=== FAIL ${fail}건 ===` : '\n=== 전부 통과 ===');
 process.exit(fail ? 1 : 0);

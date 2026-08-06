@@ -182,6 +182,16 @@
     return 'delete from NEO_VIBE_BAND where TIME between ' + sqlDate(fromMs) + ' and ' + sqlDate(toMs);
   }
   function bandDeleteKey(key) { return "delete from NEO_VIBE_BAND where NAME='" + esc(key) + "'"; }
+  /* 데이터가 하나도 안 남은 태그의 이름을 표에서 지운다.
+
+     TAG 표는 데이터와 이름 등록이 따로다 — 행을 다 지워도 이름은 메타에 남아, 철거한 설비가
+     태그 목록에 영영 보인다. 반대로 이름을 지워도 손해가 없다: INSERT가 없는 이름을 자동으로
+     다시 등록하므로(라이브 확인), 살아 있는 태그는 다음 수집에서 저절로 돌아온다.
+     그래서 "지금 데이터가 없으면 이름도 없앤다"가 안전한 규칙이 된다. */
+  function metaPurgeOrphans(table) {
+    var t = ident(table);
+    return 'delete from ' + t + ' metadata where NAME not in (select NAME from ' + t + ' group by NAME)';
+  }
   // 옛 LOG 테이블에서 옮겨 담기 위한 전체 조회 — 마이그레이션 전용
   function eventsLegacySelect() {
     return 'select EID, TS, TBL, TAG, ETYPE, GRADE, VAL, LIM, DETAIL from NEO_VIBE_EVENTS order by TS';
@@ -226,6 +236,7 @@
     eventsCount: eventsCount, eventInsert: eventInsert,
     eventsDeleteTag: eventsDeleteTag, eventsDeleteRange: eventsDeleteRange,
     bandDeleteRange: bandDeleteRange, bandDeleteKey: bandDeleteKey,
+    metaPurgeOrphans: metaPurgeOrphans,
     eventsLegacySelect: eventsLegacySelect, tableTypeOf: tableTypeOf, dropTable: dropTable,
     kvSelect: kvSelect, kvExists: kvExists, kvInsert: kvInsert, kvUpdate: kvUpdate, kvDelete: kvDelete,
     usageCount: usageCount, eventsSpan: eventsSpan, bandSpan: bandSpan, bandKeyCount: bandKeyCount,

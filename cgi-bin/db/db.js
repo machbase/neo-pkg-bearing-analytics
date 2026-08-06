@@ -387,17 +387,27 @@
     return q(SQL.eventsSelect(limit)).then(function (rows) { return rows.map(evRow); });
   }
   // 태그 단위 이벤트 삭제 — TAG 표가 되면서 가능해진 것(설비 철거 시 그 이력만 정리)
-  function deleteEventsOfTag(tbl, tag) { return q(SQL.eventsDeleteTag(tbl, tag)); }
-  function deleteEventsRange(fromMs, toMs) { return q(SQL.eventsDeleteRange(fromMs, toMs)); }
-  function deleteBandRange(fromMs, toMs) { return q(SQL.bandDeleteRange(fromMs, toMs)); }
+  /* 행을 지운 뒤 이름까지 정리한다 — 데이터가 하나도 안 남은 태그는 목록에서도 사라져야 한다.
+     이름 정리가 실패해도 행 삭제는 성공으로 둔다: 남은 이름은 다음 삭제 때 다시 걸리고,
+     여기서 통째로 실패하면 사용자는 "지웠는데 그대로"만 보게 된다. */
+  function purgeNames(table) { return q(SQL.metaPurgeOrphans(table)).catch(function () { return null; }); }
+  function deleteEventsOfTag(tbl, tag) {
+    return q(SQL.eventsDeleteTag(tbl, tag)).then(function (r) { return purgeNames('NEO_VIBE_EVENTS').then(function () { return r; }); });
+  }
+  function deleteEventsRange(fromMs, toMs) {
+    return q(SQL.eventsDeleteRange(fromMs, toMs)).then(function (r) { return purgeNames('NEO_VIBE_EVENTS').then(function () { return r; }); });
+  }
+  function deleteBandRange(fromMs, toMs) {
+    return q(SQL.bandDeleteRange(fromMs, toMs)).then(function (r) { return purgeNames('NEO_VIBE_BAND').then(function () { return r; }); });
+  }
   /* 태그 하나의 대역 데이터 — 6키(대역 5 + fr)를 차례로 지운다.
      한 키가 실패해도 나머지는 지운다: 일부만 남는 편이 "정리를 눌렀는데 아무것도 안 지워짐"보다 낫고,
      남은 키는 다시 눌러 지울 수 있다. */
-  var BAND_KEYS = ['sub', 'one', 'fault', 'high', 'vhigh', 'fr'];
+  var BAND_KEYS = ['sub', 'one', 'fault', 'high', 'vh1', 'vh2', 'vh3', 'vh4', 'fr'];
   function deleteBandOfTag(tbl, tag) {
     return BAND_KEYS.reduce(function (p, b) {
       return p.then(function () { return q(SQL.bandDeleteKey(tbl + ':' + tag + ':' + b)).catch(function () { }); });
-    }, Promise.resolve());
+    }, Promise.resolve()).then(function () { return purgeNames('NEO_VIBE_BAND'); });
   }
   // 판정 상태·학습값 — LOOKUP이라 키 단위. 되살릴 수 있는 것(상태)과 아닌 것(학습값)을 부르는 쪽이 구분한다
   function deleteMonState(key) { return q(SQL.kvDelete('NEO_VIBE_MONSTATE', key)); }

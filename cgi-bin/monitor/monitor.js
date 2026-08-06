@@ -115,7 +115,7 @@
       nf ? nf.src : '',
       'var NOTIFY=' + JSON.stringify(nf ? (nf.cfg || {}) : {}) + ';',
       'var TYPEKO=' + JSON.stringify({ threshold: '임계 초과', sustained: '상태 지속', recovery: '정상 복귀', improve: '상태 개선', signal_lost: '신호 두절', sensor_fault: '계측 이상', sensor_ok: '계측 복귀', baseline: '베이스라인 이탈', band: '대역 이탈', bandrec: '대역 복귀' }) + ';',
-      'var BORDER=' + JSON.stringify(spec.bandOrder || ['sub', 'one', 'fault', 'high', 'vhigh']) + ';',
+      'var BORDER=' + JSON.stringify(spec.bandOrder || ['sub', 'one', 'fault', 'high', 'vh1', 'vh2', 'vh3', 'vh4']) + ';',
       /* 대역 추출 타이머가 적재한 최신 대역값을 읽는다. 5개 대역이 같은 시각에 한 묶음으로
          들어가므로 TIME 역순 몇 줄이면 전부 잡힌다(이름별 첫 등장만 취함).
          NEO_VIBE_BAND가 아직 없을 수 있어(추출 미사용) try로 감싼다 — 없으면 대역 판정만 건너뛴다. */

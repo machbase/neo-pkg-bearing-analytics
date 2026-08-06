@@ -2,6 +2,7 @@
 // SQL/HTTP와 수학은 전부 cgi-bin에 있고, 여기는 화면 모델(equipment/det/trend) 조립만 담당한다.
 import DB from '../../../cgi-bin/db/db.js';
 import VC from '../../../cgi-bin/calc/calc.js';
+import Band from '../../../cgi-bin/monitor/band.js';
 
 /* 표시 상한 — 묶는 것은 앱이 아니라 서버 상시감시(monitor.tql)다.
 
@@ -22,6 +23,8 @@ const TAG_SCAN_MAX = 100000; // 상한 판정용 전체 조회 — 상한을 조
 export const CAPS = { perTable: TAGS_PER_TABLE, total: MAX_EQUIPMENT };
 const ROLLUP_BUCKETS = 720;  // 트렌드 목표 버킷 수
 const TREND_CHUNKS = 24;     // 첨도·대역에너지 추이 샘플 청크 수
+// 대역 계열 색 — BAND_ORDER 순서. 저주파에서 고주파로 갈수록 따뜻한 쪽으로 옮겨 간다
+const BAND_COLOR = ['#4199ff', '#2fb7a6', '#e5646a', '#8b7ff0', '#fdb532'];
 
 // db.js 재노출 — app.js가 데이터 진입점을 이 파일 하나로 유지
 export const listTagTables = DB.listTagTables;
@@ -573,7 +576,8 @@ export async function loadTrendChunks(E, eq, roll) {
   const fr = eq.rpm / 60;
   const fromMs = roll[0].ms, toMs = roll[roll.length - 1].ms;
   const n = Math.min(TREND_CHUNKS, roll.length);
-  const kurt = [], b1 = [], b2 = [], b3 = [], xLabels = [], xTips = [], times = [];
+  const kurt = [], xLabels = [], xTips = [], times = [];
+  const bandVals = VC.BAND_ORDER.map(() => []);
   const jobs = [];
   for (let i = 0; i < n; i++) {
     const at = fromMs + (toMs - fromMs) * (n === 1 ? 1 : i / (n - 1));
@@ -585,21 +589,20 @@ export async function loadTrendChunks(E, eq, roll) {
   const chunks = await Promise.all(jobs);
   chunks.forEach(({ at, w }) => {
     if (w.values.length < 64) return;
+
+    /* 알람이 쓰는 바로 그 함수로 구한다. 예전엔 화면만 따로 계산해서(대역 3개·정규화도 달랐다)
+       "알람은 났는데 차트엔 안 보이는" 상태가 됐다 — 같은 이름의 값이 두 벌이면 어느 쪽도 못 믿는다. */
+    const be = Band.bandEnergy(w.values, fs, fr, fs / 2);
+    if (!be) return;   // 계열 길이가 어긋나면 안 되므로 값을 하나라도 못 구하면 이 청크는 통째로 건너뛴다
     kurt.push(VC.kurtosis(w.values));
-    const sp = VC.amplitudeSpectrum(w.values, fs, Math.min(1000, fs * 0.45));
-    const be = VC.bandEnergies(sp, fr, fs);
-    b1.push(be[0]); b2.push(be[1]); b3.push(be[2]);
+    be.forEach((v, i) => bandVals[i].push(v));
     xLabels.push(E.fmtMD(at));
     xTips.push(E.fmtDT(at));
     times.push(at); // 시간축 배치용 (청크 실제 시각 — 데이터 부족 청크는 건너뛰므로 값 배열과 길이 일치)
   });
   return {
     kurt,
-    bands: [
-      { label: '1× 회전 성분', color: '#4199ff', vals: b1 },
-      { label: '결함 대역', color: '#e5646a', vals: b2 },
-      { label: '고주파 대역', color: '#8b7ff0', vals: b3 },
-    ],
+    bands: VC.BAND_ORDER.map((bn, i) => ({ label: VC.BAND_KO[bn] || bn, color: BAND_COLOR[i % BAND_COLOR.length], vals: bandVals[i] })),
     xLabels, xTips, times,
   };
 }

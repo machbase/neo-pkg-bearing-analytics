@@ -201,7 +201,17 @@
     " if(R.p2p)line('cP2p','tP2p',{values:R.p2p,xLabels:R.xL,tipLabels:R.xT,color:CH.SERIES.p2p,height:220,smooth:true,zeroBase:true});",
     " if(R.crest)line('cCrest','tCrest',{values:R.crest,xLabels:R.xL,tipLabels:R.xT,color:CH.SERIES.crest,height:220,smooth:true,refLines:[{val:3,color:'#8a8d99',label:'CF=3'},{val:6,color:'#e07b39',label:'CF=6'}]});",
     " if(R.kurt)line('cKurt','tKurt',{values:R.kurt,xLabels:R.kxl,color:'#fdb532',height:220,smooth:true,refLines:[{val:3,color:'#8a8d99',label:'정상=3'},{val:4.5,color:'#e07b39',label:'충격성 경계'}]});",
-    " if(R.bands){var cb=el('cBand');if(cb){var db=function(s,e){CH.drawMultiLine(cb,{series:R.bands.map(function(sr){return {label:sr.label,color:sr.color,vals:sr.vals.slice(s,e)};}),xLabels:R.kxl.slice(s,e),height:220},cc());};db(0,R.kxl.length);CH.addZoom(cb,R.kxl.length,db);}}",
+    /* 범례 클릭 → 그 계열을 빼고 다시 그린다. 축 범위가 남은 계열 기준으로 다시 잡히는 것이
+       핵심이다 — 계열만 감추고 축을 그대로 두면 작은 대역은 여전히 바닥에 붙어 보이지 않는다.
+       마지막으로 그린 구간(s,e)을 기억해 두어 확대해 둔 상태가 풀리지 않게 한다. */
+    " if(R.bands){var cb=el('cBand');if(cb){var hid={},rng=[0,R.kxl.length];",
+    "  var db=function(s,e){rng=[s,e];CH.drawMultiLine(cb,{series:R.bands.filter(function(sr){return !hid[sr.label];}).map(function(sr){return {label:sr.label,color:sr.color,vals:sr.vals.slice(s,e)};}),xLabels:R.kxl.slice(s,e),height:220},cc());};",
+    "  db(0,R.kxl.length);CH.addZoom(cb,R.kxl.length,db);",
+    "  var lg=document.querySelector('[data-toggle=\"cBand\"]');",
+    "  if(lg)lg.addEventListener('click',function(ev){var t=ev.target;while(t&&t!==lg&&!t.getAttribute('data-series'))t=t.parentNode;",
+    "    if(!t||t===lg)return;var k=t.getAttribute('data-series');",
+    "    if(hid[k]){delete hid[k];t.style.opacity='';t.style.textDecoration='';}else{hid[k]=1;t.style.opacity='.35';t.style.textDecoration='line-through';}",
+    "    db(rng[0],rng[1]);});}}",
     " if(R.wave)line('cWave','tWave',{values:R.wave.v,xLabels:R.wave.t,color:CH.SERIES.wave,height:240,lw:1.1},'xWave');",
     " if(R.fft)fftc('cFft','tFft',{freqs:R.fft.freqs,mags:R.fft.mags,markers:R.fft.markers,res:R.fft.res,height:280,hideMarkerLabels:true});",
     " if(R.spec){var cs=el('cSpec');if(cs)CH.drawHeat(cs,{grid:R.spec.grid,rows:R.spec.rows,cols:R.spec.cols,fmax:R.spec.fmax,height:200},cc());}",
@@ -243,8 +253,11 @@
       + (opts.tipId ? '<div class="tooltip" id="' + opts.tipId + '"></div>' : '')
       + '</div>');
     if (opts.legend && opts.legend.length) {
-      h.push('<div class="legend">' + opts.legend.map(function (l) {
-        return '<span><span class="sw" style="background:' + esc(l.color) + ';"></span>' + esc(l.label) + '</span>';
+      /* toggle을 준 차트는 범례를 눌러 계열을 끌 수 있다 — 계열이 여럿이면 큰 값이 작은 값을
+         눌러 버려서, 끄고 봐야 비로소 작은 대역의 변화가 보인다. */
+      h.push('<div class="legend"' + (opts.toggle ? ' data-toggle="' + esc(opts.canvasId) + '"' : '') + '>' + opts.legend.map(function (l) {
+        var t = opts.toggle ? ' data-series="' + esc(l.label) + '" style="cursor:pointer;user-select:none" title="클릭하면 숨기거나 다시 표시합니다"' : '';
+        return '<span' + t + '><span class="sw" style="background:' + esc(l.color) + ';"></span>' + esc(l.label) + '</span>';
       }).join('') + '</div>');
     }
     h.push('</div>');
@@ -531,7 +544,7 @@
     if (d.p2p) g2.push({ title: 'Peak-to-Peak 추이', canvasId: 'cP2p', h: 220, tipId: 'tP2p' });
     if (d.crest) g2.push({ title: 'Crest Factor 추이', sub: '충격성 지표', canvasId: 'cCrest', h: 220, tipId: 'tCrest' });
     if (d.kurt) g2.push({ title: '첨도 추이', sub: 'Kurtosis · 3 = 정상', canvasId: 'cKurt', h: 220, tipId: 'tKurt' });
-    if (d.bands) g2.push({ title: '결함 대역 에너지 추이', sub: 'Band Energy', canvasId: 'cBand', h: 220, legend: d.bands.map(function (b) { return { label: b.label, color: b.color }; }) });
+    if (d.bands) g2.push({ title: '결함 대역 에너지 추이', sub: 'Band Energy', canvasId: 'cBand', h: 220, toggle: true, legend: d.bands.map(function (b) { return { label: b.label, color: b.color }; }) });
     if (g2.length) {
       h.push('<div class="grid2">');
       g2.forEach(function (c) { chartSection(h, c); });

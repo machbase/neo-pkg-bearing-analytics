@@ -53,9 +53,9 @@ chk('windowRms 격리 실행', () => {
 /* bandJudge는 모듈 상수(BAND_ORDER·BAND_KO·BAND_GRADE·BAND_HYST)와 baselineLimit을 쓰던 자리다.
    격리 스코프에서 부르면 그 참조가 남아 있는지 바로 드러난다. */
 chk('bandJudge 격리 실행', () => {
-  const now = { sub: 0.1, one: 0.5, fault: 0.3, high: 0.2, vhigh: 0 };
+  const now = { sub: 0.1, one: 0.5, fault: 0.3, high: 0.2, vh1: 0 };
   const bls = { sub: { mu: 0.1, sigma: 0.01, k: 3 }, one: { mu: 0.2, sigma: 0.01, k: 3 },
-    fault: { mu: 0.3, sigma: 0.01, k: 3 }, high: { mu: 0.2, sigma: 0.01, k: 3 }, vhigh: { mu: 0, sigma: 0, k: 3 } };
+    fault: { mu: 0.3, sigma: 0.01, k: 3 }, high: { mu: 0.2, sigma: 0.01, k: 3 }, vh1: { mu: 0, sigma: 0, k: 3 } };
   const r = isolate('var bandJudge = ' + S.band + ';',
     'bandJudge(' + JSON.stringify(now) + ',' + JSON.stringify(bls) + ', false)');
   const want = VC.bandJudge(now, bls, false);
@@ -121,7 +121,7 @@ chk('isRunning의 정지 기준이 BL_IDLE_FRAC과 일치', () => {
   if (!html) console.log('SKIP 번들 검사 — main.html 없음 (npm run build:root 후 확인)');
   else chk('번들의 bandJudge가 자체 완결', () => {
     // 대역 이름 배열과 한계식이 같은 함수 안에 있어야 한다(둘 사이에 함수 경계가 없어야 함)
-    const i2 = html.indexOf('"sub","one","fault","high","vhigh"');
+    const i2 = html.indexOf('"sub","one","fault","high","vh1"');
     if (i2 < 0) throw new Error('번들에서 대역 이름 배열을 찾지 못함 — 빌드 확인');
     const near = html.slice(i2, i2 + 1200);
     if (!/\.mu\+\(.{1,4}\.k\|\|3\)\*/.test(near)) throw new Error('한계식이 함수 밖에 있다 — 자체 완결이 깨졌다');

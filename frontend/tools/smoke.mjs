@@ -368,14 +368,26 @@ const cases = [
     ['개월 전', '한 달이 넘었습니다', '학습한 지 한 달이 넘은 태그', '재학습 1',
       '정비나 운전 조건 변경이 있었다면']],
   /* 빠진 대역과 이유 — 학습된 것만 나열하면 "왜 4/5냐"를 물어봐야 알 수 있다.
-     초고주파는 회전주파수와 무관하게 1000 Hz 고정 하한이라, 샘플레이트가 2 kHz 미만이면
-     하한이 Nyquist를 넘어 빈 대역이 된다. 그 태그는 5/5가 원리적으로 불가능하므로
+     1 kHz 위 옥타브 대역들은 회전주파수와 무관하게 하한이 고정이라, 샘플레이트가 낮으면
+     하한이 Nyquist를 넘어 빈 대역이 된다. 그 태그는 8/8이 원리적으로 불가능하므로
      분모도 "측정 가능한 대역 수"로 줄여야 도달 못 할 목표를 보여주지 않는다. */
+  /* 확인 대기가 여러 개면 한 번에 끝낼 길이 있어야 한다 — 하나씩 누르게 두면 확인이 일이 되고,
+     일이 되면 읽지 않고 누르게 된다. 되돌릴 수 없는 초기화는 여기 두지 않는다. */
+  /* 회차보다 짧은 주기는 고를 수 없어야 한다 — 고르면 회차가 겹쳐 표가 영영 비는데
+     화면 어디에도 이유가 안 나온다(실제로 겪었다). 태그가 적으면 1분도 멀쩡하므로 규모로 판단한다. */
+  ['settings criteria 대역 주기 — 회차보다 짧으면 잠금', { tab: 'settings', setSection: 'criteria', bandOn: true },
+    ['한 회차 약', '회차가 겹쳐 아무것도 쌓이지 않습니다']],
+  ['settings criteria 확인 대기 일괄', { tab: 'settings', setSection: 'criteria',
+    revived: Object.fromEntries(sorted.slice(0, 3).map((e) => [e.table + ':' + e.name, { at: d.now }])),
+    baselines: Object.fromEntries(sorted.slice(0, 3).map((e) => [e.table + ':' + e.name, { mu: 1, sigma: 0.05, k: 3, n: 130, at: d.now }])) },
+    ['확인 대기', '3개', '모두 같은 설비 — 유지', '!모두 다른 설비']],
+  ['settings criteria 확인 대기 없으면 줄도 없다', { tab: 'settings', setSection: 'criteria', revived: {} },
+    ['!확인 대기']],
   ['settings criteria 측정 불가 대역', { tab: 'settings', setSection: 'criteria', bandOn: true,
     baselines: Object.fromEntries(['sub', 'one', 'fault', 'high'].map((b) => [eq0.table + ':' + eq0.name + ':' + b,
       { mu: 1, sigma: 0.01, k: 3, n: 130, band: b, at: Date.now() }])) },
-    // 목 설비는 fs=25600이라 5개 대역 모두 측정 가능 — 빠진 것은 학습 실패로 표시된다
-    ['4/5 대역 학습됨', '학습 안 됨', '초고주파', '표본 부족 또는 학습 실패']],
+    // 목 설비는 fs=25600(Nyquist 12.8k)이라 8개 대역 모두 측정 가능 — 빠진 것은 학습 실패로 표시된다
+    ['4/8 대역 학습됨', '학습 안 됨', '2~4 kHz', '표본 부족 또는 학습 실패']],
   /* 표본 칩 — 비율이 아니라 개수로 쓴다. 알아야 할 것은 "최소 표본(30)을 넘었나"인데
      28% 같은 값으로는 판단이 안 된다(144칸의 28%는 40개로 충분, 60칸이면 17개로 부족). */
   ['settings criteria 표본 현황', { tab: 'settings', setSection: 'criteria', bandOn: true,

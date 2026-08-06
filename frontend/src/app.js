@@ -36,6 +36,9 @@ var ISO_TTL_QUIET_MS = 300000;
    소진되면 손을 떼고 사유를 그대로 보여준다. */
 /* 감시자 주기 — 하는 일이 남의 심박 조회뿐이라 짧게 잡아도 부담이 없다. 앱이 닫혀 있을 때
    감시가 죽으면 이 주기 안에 되살아난다. */
+/* 대역 추출 한 태그당 예상 소요(초) — 원본 조회 ~0.2초 + FFT(32,768점) ~0.7초 실측(goja).
+   주기를 고를 때 "이 설치에서 한 회차가 몇 초인지"를 계산하는 데 쓴다. */
+var BAND_TAG_SEC = 0.9;
 var WD_TICK_MS = 300000;
 var WD_SCHED = '@every 5m';
 var RECOVER_MAX = 3;
@@ -262,7 +265,7 @@ export class App extends Component {
       equipBulk: null,     // 일괄 적용 패널 {id, scope, fields} — 한 번에 한 행만 연다
       // 계측·구동 메타 {mount,drive,belt:{d1,d2,len},vanes} — 전부 선택 입력. 없으면 엔진이 "볼 수 없음"으로 처리한다.
       equipMeta: {}, lineHz: '60',
-      bandOn: false, bandInterval: '10m', bandBusy: {}, bandFill: null, bandCov: null, bandIvOpen: false, bandIvNext: '10m', bandIvAct: 'keep', // 계통주파수는 설비마다 묻지 않는다(국가 계통) — 전역 기본 60Hz
+      bandOn: false, bandHide: {}, bandInterval: '10m', bandBusy: {}, bandFill: null, bandCov: null, bandIvOpen: false, bandIvNext: '10m', bandIvAct: 'keep', // 계통주파수는 설비마다 묻지 않는다(국가 계통) — 전역 기본 60Hz
       equipCls: {}, classThresh: {}, unitThresh: {},
       llmProvider: '', llmConfigured: false, llmTesting: false, llmTest: null,
       llmKeys: {}, llmModels: {}, ollamaUrl: 'http://127.0.0.1:11434',
@@ -521,7 +524,13 @@ export class App extends Component {
       }
       self._refreshRunState(now);   // 정지·두절 표시용 — 판정과 별개로 서버 모드에서도 화면에 나와야 한다
       self._judgeLive().then(function (n) { if (n) self._loadEventsLive(); }); // 새 이벤트가 났을 때만 목록 갱신
-      self.forceUpdate();
+      /* 설정 화면은 이 틱으로 다시 그리지 않는다.
+         입력칸이 전부 제어 입력(value=상태)이라, 타이핑 도중 다시 그리면 preact가 옛 상태값을
+         DOM에 도로 써넣어 입력이 지워진다. onChange는 포커스가 빠질 때 발화하므로 그전에 글자가
+         날아가면 저장될 값 자체가 없다 — 임계값이 "저장이 안 된다"고 보인 원인이 이것이다.
+         판정·알림은 그대로 돈다(여기서 막는 것은 화면 갱신뿐이고, 설정 화면에는 이 틱으로
+         바뀌어야 할 내용이 없다). */
+      if (self.state.tab !== 'settings') self.forceUpdate();
     }).catch(function () { self._ticking = false; });
   }
   /* 설비별 운전 상태 — 정지 / 신호 두절 / 운전 중.
@@ -1251,13 +1260,25 @@ export class App extends Component {
     this._toast('기존 학습값을 계속 사용합니다');
     this._syncMonitorTimer(true);
   }
+  /* 한꺼번에 유지 — 태그를 여러 개 다시 등록하면 수십 개가 한 번에 확인 대기로 뜬다.
+     하나씩 누르게 두면 확인이 일이 되고, 일이 되면 안 보고 누르게 된다.
+     낱개로 부르지 않고 따로 두는 이유는 저장·타이머 재등록을 N번 하지 않기 위해서다. */
+  _keepAllLearned() {
+    var n = Object.keys(this.state.revived || {}).length;
+    if (!n) return;
+    this.setState({ revived: {} });
+    this._persistView(['revived'], { revived: {} });
+    this._toast(n + '개 태그의 기존 학습값을 계속 사용합니다');
+    this._syncMonitorTimer(true);
+  }
   /* 다른 설비다 — 학습값(RMS+대역 6건)과 판정 상태를 지우고 재학습을 받게 한다.
      대역 시계열은 지우지 않는다: 옛 값이 남아도 학습을 다시 하면 그 창만 쓰므로 판정엔 안 섞이고,
      지우면 되돌릴 수 없다. 정리는 고아 데이터 화면에서 따로 하게 한다. */
   _resetLearned(key) {
     var self = this;
     var jobs = [deleteBaseline(key).catch(function () {})];
-    VC.BAND_ORDER.forEach(function (bn) { jobs.push(deleteBaseline(key + ':' + bn).catch(function () {})); });
+    // 옛 이름(vhigh)도 같이 지운다 — 목록에서 빠진 뒤에도 표에 남으면 아무도 안 보는 행이 쌓인다
+    VC.BAND_ORDER.concat(VC.BAND_LEGACY).forEach(function (bn) { jobs.push(deleteBaseline(key + ':' + bn).catch(function () {})); });
     jobs.push(saveMonState(key, { g: 0, since: Date.now(), cand: 0, candSince: Date.now(), lastRe: Date.now(), b: false }).catch(function () {}));
     Promise.all(jobs).then(function () {
       var rev = Object.assign({}, self.state.revived || {});
@@ -1436,7 +1457,7 @@ export class App extends Component {
   }
   _delBandBaseline(eq) {
     var self = this, base = eq.table + ':' + eq.name;
-    Promise.all(VC.BAND_ORDER.map(function (bn) { return deleteBaseline(base + ':' + bn).catch(function () {}); }))
+    Promise.all(VC.BAND_ORDER.concat(VC.BAND_LEGACY).map(function (bn) { return deleteBaseline(base + ':' + bn).catch(function () {}); }))
       .then(function () {
         self.setState({ baselines: self._blMerge(null, VC.BAND_ORDER.map(function (bn) { return base + ':' + bn; })) });
         self._toast((eq.alias || eq.name) + ' 대역 베이스라인 삭제됨');
@@ -2545,8 +2566,11 @@ export class App extends Component {
       E.zoomDraw(kurtC, kV.length, dk, zk);
     }
     var band = bandC;
+    // 꺼둔 계열은 그리지도 않는다 — 축 범위도 남은 계열 기준으로 다시 잡혀야 작은 대역이 보인다
+    var _hide = this.state.bandHide || {};
+    if (tr && tr.bands && tr.bands.length) this._lastBandSeries = tr.bands.map(function (x) { return { label: x.label, color: x.color }; });
     if (band && tr && tr.bands && tr.bands.length && tr.bands[0].vals.length) {
-      var bS = tr.bands.map(function (s) { return { label: s.label, color: s.color, vals: s.vals }; });
+      var bS = tr.bands.filter(function (s) { return !_hide[s.label]; }).map(function (s) { return { label: s.label, color: s.color, vals: s.vals }; });
       var db = function (s, e) { var w = kWin(s, e); E.drawMultiLine(band, { series: bS.map(function (sr) { return { label: sr.label, color: sr.color, vals: sr.vals.slice(s, e) }; }), times: kTs.slice(s, e), xFrom: w.xFrom, xTo: w.xTo, xLabels: kxl.slice(s, e), height: 220 }, CC); };
       E.zoomDraw(band, kxl.length, db, zk);
     }
@@ -2763,11 +2787,35 @@ export class App extends Component {
     return null;
   }
   _gradeSrc(eq) { return ((this._gradeState || {})[eq.table + ':' + eq.name] || {}).src || 'iso'; }
-  _effZones(eq) { var S = this.state, E = this.E; if (eq.unit === 'mm/s') { var d = VC.ISO_ZONES[eq.cls] || VC.ISO_ZONES.II, o = S.classThresh[eq.cls] || []; return [o[0] != null ? o[0] : d[0], o[1] != null ? o[1] : d[1], o[2] != null ? o[2] : d[2]]; } var du = VC.zonesFor(eq.unit, eq.cls), ou = S.unitThresh[eq.unit] || []; return [ou[0] != null ? ou[0] : du[0], ou[1] != null ? ou[1] : du[1], ou[2] != null ? ou[2] : du[2]]; }
+  /* 사용자 임계값은 "입력한 문자열 그대로" 저장된다(THRESH_RAW) — 판정에 쓸 때 여기서 숫자로 만든다.
+     비었거나 숫자가 아니면 규격 기본값으로 되돌린다. 옛 설정은 숫자로 저장돼 있어 그대로 통과한다. */
+  _effZones(eq) {
+    var S = this.state;
+    var num = function (v, d) { var n = parseFloat(v); return isFinite(n) ? n : d; };
+    if (eq.unit === 'mm/s') {
+      var d = VC.ISO_ZONES[eq.cls] || VC.ISO_ZONES.II, o = S.classThresh[eq.cls] || [];
+      return [num(o[0], d[0]), num(o[1], d[1]), num(o[2], d[2])];
+    }
+    var du = VC.zonesFor(eq.unit, eq.cls), ou = S.unitThresh[eq.unit] || [];
+    return [num(ou[0], du[0]), num(ou[1], du[1]), num(ou[2], du[2])];
+  }
   _setEquipCls(id, v) { var m = Object.assign({}, this.state.equipCls); m[id] = v; this.setState({ equipCls: m, dirty: true }); }
   _setEquipUnit(id, v) { var m = Object.assign({}, this.state.equipUnit); if (v) m[id] = v; else delete m[id]; this.setState({ equipUnit: m, dirty: true }); }
-  _setClassThresh(c, i, v) { var m = Object.assign({}, this.state.classThresh); var a = (m[c] || []).slice(); var n = parseFloat(v); a[i] = isNaN(n) ? null : n; m[c] = a; this.setState({ classThresh: m, dirty: true }); }
-  _setUnitThresh(u, i, v) { var m = Object.assign({}, this.state.unitThresh); var a = (m[u] || []).slice(); var n = parseFloat(v); a[i] = isNaN(n) ? null : n; m[u] = a; this.setState({ unitThresh: m, dirty: true }); }
+  /* 입력한 문자열을 그대로 담는다 — 키 입력마다 parseFloat로 정규화하면 소수점을 칠 수 없다.
+     htm이 preact/compat에 묶여 있어 onChange가 키 입력마다 발화하는데, 그때 "1." → 1로 바뀌어
+     화면에 다시 써지면서 점이 지워진다(1.12 같은 값이 입력 자체가 불가능했다).
+     숫자로 만드는 일은 값을 쓰는 곳(_effZones) 한 곳에서만 한다. 빈 칸은 null = 기본값 사용. */
+  _setThreshRaw(mapKey, k, i, v) {
+    var m = Object.assign({}, this.state[mapKey]);
+    var a = (m[k] || []).slice();
+    a[i] = String(v).trim() === '' ? null : v;
+    m[k] = a;
+    var patch = { dirty: true };
+    patch[mapKey] = m;
+    this.setState(patch);
+  }
+  _setClassThresh(c, i, v) { this._setThreshRaw('classThresh', c, i, v); }
+  _setUnitThresh(u, i, v) { this._setThreshRaw('unitThresh', u, i, v); }
   _periodLabel() {
     var E = this.E, now = this.data ? this.data.now : Date.now();
     var p = this.state.period;
@@ -4522,16 +4570,33 @@ export class App extends Component {
     base.lineHzShow = base.lineHz !== '60' || !!(base.lineHzHint && base.lineHzHint.warn);
     base.unitOptions = ['mm/s', 'g', 'μm'];
     var _clsList = ['I', 'II', 'III', 'IV'];
+    /* 입력칸에는 사용자가 친 문자열을 그대로 되돌려준다 — 여기서 _effZones(파싱된 숫자)를 쓰면
+       "1." 을 치는 순간 1로 바뀌어 화면에 써지면서 점이 지워진다. 안 고친 칸만 기본값을 보여준다. */
+    var rawOf = function (arr, i, d) { var v = arr && arr[i]; return (v == null || v === '') ? d : v; };
     base.threshRows = _clsList.map(function (c) {
-      var z = self._effZones({ unit: 'mm/s', cls: c });
-      return { label: 'Class ' + c, unit: 'mm/s', v0: z[0], v1: z[1], v2: z[2], on0: function (ev) { self._setClassThresh(c, 0, ev.target.value); }, on1: function (ev) { self._setClassThresh(c, 1, ev.target.value); }, on2: function (ev) { self._setClassThresh(c, 2, ev.target.value); } };
+      var d = VC.ISO_ZONES[c] || VC.ISO_ZONES.II, o = S.classThresh[c] || [];
+      return { label: 'Class ' + c, unit: 'mm/s',
+        v0: rawOf(o, 0, d[0]), v1: rawOf(o, 1, d[1]), v2: rawOf(o, 2, d[2]),
+        on0: function (ev) { self._setClassThresh(c, 0, ev.target.value); },
+        on1: function (ev) { self._setClassThresh(c, 1, ev.target.value); },
+        on2: function (ev) { self._setClassThresh(c, 2, ev.target.value); } };
     });
     ['g', 'μm'].forEach(function (u) {
-      var z = self._effZones({ unit: u, cls: 'II' });
+      var du = VC.zonesFor(u, 'II'), ou = S.unitThresh[u] || [];
       var _ud = { g: '가속도', 'μm': '변위' }[u] || '';
-      base.threshRows.push({ label: u + ' (' + _ud + ')', unit: u, v0: z[0], v1: z[1], v2: z[2], on0: function (ev) { self._setUnitThresh(u, 0, ev.target.value); }, on1: function (ev) { self._setUnitThresh(u, 1, ev.target.value); }, on2: function (ev) { self._setUnitThresh(u, 2, ev.target.value); } });
+      base.threshRows.push({ label: u + ' (' + _ud + ')', unit: u,
+        v0: rawOf(ou, 0, du[0]), v1: rawOf(ou, 1, du[1]), v2: rawOf(ou, 2, du[2]),
+        on0: function (ev) { self._setUnitThresh(u, 0, ev.target.value); },
+        on1: function (ev) { self._setUnitThresh(u, 1, ev.target.value); },
+        on2: function (ev) { self._setUnitThresh(u, 2, ev.target.value); } });
     });
-    base.onResetThresh = function () { self.setState({ classThresh: {}, unitThresh: {} }); self._toast('임계값을 기본값으로 초기화'); };
+    /* 초기화도 다른 편집과 같은 취급 — 저장해야 확정된다.
+       dirty를 안 세우면 저장 안내가 안 떠서, 되돌린 뒤 그냥 나가면 조용히 없던 일이 된다
+       (화면은 기본값인데 저장된 값은 옛 값이라 다음에 들어오면 되살아난다). */
+    base.onResetThresh = function () {
+      self.setState({ classThresh: {}, unitThresh: {}, dirty: true });
+      self._toast('임계값을 기본값으로 되돌렸습니다 — 저장해야 적용됩니다', 'warn');
+    };
     // 베이스라인(정상 상태 학습) — 판정기준 카드
     base.blWin = S.blWin; base.onBlWin = function (ev) { self.setState({ blWin: ev.target.value }); };
     base.blK = S.blK; base.onBlK = function (ev) { self.setState({ blK: ev.target.value }); };
@@ -4596,7 +4661,18 @@ export class App extends Component {
         onDel: function () { self._delBaseline(key, eq); },
       };
     });
+    /* 대역 범례 — 계열 8개가 한 축에 겹치면 작은 대역이 큰 대역에 눌려 안 보인다.
+       눌러서 끄면 축 범위가 남은 계열 기준으로 다시 잡혀 그 대역의 변화가 드러난다. */
+    var _bh = S.bandHide || {};
+    base.bandLegend = (this._lastBandSeries || []).map(function (sr) {
+      return { label: sr.label, color: sr.color, on: !_bh[sr.label],
+        onClick: function () { var h = Object.assign({}, self.state.bandHide || {}); if (h[sr.label]) delete h[sr.label]; else h[sr.label] = 1; self.setState({ bandHide: h }); } };
+    });
     base.onBlLearnAll = function () { blEqs.forEach(function (eq) { if (self._blLearnable(eq)) self._learnBaseline(eq); }); };
+    /* 확인 대기 중인 태그 수 — 목록을 훑지 않고도 "몇 개가 막혀 있는지" 보이게 한다.
+       답할 때까지 그 태그들은 학습 기반 판정이 멈춰 있다. */
+    base.revPending = (base.blRows || []).filter(function (r) { return r.revived; }).length;
+    base.onKeepAllRevived = function () { self._keepAllLearned(); };
     base.llmProviders = [['claude', 'Claude'], ['openai', 'OpenAI'], ['gemini', 'Gemini'], ['ollama', 'Ollama']].map(function (p) { var a = S.llmProvider === p[0]; return { label: p[1], onClick: function () { self.setState({ llmProvider: p[0], dirty: true, llmConfigured: false, llmTest: null, dxAiText: null }); }, style: 'flex: 1; text-align: center; padding: 9px 6px; border-radius: 6px; cursor: pointer; font-size: 13px; font-weight: ' + (a ? '600' : '500') + '; border: 1px solid ' + (a ? 'var(--primary-base)' : 'var(--border-default)') + '; background: ' + (a ? 'rgba(0,108,210,.1)' : 'var(--bg-elevated)') + '; color: ' + (a ? 'var(--primary-light)' : 'var(--text-secondary)') + ';' }; });
     base.isOllama = S.llmProvider === 'ollama';
     base.llmApiKey = (S.llmKeys || {})[S.llmProvider] || '';
@@ -4919,7 +4995,27 @@ export class App extends Component {
     base.bandIvNext = S.bandIvNext || base.bandInterval;
     base.bandIvSame = base.bandIvNext === base.bandInterval;
     base.onBandIvOpen = function () { self.setState({ bandIvOpen: true, bandIvNext: self.state.bandInterval || '10m', bandIvAct: 'keep' }); };
-    base.bandIvOptions = [{ v: '1m', l: '1분' }, { v: '5m', l: '5분' }, { v: '10m', l: '10분' }, { v: '30m', l: '30분' }, { v: '1h', l: '1시간' }];
+    /* 회차보다 짧은 주기는 고를 수 없게 한다.
+
+       한 태그에 원본 조회 ~0.2초 + FFT(32,768점) ~0.7초가 든다(goja 실측). 태그가 62개면
+       한 회차가 56초라, 1분 주기로는 회차가 겹쳐 서로 밀다가 한 번도 완주하지 못한다 —
+       타이머는 RUNNING인데 표는 영영 비어 있고, 화면 어디에도 이유가 안 나온다(실제로 겪었다).
+       그래서 못 쓰는 선택지는 잠그고, 왜 못 쓰는지를 라벨에 적는다. 태그가 적은 설치에서는
+       1분도 멀쩡하므로 목록에서 빼지는 않는다 — 규모에 따라 달라지는 값이다. */
+    var _bandN = (this._bandSpec().tags || []).length;
+    var _passSec = Math.round(_bandN * BAND_TAG_SEC);
+    base.bandPassSec = _passSec;
+    base.bandIvOptions = [
+      { v: '1m', l: '1분', sec: 60 }, { v: '5m', l: '5분', sec: 300 }, { v: '10m', l: '10분', sec: 600 },
+      { v: '30m', l: '30분', sec: 1800 }, { v: '1h', l: '1시간', sec: 3600 },
+    ].map(function (o) {
+      // 여유 2배 — 딱 맞으면 태그가 몇 개만 늘어도 바로 겹친다
+      var bad = _passSec > 0 && o.sec < _passSec * 2;
+      return { v: o.v, l: bad ? o.l + ' — 회차(' + _passSec + '초)보다 짧음' : o.l, disabled: bad };
+    });
+    base.bandIvHint = _passSec > 0
+      ? '감시 태그 ' + _bandN + '개 → 한 회차 약 ' + _passSec + '초. 그보다 짧은 주기는 회차가 겹쳐 아무것도 쌓이지 않습니다.'
+      : '주기가 짧을수록 표본이 빨리 쌓입니다';
     /* 드롭다운에서 고르면 바로 적용하지 않고 확인 절차를 연다 — 주기를 바꾸면 이전 구간과
        밀도가 갈려 학습이 편향될 수 있고, 이미 채운 값의 간격과도 어긋난다. */
     base.onBandIvPickDirect = function (ev) {

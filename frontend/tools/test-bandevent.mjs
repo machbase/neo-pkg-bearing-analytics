@@ -13,11 +13,11 @@ const chk = (ok, msg, extra) => {
 };
 
 // 실측 BEARING:C1 대역값 + 정상 시절 베이스라인(가정)
-const NOW = { sub: 0.630, one: 1.090, fault: 1.783, high: 1.142, vhigh: 2.559 };
+const NOW = { sub: 0.630, one: 1.090, fault: 1.783, high: 1.142, vh2: 2.559 };
 const BLS = {
   sub: { mu: 0.60, sigma: 0.04, k: 3 }, one: { mu: 1.05, sigma: 0.06, k: 3 },
   fault: { mu: 1.20, sigma: 0.08, k: 3 }, high: { mu: 0.70, sigma: 0.05, k: 3 },
-  vhigh: { mu: 1.60, sigma: 0.12, k: 3 },
+  vh2: { mu: 1.60, sigma: 0.12, k: 3 },
 };
 
 // ── ② DETAIL 컬럼 ──────────────────────────────────────────────────────────
@@ -43,7 +43,7 @@ chk(/GRADE, LIM, DETAIL/.test(SQL.eventsSelect(10)), 'SELECT가 DETAIL 포함');
 {
   const j = VC.bandJudge(NOW, BLS, false);
   chk(j && j.on, '이탈 판정');
-  chk(j.over.length === 3, '이탈 대역 3개 (fault·high·vhigh)', j.over.map((o) => o.k).join(','));
+  chk(j.over.length === 3, '이탈 대역 3개 (fault·high·vh2)', j.over.map((o) => o.k).join(','));
   chk(Math.abs(j.maxR - 1.34) < 0.02, '최대 배수 ×1.34', '×' + j.maxR.toFixed(2));
   chk(j.gi === 1, '×1.34 → 주의(gi=1)', 'gi=' + j.gi);
   // 경계 확인
@@ -238,11 +238,11 @@ chk(VC.bandJudge({ fault: 1.0 }, { one: BLS.one }, false) === null, '겹치는 �
 {
   const zero = { mu: 0, sigma: 0, k: 3 };
   chk(VC.baselineLimit(zero) === 0, '전부 0인 대역의 한계는 0');
-  const j = VC.bandJudge({ vhigh: 0.0001, fault: 2.0 }, { vhigh: zero, fault: { mu: 1.5, sigma: 0.1, k: 3 } }, false);
-  chk(j && !/vhigh/.test(j.detail), '판정이 한계 0인 대역을 건너뜀', j ? j.detail : 'null');
+  const j = VC.bandJudge({ vh2: 0.0001, fault: 2.0 }, { vh2: zero, fault: { mu: 1.5, sigma: 0.1, k: 3 } }, false);
+  chk(j && !/vh2/.test(j.detail), '판정이 한계 0인 대역을 건너뜀', j ? j.detail : 'null');
   chk(j && j.over.length === 1, '정상 대역만 이탈로 집계', String(j.over.length));
   // 한계 0짜리만 있으면 판정 자체가 불가(any=false)여야 한다
-  chk(VC.bandJudge({ vhigh: 0.0001 }, { vhigh: zero }, false) === null, '쓸 수 있는 대역이 없으면 판정 불가');
+  chk(VC.bandJudge({ vh2: 0.0001 }, { vh2: zero }, false) === null, '쓸 수 있는 대역이 없으면 판정 불가');
 }
 
 // ── 대역 경계와 측정 가능성 ────────────────────────────────────────────────
@@ -258,14 +258,14 @@ chk(VC.bandJudge({ fault: 1.0 }, { one: BLS.one }, false) === null, '겹치는 �
   // 1 kHz 샘플링: Nyquist 500 → 초고주파(1000~500)는 빈 대역
   const able1k = VC.BAND_ORDER.filter((bn) => VC.bandMeasurable(bn, 30, 1000));
   chk(able1k.length === 4, '1 kHz 샘플링에서 측정 가능 대역은 4개', able1k.join(','));
-  chk(!VC.bandMeasurable('vhigh', 30, 1000), '초고주파 측정 불가');
+  chk(!VC.bandMeasurable('vh1', 30, 1000), '1~2 kHz 측정 불가');
   chk(VC.bandMeasurable('high', 30, 1000), '고주파(300~1000)는 측정 가능');
 
   // 25.6 kHz면 전부 가능
   chk(VC.BAND_ORDER.every((bn) => VC.bandMeasurable(bn, 30, 25600)), '25.6 kHz에서는 5개 전부 가능');
 
   // 인자가 없으면 막지 않는다 — 판단 불가를 "불가"로 단정하면 학습이 통째로 막힌다
-  chk(VC.bandMeasurable('vhigh', 0, 0), '회전주파수·샘플레이트 불명이면 허용');
+  chk(VC.bandMeasurable('vh1', 0, 0), '회전주파수·샘플레이트 불명이면 허용');
 }
 // ── 측정 불가 대역도 저장한다 ──────────────────────────────────────────────
 /* 행을 빼면 "측정 불가"인지 "타이머가 안 돌았는지" 구분이 안 된다. 0으로 남겨두고,
@@ -280,7 +280,7 @@ chk(VC.bandJudge({ fault: 1.0 }, { one: BLS.one }, false) === null, '겹치는 �
   const fr = 30, fs = 1000, nyq = fs / 2;
   const B = [[2, 15], [15, 45], [45, 300], [300, 1000], [1000, nyq]];
   chk(B[4][0] >= Math.min(B[4][1], nyq), '초고주파는 빈 대역이라 값이 0으로 나온다');
-  chk(!VC.bandMeasurable('vhigh', fr, fs), 'calc는 그 대역을 측정 불가로 판단(표시·학습용)');
+  chk(!VC.bandMeasurable('vh1', fr, fs), 'calc는 그 대역을 측정 불가로 판단(표시·학습용)');
 }
 
 console.log(fail ? `\n=== FAIL ${fail}건 ===` : '\n=== 전부 통과 ===');
