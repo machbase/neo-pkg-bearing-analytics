@@ -338,5 +338,45 @@ function instrument(app) {
   chk(a.state.health === null, '대역 추출을 끄면 대역 복구 흔적도 사라진다', JSON.stringify(a.state.health));
 }
 
+/* ── 설정 전 반복 요청 ────────────────────────────────────────────────────────
+   새로 설치하면 감시 대상도 설정도 없다. 그 상태에서 확인이 10초마다 도는데, 매번 없는
+   타이머를 지우러 가면 Neo가 500을 돌려준다 — 실패 요청 세 건이 영원히 나가고 그 소음이
+   진짜 오류를 덮는다. 한 번 지웠으면 지웠다고 기억해야 한다. */
+{
+  const app = new App({ seed: 1, equipmentCount: 1 });
+  app.setState = function (st) { Object.assign(this.state, st); };
+  app._scheduleDraw = function () {};
+  app.live = true;
+  let dels = 0;
+  app._dropTimerCalls = () => dels;
+  const del = () => { dels++; return Promise.resolve(true); };
+  Object.assign(app.state, { monitorOn: true, monMode: 'app' });
+
+  // 없는 타이머는 지우러 가지도 않는다 — 없는 것을 지우면 Neo가 500을 돌려주고,
+  // 새 설치에서 그 빨간 요청이 화면을 덮어 고장으로 읽힌다
+  let states = 0;
+  app._timerStates = () => { states++; return Promise.resolve({}); };   // 등록된 타이머 없음
+  await app._dropTimer('_specSig', del, 'NEO_VIBE_MONITOR');
+  chk(dels === 0, '없는 타이머는 삭제 요청조차 보내지 않는다', dels + '회');
+  chk(states === 1, '있는지 한 번만 확인한다', states + '회');
+
+  await app._dropTimer('_specSig', del, 'NEO_VIBE_MONITOR');
+  await app._dropTimer('_specSig', del, 'NEO_VIBE_MONITOR');
+  chk(states === 1, '한 번 확인했으면 조회도 다시 하지 않는다', states + '회');
+
+  // 실제로 있으면 지운다
+  app._specSig = null;
+  app._timerStates = () => Promise.resolve({ NEO_VIBE_MONITOR: { state: 'RUNNING' } });
+  await app._dropTimer('_specSig', del, 'NEO_VIBE_MONITOR');
+  chk(dels === 1, '있으면 지운다', dels + '회');
+
+  /* 상태를 못 읽었으면(연결 실패) 예전처럼 지워 본다 — 확인이 안 된다고 손을 놓으면
+     꺼둔 설정의 타이머가 계속 도는 쪽이 된다. */
+  app._specSig = null;
+  app._timerStates = () => Promise.resolve(null);
+  await app._dropTimer('_specSig', del, 'NEO_VIBE_MONITOR');
+  chk(dels === 2, '상태를 모르면 지워 본다', dels + '회');
+}
+
 console.log(fail ? `\n=== FAIL ${fail}건 ===` : '\n=== 전부 통과 ===');
 process.exit(fail ? 1 : 0);

@@ -39,6 +39,10 @@ var ISO_TTL_QUIET_MS = 300000;
 /* 대역 추출 한 태그당 예상 소요(초) — 원본 조회 ~0.2초 + FFT(32,768점) ~0.7초 실측(goja).
    주기를 고를 때 "이 설치에서 한 회차가 몇 초인지"를 계산하는 데 쓴다. */
 var BAND_TAG_SEC = 0.9;
+/* "타이머가 없는 것이 맞는 상태"를 나타내는 서명. 서명을 null로 두면 다음 확인 때 또 지우러
+   가는데, 없는 타이머 DELETE는 Neo가 500을 돌려준다 — 새 설치에서 10초마다 실패 요청 세 건이
+   영원히 나가고, 그 소음이 진짜 오류를 덮는다. 한 번 지웠으면 지웠다고 기억한다. */
+var SIG_NONE = '(none)';
 var WD_TICK_MS = 300000;
 var WD_SCHED = '@every 5m';
 var RECOVER_MAX = 3;
@@ -277,6 +281,9 @@ export class App extends Component {
       notifTo: { webhook: '', email: '', sms: '' }, // 채널별 대상(웹훅 URL·수신 주소·번호)
       notifTest: null, // 테스트 발송 결과 {ch, ok, msg}
       routes: {}, // 심각도별 라우팅 {심각도: {email,slack,sms,timing}} — 기본 전부 비활성
+      /* 서버 타이머는 앱을 닫아도 계속 도는 상주물이라 말없이 만들지 않는다 — 설정에서
+         고른 뒤에 생기고, 끄면 지운다. 대신 앱 모드로 두면 화면을 닫는 순간 감시가 멈추므로
+         그 사실을 배너로 남긴다(고른 사람도 몇 주 뒤엔 잊는다). */
       monMode: 'app', // 감시 방식: 'app'(앱 열린 동안만) | 'server'(Neo 타이머 상시)
       // 알람 시나리오 파라미터 (앱·서버 타이머 공통 규칙)
       escHold: '1m',  // 진입 확인 시간 — 이상이 이만큼 이어져야 알린다(단발 스파이크 차단)
@@ -685,7 +692,9 @@ export class App extends Component {
         var _rw = this._recoverWarn(MON_T, dead, now, reMon);
         if (_rw) warns.push(_rw);
       }
-    } else if (this._lastJudgeAt && (typeof document === 'undefined' || document.visibilityState !== 'hidden')) {
+    }
+    if (S.monMode !== 'server' && this._lastJudgeAt
+      && (typeof document === 'undefined' || document.visibilityState !== 'hidden')) {
       var lag = now - this._lastJudgeAt;
       if (lag > Math.max(60000, iv * 20)) {
         warns.push({ k: 'applag', lv: 'warn', text: '앱 판정이 ' + durKo(lag) + ' 동안 멈춰 있습니다 — 탭을 다시 열거나 새로고침하세요' });
@@ -928,17 +937,41 @@ export class App extends Component {
     if (!this._wdSpec('wd')) return null;
     return Object.assign(this._wdBase(), { targets: [this._wdTarget('wd')], selfHb: who === 'band' ? '__hbband' : '__hb' });
   }
+  // 타이머 목록 조회 — 테스트가 갈아끼울 수 있도록 메서드로 감싼다
+  _timerStates() { return timerStates(); }
+  /* 타이머를 지우고 "없는 것이 맞다"고 기억한다.
+
+     지우기 전에 있는지 먼저 본다 — 없는 타이머를 지우면 Neo가 500을 돌려주고, 새 설치는
+     이 경로를 10초마다 지나가므로 실패 요청이 화면을 덮는다(그걸 고장으로 읽는다).
+     그리고 한 번 확인했으면 기억한다: 상태가 바뀌기 전에는 조회조차 하지 않는다.
+     상태를 못 읽었으면(연결 실패) 예전처럼 지워 본다 — 남아서 도는 것보다 낫다. */
+  _dropTimer(sigKey, del, name) {
+    if (this[sigKey] === SIG_NONE) return Promise.resolve();
+    var self = this;
+    return this._timerStates().then(function (m) {
+      if (m && name && !m[name]) { self[sigKey] = SIG_NONE; return true; }   // 애초에 없다
+      return del().then(function (r) { self[sigKey] = SIG_NONE; return r; });
+    });
+  }
+  /* 등록 직전에 "지금 그 타이머가 있는가"를 아는 만큼만 알려준다 — 서명이 그 기억이다.
+     SIG_NONE은 없음을 확인한 상태(끄면 여기로 온다), 서명 문자열은 우리가 만든 것이 도는 상태,
+     null은 모름(앱을 새로 열었거나 직전 등록이 실패했다). 모르면 등록 쪽이 목록을 읽는다. */
+  _timerKnown(sigKey) {
+    var s = this[sigKey];
+    return s === SIG_NONE ? 'absent' : (s ? 'present' : null);
+  }
   /* 감시자 타이머 생성/삭제 — 감시가 꺼져 있으면 볼 것이 없으니 지운다(고아 방지). */
   _syncWdTimer(silent) {
     var self = this, S = this.state;
     if (!this.live) return Promise.resolve();
     var spec = this._wdSpec('wd');
-    if (!spec || !spec.targets.length) { this._wdSig = null; return deleteWdTimer(); }
+    if (!spec || !spec.targets.length) return this._dropTimer('_wdSig', deleteWdTimer, WD_TIMER);
     var tql = Watchdog.buildWatchdogTql(spec);
     var sig = JSON.stringify(spec) + '|' + WD_SCHED + '|' + srcSig(tql);
     if (silent && sig === this._wdSig) return Promise.resolve();
+    var known = this._timerKnown('_wdSig');   // 새 서명을 넣기 전에 읽는다 — 넣고 나면 항상 '있음'이 된다
     this._wdSig = sig;
-    return createWdTimer(tql, WD_SCHED)
+    return createWdTimer(tql, WD_SCHED, known)
       .then(function () { if (!silent) self._toast('감시자 켜짐 · ' + WD_SCHED, 'ok'); })
       .catch(function (e) { self._wdSig = null; if (!silent) self._toast('감시자 설정 실패: ' + (e.message || e), 'err'); });
   }
@@ -949,12 +982,12 @@ export class App extends Component {
   _syncMonitorTimer(silent) {
     var self = this, S = this.state;
     if (!this.live) return Promise.resolve();
-    if (S.monMode !== 'server' || !S.monitorOn) { this._specSig = null; return deleteMonitorTimer(); }
+    if (S.monMode !== 'server' || !S.monitorOn) return this._dropTimer('_specSig', deleteMonitorTimer, MON_TIMER);
     var spec = this._monSpec();
     var sched = { '1s': '@every 1s', '3s': '@every 3s', '5s': '@every 5s', '10s': '@every 10s', '30s': '@every 30s', '1m': '@every 1m', '10m': '@every 10m' }[S.monitorInterval] || '@every 3s';
     if (!spec.tags.length) {
-      this._specSig = null;
-      return deleteMonitorTimer().then(function () { if (!silent) self._toast('감시할 태그가 없어 서버 감시를 만들지 않았습니다', 'warn'); });
+      return this._dropTimer('_specSig', deleteMonitorTimer, MON_TIMER)
+        .then(function () { if (!silent) self._toast('감시할 태그가 없어 서버 감시를 만들지 않았습니다', 'warn'); });
     }
     /* 서명에 생성된 TQL 자체를 넣는다 — 설정뿐 아니라 코드가 바뀌어도 다시 구워야 한다.
        예전엔 설정값만 넣었는데("코드는 런타임에 안 변한다"는 전제였다), 그 전제는 배포하면 깨진다:
@@ -974,7 +1007,7 @@ export class App extends Component {
       this._toast('서버 감시 코드 검증 실패 — 타이머를 바꾸지 않았습니다: ' + bad, 'err');
       return Promise.resolve();
     }
-    return createMonitorTimer(tql, sched)
+    return createMonitorTimer(tql, sched, this._timerKnown('_specSig'))
       .then(function () { self._specSig = sig; if (!silent) self._toast('서버 상시감시 켜짐 · ' + sched, 'ok'); })
       .catch(function (e) { self._specSig = null; if (!silent) self._toast('서버 감시 설정 실패: ' + (e.message || e), 'err'); });
   }
@@ -1678,15 +1711,15 @@ export class App extends Component {
     var self = this, S = this.state;
     if (!this.live) return Promise.resolve();
     // 대역 추출은 서버 감시 여부와 무관하게 "알람이 켜져 있으면" 돈다 — 추세는 앱이 닫혀도 이어져야 한다
-    if (!S.monitorOn || !S.bandOn) { this._bandSig = null; return deleteBandTimer(); }
+    if (!S.monitorOn || !S.bandOn) return this._dropTimer('_bandSig', deleteBandTimer, BAND_TIMER);
     var spec = this._bandSpec();
     var sched = '@every ' + (S.bandInterval || '10m');
-    if (!spec.tags.length) { this._bandSig = null; return deleteBandTimer(); }
+    if (!spec.tags.length) return this._dropTimer('_bandSig', deleteBandTimer, BAND_TIMER);
     // 판정 타이머와 같은 이유로 생성된 TQL을 서명에 넣는다 — 코드가 바뀌면 다시 구워야 한다
     var tql = Band.buildBandTql(spec);
     var sig = JSON.stringify(spec.tags) + '|' + sched + '|' + srcSig(tql);
     if (silent && sig === this._bandSig) return Promise.resolve();
-    return createBandTimer(tql, sched)
+    return createBandTimer(tql, sched, this._timerKnown('_bandSig'))
       .then(function () { self._bandSig = sig; if (!silent) self._toast('대역 추출 켜짐 · ' + sched, 'ok'); })
       .catch(function (e) { self._bandSig = null; if (!silent) self._toast('대역 추출 설정 실패: ' + (e.message || e), 'err'); });
   }

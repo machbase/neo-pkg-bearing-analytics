@@ -2,10 +2,11 @@
     "name": "neo-pkg-vibe-analytics",
     "version": "0.1.0",
     "minServerVersion": "8.5.9",
+    "packageService": {
+        "managed": false
+    },
     "scripts": {
         "install": "./scripts/install.js",
-        "start": "./scripts/start.js",
-        "stop": "./scripts/stop.js",
         "uninstall": "./scripts/uninstall.js"
     },
     "dependencies": {}

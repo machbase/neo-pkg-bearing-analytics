@@ -493,22 +493,54 @@
      state는 'RUNNING' 또는 'STOP, <에러문구>' 형태로 실패 이유까지 담겨 온다.
      감시 타이머는 등록만 성공하고 첫 실행에서 죽을 수 있는데, 그러면 화면에는 아무 표시가
      없어 "조용함 = 정상"과 구분되지 않는다. 그 구분을 만들려고 읽는다. */
+  /* 응답이 실패면 null이다 — 빈 목록으로 접으면 "하나도 없다"가 되어, 부르는 쪽이 남아서 도는
+     타이머를 없는 것으로 기억한다(삭제도 건너뛰고 재조회도 안 한다). 모르는 것은 모른다고 준다. */
   function timerStates() {
     return authedTimer('', { cache: 'no-store' })
       .then(function (r) { return r.ok ? r.json() : null; })
       .then(function (j) {
+        if (!j) return null;
         var m = {};
-        ((j && j.data) || []).forEach(function (t) {
+        (j.data || []).forEach(function (t) {
           if (t && t.name) m[t.name] = { state: t.state || '', schedule: t.schedule || '', task: t.task || '' };
         });
         return m;
       })
       .catch(function () { return null; });   // 조회 실패는 "상태 모름" — 없다고 단정하지 않는다
   }
-  // 없는 타이머 삭제는 조용히 통과 (idempotent — 서버 모드 한 번도 안 켰으면 없음)
-  function deleteMonitorTimer() {
-    return authedTimer('/' + MON_TIMER, { method: 'DELETE' }).then(function () { return true; }).catch(function () { return true; });
+  // 없는 타이머 삭제는 조용히 통과 (idempotent — 그 기능을 한 번도 안 켰으면 없다)
+  function deleteTimer(name) {
+    return authedTimer('/' + name, { method: 'DELETE' }).then(function () { return true; }).catch(function () { return true; });
   }
+  /* 타이머 등록 — TQL 파일을 쓰고, 있으면 지운 뒤 만든다(autoStart라 등록이 곧 실행).
+
+     실행 중인 타이머는 PUT 수정이 500이라 delete→create가 유일한 교체 수단이다. 그런데 없는
+     타이머 DELETE도 500이고, 첫 등록은 늘 그 경우다 — 새 설치가 감시를 처음 켜면 세 타이머가
+     전부 빨간 요청을 하나씩 남긴다(삼켜지므로 동작은 멀쩡하고, 그래서 고장으로 읽힌다).
+     known은 부르는 쪽이 이미 확인해 둔 사실이다. 조회를 한 번 더 하는 대신 그것을 쓴다:
+       'absent'  없음을 확인했다      → 삭제를 건너뛴다 (켜는 순간이 여기다)
+       'present' 우리가 만든 것이 있다 → 확인 없이 지운다 (설정을 바꿔 다시 굽는 경우)
+       그 외      모른다              → 목록을 한 번 읽는다
+     읽지 못했으면 지워 본다 — 남아서 도는 것보다 낫다.
+     아는 것이 틀렸으면(다른 세션이 만들어 둔 경우) 생성이 실패하고, 호출측이 서명을 비워
+     다음 회차에 '모름' 경로로 되돌아온다. */
+  function putTimer(name, path, tqlSource, schedule, known) {
+    return saveFile(path, tqlSource, 'text/plain')
+      .then(function () {
+        if (known === 'absent') return true;
+        if (known === 'present') return deleteTimer(name);
+        return timerStates().then(function (m) { return (m && !m[name]) ? true : deleteTimer(name); });
+      })
+      .then(function () {
+        return authedTimer('', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name: name, autoStart: true, schedule: schedule, path: path }),
+        });
+      })
+      .then(function (r) { return r.json().catch(function () { return { success: r.ok }; }); })
+      .then(function (j) { if (j.success === false) throw new Error(name + ' 타이머 생성 실패: ' + (j.reason || '')); return true; });
+  }
+  function deleteMonitorTimer() { return deleteTimer(MON_TIMER); }
   /* 대역 추출 타이머 — 판정 타이머와 이름·파일·주기를 분리한다.
      판정은 10초가 좋고 대역 추출은 FFT라 태그당 0.5~1초가 든다. 한 타이머에 묶으면
      둘 다 나빠지고, 한쪽 실패가 다른 쪽을 멈춘다. */
@@ -516,37 +548,15 @@
      감시가 살아있는지가 대역 추출 같은 선택 기능의 on/off에 걸리면 안 되기 때문이다. */
   var WD_TIMER = 'NEO_VIBE_WD';
   function wdTqlPath() { return pkgBase() + '/cgi-bin/watchdog.tql'; }
-  function deleteWdTimer() {
-    return authedTimer('/' + WD_TIMER, { method: 'DELETE' }).then(function () { return true; }).catch(function () { return true; });
-  }
-  function createWdTimer(tqlSource, schedule) {
-    return saveFile(wdTqlPath(), tqlSource, 'text/plain')
-      .then(function () { return deleteWdTimer(); })
-      .then(function () {
-        return authedTimer('', {
-          method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ name: WD_TIMER, autoStart: true, schedule: schedule, path: wdTqlPath() }),
-        });
-      })
-      .then(function (r) { return r.json().catch(function () { return { success: r.ok }; }); })
-      .then(function (j) { if (j.success === false) throw new Error('감시자 타이머 생성 실패: ' + (j.reason || '')); return true; });
+  function deleteWdTimer() { return deleteTimer(WD_TIMER); }
+  function createWdTimer(tqlSource, schedule, known) {
+    return putTimer(WD_TIMER, wdTqlPath(), tqlSource, schedule, known);
   }
   var BAND_TIMER = 'NEO_VIBE_BAND';
   function bandTqlPath() { return pkgBase() + '/cgi-bin/band.tql'; }
-  function deleteBandTimer() {
-    return authedTimer('/' + BAND_TIMER, { method: 'DELETE' }).then(function () { return true; }).catch(function () { return true; });
-  }
-  function createBandTimer(tqlSource, schedule) {
-    return saveFile(bandTqlPath(), tqlSource, 'text/plain')
-      .then(function () { return deleteBandTimer(); })
-      .then(function () {
-        return authedTimer('', {
-          method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ name: BAND_TIMER, autoStart: true, schedule: schedule, path: bandTqlPath() }),
-        });
-      })
-      .then(function (r) { return r.json().catch(function () { return { success: r.ok }; }); })
-      .then(function (j) { if (j.success === false) throw new Error('대역 타이머 생성 실패: ' + (j.reason || '')); return true; });
+  function deleteBandTimer() { return deleteTimer(BAND_TIMER); }
+  function createBandTimer(tqlSource, schedule, known) {
+    return putTimer(BAND_TIMER, bandTqlPath(), tqlSource, schedule, known);
   }
   /* 백필 한 청크 즉시 실행 — 타이머 등록 없이 그 자리에서 앵커 몇 개를 계산·저장한다.
      청크로 쪼개는 것은 호출측 책임이다. 한 요청에 전부 넣으면 길게는 몇 시간이라
@@ -577,18 +587,8 @@
       return rows.map(function (r) { return { ms: r[0], v: r[1] }; });
     });
   }
-  // 판정 TQL 저장 → 기존 타이머 삭제(실행 중 PUT 수정=500이라 delete→create) → 생성(autoStart)
-  function createMonitorTimer(tqlSource, schedule) {
-    return saveFile(monTqlPath(), tqlSource, 'text/plain')
-      .then(function () { return deleteMonitorTimer(); })
-      .then(function () {
-        return authedTimer('', {
-          method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ name: MON_TIMER, autoStart: true, schedule: schedule, path: monTqlPath() }),
-        });
-      })
-      .then(function (r) { return r.json().catch(function () { return { success: r.ok }; }); })
-      .then(function (j) { if (j.success === false) throw new Error('타이머 생성 실패: ' + (j.reason || '')); return true; });
+  function createMonitorTimer(tqlSource, schedule, known) {
+    return putTimer(MON_TIMER, monTqlPath(), tqlSource, schedule, known);
   }
 
   return {

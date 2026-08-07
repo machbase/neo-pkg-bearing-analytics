@@ -128,5 +128,22 @@ const run = (vals) => Band.bandEnergy(vals, FS, FR, FS / 2);
     '계산 결과 개수와 판정 순서 목록이 같다', String(VC.BAND_ORDER.length));
 }
 
+// 압축된 이름 함정 ────────────────────────────────────────────────────────
+{
+  /* 계산부는 소스를 문자열로 박아 TQL에 넣는다. 번들이 압축되면 함수 이름이 바뀌므로,
+     생성된 코드가 그 이름을 알아야 하면 선언과 호출이 어긋날 자리가 생긴다 — 한쪽만
+     리터럴로 박으면 TQL 첫 태그에서 ReferenceError로 죽는데, 타이머는 RUNNING으로 남고
+     표만 영영 빈다(실제로 겪었다). 그래서 이름에 기대지 않고 고정 별칭으로 받는다. */
+  const tql = Band.buildBandTql({ tags: [{ tbl: 'T', tag: 'A', fr: 30, fs: 2048 }], nowMs: 1 });
+  chk(tql.includes('var __bandEnergy=function'), '고정 별칭으로 선언한다');
+  chk(tql.includes('var vv=__bandEnergy('), '호출도 같은 별칭을 쓴다');
+  /* 이 검사가 본체다 — 압축돼도 안 깨지려면 생성된 코드에 실제 함수 이름이 나오면 안 된다.
+     node에서는 이름이 안 바뀌므로 "결과 문자열"을 보는 검사로는 이 사고를 못 잡는다. */
+  // 별칭(__bandEnergy)이 이름을 포함하므로 앞 글자가 식별자가 아닐 때만 "이름을 부른 것"이다
+  const body = tql.slice(tql.indexOf('var __bandEnergy=') + 60);
+  const calls = new RegExp('(^|[^A-Za-z0-9_$])' + Band.bandEnergy.name + '\\(');
+  chk(!calls.test(body), '생성된 코드가 실제 함수 이름을 부르지 않는다', Band.bandEnergy.name);
+}
+
 console.log(fail ? `\n=== FAIL ${fail}건 ===` : '\n=== 전부 통과 ===');
 process.exit(fail ? 1 : 0);

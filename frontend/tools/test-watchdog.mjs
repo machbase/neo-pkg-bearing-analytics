@@ -65,6 +65,16 @@ const NOW = 1_700_000_000_000;
   // 압축으로 이름이 바뀌어도 몸통이 자기 이름에 기대지 않는다
   const renamed = WD.wdDecide.toString().replace(/wdDecide/g, 'x');
   chk(new Function('return (' + renamed + ')')()({ t: NOW - 600000 }, null, NOW, CFG).act === true, '이름이 바뀌어도 돈다');
+
+  /* 생성된 코드는 실제 함수 이름을 몰라야 한다. 이름으로 부르면 압축 후에만 어긋나는데,
+     그때 타이머는 RUNNING으로 남고 아무 일도 안 한다 — band.js에서 그렇게 당했다.
+     별칭이 이름을 포함하므로 앞 글자가 식별자가 아닐 때만 "이름을 부른 것"으로 센다. */
+  const src = WD.wdSrc({ base: 'http://x', authPath: '/a', targets: [{ peer: 'P', hb: '__h', key: '__k', stale: 1, gap: 1, max: 3, calm: 1 }] }).join('\n');
+  const body = src.slice(src.indexOf('var __wdDecide=') + 60);
+  const calls = new RegExp('(^|[^A-Za-z0-9_$])' + WD.wdDecide.name + '\\(');
+  chk(src.includes('var __wdDecide=function'), '고정 별칭으로 선언한다');
+  chk(src.includes('__wdDecide(wdGet('), '호출도 같은 별칭을 쓴다');
+  chk(!calls.test(body), '생성된 코드가 실제 함수 이름을 부르지 않는다', WD.wdDecide.name);
 }
 
 // ── 3. 굽기 ────────────────────────────────────────────────────────────────

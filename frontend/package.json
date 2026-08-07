@@ -7,7 +7,7 @@
         "dev": "vite --host --port 7781",
         "build": "vite build",
         "build:root": "vite build && node tools/deploy.mjs",
-        "smoke": "node tools/smoke.mjs && node tools/test-dsp.mjs && node tools/test-baseline.mjs && node tools/test-monsync.mjs && node tools/test-watchdog.mjs && node tools/test-bandenergy.mjs && node tools/test-purge.mjs && node tools/test-reportmeta.mjs && node tools/test-bandevent.mjs && node tools/test-learnall.mjs && node tools/test-alarmrate.mjs && node tools/test-embedsrc.mjs && node tools/test-iso.mjs && node tools/test-revive.mjs && node tools/test-isottl.mjs && node tools/test-gate.mjs && node tools/test-isostate.mjs && node tools/test-cap.mjs && node tools/test-sevgrade.mjs && node tools/test-settinginput.mjs && node tools/test-equipbulk.mjs",
+        "smoke": "node tools/smoke.mjs && node tools/test-dsp.mjs && node tools/test-baseline.mjs && node tools/test-monsync.mjs && node tools/test-watchdog.mjs && node tools/test-timerput.mjs && node tools/test-bandenergy.mjs && node tools/test-purge.mjs && node tools/test-reportmeta.mjs && node tools/test-bandevent.mjs && node tools/test-learnall.mjs && node tools/test-alarmrate.mjs && node tools/test-embedsrc.mjs && node tools/test-iso.mjs && node tools/test-revive.mjs && node tools/test-isottl.mjs && node tools/test-gate.mjs && node tools/test-isostate.mjs && node tools/test-cap.mjs && node tools/test-sevgrade.mjs && node tools/test-settinginput.mjs && node tools/test-equipbulk.mjs",
         "smoke:live": "node tools/smoke-live.mjs",
         "verify:live": "node tools/verify-persona.mjs && node tools/verify-summary.mjs && node tools/verify-meta.mjs"
     },

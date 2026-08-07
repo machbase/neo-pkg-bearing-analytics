@@ -124,7 +124,10 @@
         return { tbl: t.tbl, tag: t.tag, fr: t.fr, fs: t.fs, win: Math.pow(2, WIN_POW) };
       })) + ';',
       'var NAMES=' + JSON.stringify(BAND_NAMES) + ';',
-      'var ' + bandEnergy.name + '=' + bandEnergy.toString() + ';',
+      /* 고정 별칭으로 받는다 — 압축기가 함수 이름을 바꿔도 바깥에서 부르는 이름은 그대로다.
+         .name을 쓰면 선언과 호출이 같은 값을 참조해야 하는 규칙이 생기는데, 한 곳만 어겨도
+         압축 후에만 드러나는 ReferenceError가 된다(테스트는 통과하고 배포본만 죽는다). */
+      'var __bandEnergy=' + bandEnergy.toString() + ';',
       // null이면 태그마다 MAX_TIME 하나(타이머), 배열이면 그 시각들을 창 끝으로 반복(백필)
       'var ANCHORS=' + (spec.anchors && spec.anchors.length ? JSON.stringify(spec.anchors.map(Number)) : 'null') + ';',
       'var db=$.db(), now=' + (Number(spec.nowMs) || Date.now()) + ', nOk=0;',
@@ -172,7 +175,7 @@
       '    .forEach(function(r){ vals.push(+r[0]); });',
       '  if(vals.length < 1024) return;',
       // 대역값의 정의는 bandEnergy 하나뿐 — 앱·서버·테스트가 같은 소스를 쓴다
-      '  var vv=bandEnergy(vals, t.fs, t.fr, t.fs/2);',
+      '  var vv=__bandEnergy(vals, t.fs, t.fr, t.fs/2);',
       '  if(!vv) return;',
       '  var fr=t.fr;',
       '  var ts=dt(maxMs);',

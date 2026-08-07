@@ -51,7 +51,8 @@
     return [
       'var WD_BASE=' + q(o.base) + ', WD_AUTH=' + q(o.authPath) + ';',
       'var WD_TARGETS=' + JSON.stringify(targets) + ';',
-      'var ' + wdDecide.name + '=' + wdDecide.toString() + ';',
+      // 고정 별칭 — 압축기가 이름을 바꿔도 부르는 쪽이 안 흔들린다(band.js와 같은 이유)
+      'var __wdDecide=' + wdDecide.toString() + ';',
       // MONSTATE 값 규약은 감시 쪽과 같다 — URL 인코딩된 JSON 한 칸
       'function wdGet(db,k){ var v=null; try{ db.query("select VAL from NEO_VIBE_MONSTATE where K=\'"+k+"\'")',
       '  .forEach(function(r){ try{ v=JSON.parse(decodeURIComponent(String(r[0]))); }catch(e){} }); }catch(e){} return v; }',
@@ -77,7 +78,7 @@
          now를 인자로 받지 않는 이유는 대역 쪽 now가 생성 시각으로 구워져 있어서다. */
       'function wdTick(db){ var out=[];',
       '  for(var i=0;i<WD_TARGETS.length;i++){ var t=WD_TARGETS[i];',
-      '    try{ var d=' + wdDecide.name + '(wdGet(db,t.hb), wdGet(db,t.key), Date.now(), t.cfg);',
+      '    try{ var d=__wdDecide(wdGet(db,t.hb), wdGet(db,t.key), Date.now(), t.cfg);',
       '      if(!d.act){ out.push(t.peer+":"+d.why); continue; }',
       '      var ok=wdStart(t.peer); d.w.ok=!!ok; wdPut(db,t.key,d.w);',
       '      out.push(t.peer+":"+(ok?"restarted":"failed"));',

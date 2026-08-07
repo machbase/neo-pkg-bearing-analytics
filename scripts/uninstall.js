@@ -1,11 +1,12 @@
 'use strict';
 
 // pkg run uninstall — 사용자 데이터(data/)는 보존한다. 패키지 파일 삭제는 Neo가 수행.
-// 서버 상시감시 타이머(NEO_VIBE_MONITOR)는 패키지 밖(~/.config/machbase/schedules)에 있어
-// Neo의 패키지 파일 삭제로는 안 지워진다 → 여기서 제거(고아 타이머 방지). best-effort·실패 무시.
-// (1차 정리는 앱: 서버 모드를 끄면 앱이 삭제. 여기는 앱을 안 거치고 제거한 경우의 안전망.)
-// 주의: stop.js에는 넣지 않는다 — 스톱이 Neo 재시작 시 불리면 상시감시가 꺼져야 할 이유가 없다.
-(function removeMonitorTimer() {
+// 이 패키지가 만드는 타이머 셋(감시·대역 추출·감시자)은 패키지 밖(~/.config/machbase/schedules)에
+// 있어 Neo의 패키지 파일 삭제로는 안 지워진다 → 여기서 제거(고아 타이머 방지). best-effort·실패 무시.
+// 하나라도 빠뜨리면 실행할 TQL이 사라진 채로 목록에 남아 주기마다 실패한다.
+// (1차 정리는 앱: 알람이나 대역 추출을 끄면 앱이 삭제. 여기는 앱을 안 거치고 제거한 경우의 안전망.)
+// 이 패키지는 상주 서비스가 없어 start/stop 훅을 두지 않는다 — 타이머 정리는 uninstall에서만 한다.
+(function removeTimers() {
   try {
     var http = require('@jsh/http');
     var fs = require('fs');
@@ -36,7 +37,13 @@
       JSON.stringify({ loginName: user, password: pass }));
     var token = '';
     try { token = JSON.parse(loginResp).accessToken || ''; } catch (e) { /* empty */ }
-    if (token) req('DELETE', base + '/web/api/timers/NEO_VIBE_MONITOR', { 'Authorization': 'Bearer ' + token });
+    // 이름은 cgi-bin/db/db.js의 MON_TIMER·BAND_TIMER·WD_TIMER와 같아야 한다
+    if (token) {
+      ['NEO_VIBE_MONITOR', 'NEO_VIBE_BAND', 'NEO_VIBE_WD'].forEach(function (name) {
+        // 없는 타이머 삭제는 500이지만 응답을 보지 않는다 — 지울 것이 남지 않는 쪽이 중요하다
+        try { req('DELETE', base + '/web/api/timers/' + name, { 'Authorization': 'Bearer ' + token }); } catch (e) { /* 다음 것을 계속 지운다 */ }
+      });
+    }
   } catch (e) { /* 안전망 — 정리 실패가 uninstall을 막지 않는다 */ }
 })();
 

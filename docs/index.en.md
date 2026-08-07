@@ -19,7 +19,7 @@ In the Machbase Neo left side panel, select `neo-pkg-vibe-analytics` from the pa
 
 ### Uninstall
 
-Select `neo-pkg-vibe-analytics` in the left panel and press **Uninstall** to remove the package. Accumulated data — events, baselines, reports — is preserved. The server-side monitoring timer is registered outside the package, so it is cleaned up during uninstall.
+Select `neo-pkg-vibe-analytics` in the left panel and press **Uninstall** to remove the package. Accumulated data — events, baselines, reports — is preserved. The timers this package registers (monitoring, band extraction, watchdog) live outside the package, so they are cleaned up during uninstall. That cleanup only tries the default port (5654), so if you run Neo on another port, turn alarms off in the app before uninstalling — the app removes the timers first.
 
 ## How it works
 
