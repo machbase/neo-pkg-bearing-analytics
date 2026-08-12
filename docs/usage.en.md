@@ -96,7 +96,7 @@ Falling kurtosis normally reads as "getting better", but this combination can me
 | :--- | :--- |
 | Raw waveform | Time-domain vibration waveform |
 | RMS · Peak-to-Peak · Crest Factor · Kurtosis trends | Headline indicators over time (the RMS trend also draws ISO zone reference lines) |
-| Defect-band energy trend | Energy and impulsiveness in the bearing defect band |
+| Defect-band energy trend | Per-band energy over time. With band extraction on, envelope series (periodicity, fault frequencies) are drawn too. **View vs. alarm limit** rescales each series by its trained limit — 1.0 is the alarm line, so you see at a glance how close each series is (requires trained band baselines) |
 | FFT spectrum | Frequency content. With a bearing registered, markers for 1×/2×/3× and BPFO/BPFI/BSF/FTF |
 | ↳ Frequency range | Defaults to the lower range; switch to **full band** to expand out to the sensor's maximum measurable frequency |
 | Spectrogram | Time-frequency evolution |

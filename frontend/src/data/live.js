@@ -4,27 +4,21 @@ import DB from '../../../cgi-bin/db/db.js';
 import VC from '../../../cgi-bin/calc/calc.js';
 import Band from '../../../cgi-bin/monitor/band.js';
 
-/* 표시 상한 — 묶는 것은 앱이 아니라 서버 상시감시(monitor.tql)다.
-
-   앱 쪽은 여유롭다(실측, 로컬 Neo): 판정 틱은 배치 조회라 태그당 0.34ms 선형이고 데이터
-   밀도는 거의 무관하다(2,510태그 918ms, 같은 태그 수에서 결과 행이 11배여도 22%만 증가).
-   적재도 배치로 바꾼 뒤 200태그 247ms다.
-
-   서버 TQL은 다르다. 태그마다 문장을 실행하고, 경보 구간의 태그는 ISO 대역제한까지 계산한다
-   (태그당 약 210ms). 예전에는 상태 쓰기가 delete+insert여서 회차가 겹치면 ERR-1418로 감시가
-   통째로 죽었다 — 지금은 배치 읽기·update 쓰기·중복 실행 잠금이 있어, 넘치면 죽는 대신
-   회차를 건너뛰고 경고한다(monitor.js). 그래서 이 값은 "안전 한계"가 아니라 "권장 상한"이다.
-
-   실제 소요는 설치마다·설비 상태마다 다르므로 상수로 못 박지 않는다. 서버가 회차 소요를
-   심박(__hb.ms)에 남기고, 주기의 70%를 넘으면 화면이 경고한다 — 그 값을 보고 조정한다. */
+/* 표시 상한 — 병목은 앱이 아니라 서버 상시감시(monitor.tql)다. 앱 판정 틱은 배치 조회라 여유롭지만,
+   서버 TQL은 태그마다 문장을 실행하고 경보 구간의 태그는 ISO 대역제한까지 계산해 훨씬 비싸다.
+   넘치면 죽는 대신 회차를 건너뛰고 경고하므로(monitor.js) 이 값은 "안전 한계"가 아니라 "권장 상한"이다.
+   실제 소요는 설치마다 다르다 — 서버가 회차 소요를 심박(__hb.ms)에 남기고, 주기의 70%를 넘으면 화면이 경고한다. */
 const TAGS_PER_TABLE = 60;   // 테이블당 태그 상한
 const MAX_EQUIPMENT = 100;   // 전체 설비 상한
 const TAG_SCAN_MAX = 100000; // 상한 판정용 전체 조회 — 상한을 조회 뒤에 적용해야 몇 개가 빠졌는지 셀 수 있다
 export const CAPS = { perTable: TAGS_PER_TABLE, total: MAX_EQUIPMENT };
 const ROLLUP_BUCKETS = 720;  // 트렌드 목표 버킷 수
 const TREND_CHUNKS = 24;     // 첨도·대역에너지 추이 샘플 청크 수
-// 대역 계열 색 — BAND_ORDER 순서. 저주파에서 고주파로 갈수록 따뜻한 쪽으로 옮겨 간다
+// 대역 계열 색 — BAND_FREQ 순서. 저주파에서 고주파로 갈수록 따뜻한 쪽으로 옮겨 간다
 const BAND_COLOR = ['#4199ff', '#2fb7a6', '#e5646a', '#8b7ff0', '#fdb532'];
+/* 포락선 계열은 대역과 다른 계통의 값이라(주파수축이 아니라 복조 스펙트럼) 색도 갈라 둔다 —
+   같은 팔레트를 돌려 쓰면 범례에서 "고주파"와 "BPFO"가 같은 색으로 나와 축이 같은 줄로 읽힌다. */
+const ENV_COLOR = ['#9aa4b2', '#d9534f', '#c77dff', '#2a9d8f'];
 
 // db.js 재노출 — app.js가 데이터 진입점을 이 파일 하나로 유지
 export const listTagTables = DB.listTagTables;
@@ -63,10 +57,12 @@ export const bandTrend = DB.bandTrend;
 export const bandBackfill = DB.bandBackfill;
 export const bandTimes = DB.bandTimes;
 export const bandRaw = DB.bandRaw;
+export const bandLatest = DB.bandLatest;
 export const deleteMonitorTimer = DB.deleteMonitorTimer;
 // 데이터 관리(설정) — 패키지가 만든 테이블의 현황·삭제 전 건수
 export const usageStats = DB.usageStats;
 export const countRange = DB.countRange;
+export const tagUsage = DB.tagUsage;
 export const deleteEventsRange = DB.deleteEventsRange;
 export const deleteEventsOfTag = DB.deleteEventsOfTag;
 export const deleteBandRange = DB.deleteBandRange;
@@ -149,9 +145,8 @@ export async function buildLiveData(E, tables, cfg) {
   if (!equipment.length) return { now: 0, equipment: [], events: [], reports: [], cap };
 
   /* 트렌드·스파크는 테이블 단위로 한 번에 받는다.
-     예전에는 태그마다 2회씩 Promise.all로 한꺼번에 던졌다 — 쿼리 자체는 1~3ms로 싸지만
-     동시에 수백 개가 나가면 서버가 직렬로 소화하느라 벽시계가 태그 수에 비례해 늘었다
-     (실측 300태그=600쿼리 5.0초). 같은 범위를 NAME IN 배치로 받으면 133ms다.
+     태그별 개별 조회 대신 NAME IN 배치로 받는다 — 동시에 수백 쿼리가 나가면 서버가 직렬로
+     소화하느라 벽시계가 태그 수에 비례해 늘어난다.
      묶음 단위는 (테이블 × 롤업단위) — 단위는 태그의 데이터 기간에서 정해지므로,
      한 테이블 안에서도 어제 붙은 태그와 한 달 된 태그는 단위가 다를 수 있다. */
   const groups = {};
@@ -212,10 +207,8 @@ export async function buildLiveData(E, tables, cfg) {
       catch (e) { byTag = {}; }
       /* 샘플레이트 추정 — 표본 간격(Δt)의 중앙값이 1순위다.
 
-         "초당 행 수"는 기록 밀도라 센서가 얼마나 빠르게 재는지와 다른 양이다: 1분에 1초만
-         캡처하면 과소로, 같은 구간이 두 번 적재되면 과대로 나온다. 실측에서 진짜 4,096 Hz인
-         태그가 각각 70 Hz·8,190 Hz로 잡혔다. 70이면 isoNeeded가 false가 되어 ISO 대역제한이
-         통째로 꺼지고, 8,190이면 밴드패스가 실질 20~2000 Hz를 재게 된다.
+         "초당 행 수"는 기록 밀도라 센서가 얼마나 빠르게 재는지와 다른 양이다: 주기 기록이면
+         과소로, 같은 구간이 두 번 적재되면 과대로 나온다 — 둘 다 ISO 대역제한·밴드패스 설계를 통째로 어긋나게 한다.
 
          Δt를 못 구하면(표본이 얇은 태그) 초당 버킷 건수의 중앙값, 그것도 안 되면 이미 넣어 둔
          전체 평균(count/span) 순으로 물러난다 — 새 조회가 실패해도 옛 동작을 잃지 않게. */
@@ -299,12 +292,9 @@ const ANA_BLOCKS = 8;        // 평균 블록 수(50% 중첩) — N_MAX 2^19와 
 const ANA_DEC_FS = 3000;     // 차수 해석용 목표 데시메이션 레이트(≥1 kHz 대역 확보)
 function anaWindowSec(fs, rpm) {
   /* N_MAX는 대역통과 FFT가 실제로 쓰는 2의 거듭제곱 상한과 맞춘다 — 더 받아봐야 잘려서 버려진다.
-     2^18(25.6kHz에서 10.2초)이면 16k 블록이 3개밖에 안 들어가 평균 3회에 그친다. 2^19로 올리면
-     20.5초 창에 7회 평균이 되고, 분해능(0.195 Hz)은 블록 크기가 정하므로 그대로다.
-     실측(BEARING:C1): 평균 3→7회, 블록간 변동 ×1.06→×1.19, 조회 435→990ms.
-     ⚠더 늘리지 않는 이유 — 36초에서 변동이 ×1.51까지 벌어진다. 정상상태를 벗어난 구간을 평균하면
-     평균 횟수는 늘어도 서로 다른 운전 상태가 섞여 결과가 흐려진다. 규격 목표(0.125Hz·8평균)를
-     이 설비에서 채우려면 46초가 필요한데, 그건 정상상태 전제를 깬다. */
+     2^19면 20초급 창에 16k 블록 7회 평균이 들어가고, 분해능은 블록 크기가 정하므로 그대로다.
+     ⚠더 늘리지 않는 이유 — 창이 길어질수록 정상상태 전제가 깨져, 평균 횟수는 늘어도
+     서로 다른 운전 상태가 섞여 결과가 흐려진다. */
   const T_MAX = 22, REV_MIN = 6, N_MAX = 1 << 19;
   const fr = rpm > 0 ? rpm / 60 : 0;
   const dec = Math.max(1, Math.floor(fs / ANA_DEC_FS));
@@ -577,7 +567,7 @@ export async function loadTrendChunks(E, eq, roll) {
   const fromMs = roll[0].ms, toMs = roll[roll.length - 1].ms;
   const n = Math.min(TREND_CHUNKS, roll.length);
   const kurt = [], xLabels = [], xTips = [], times = [];
-  const bandVals = VC.BAND_ORDER.map(() => []);
+  const bandVals = VC.BAND_FREQ.map(() => []);
   const jobs = [];
   for (let i = 0; i < n; i++) {
     const at = fromMs + (toMs - fromMs) * (n === 1 ? 1 : i / (n - 1));
@@ -590,19 +580,43 @@ export async function loadTrendChunks(E, eq, roll) {
   chunks.forEach(({ at, w }) => {
     if (w.values.length < 64) return;
 
-    /* 알람이 쓰는 바로 그 함수로 구한다. 예전엔 화면만 따로 계산해서(대역 3개·정규화도 달랐다)
-       "알람은 났는데 차트엔 안 보이는" 상태가 됐다 — 같은 이름의 값이 두 벌이면 어느 쪽도 못 믿는다. */
+    // 알람이 쓰는 바로 그 함수로 구한다 — 같은 이름의 값이 두 벌이면 "알람은 났는데 차트엔 안 보이는" 상태가 된다.
     const be = Band.bandEnergy(w.values, fs, fr, fs / 2);
     if (!be) return;   // 계열 길이가 어긋나면 안 되므로 값을 하나라도 못 구하면 이 청크는 통째로 건너뛴다
     kurt.push(VC.kurtosis(w.values));
-    be.forEach((v, i) => bandVals[i].push(v));
+    be.vals.forEach((v, i) => bandVals[i].push(v));
     xLabels.push(E.fmtMD(at));
     xTips.push(E.fmtDT(at));
     times.push(at); // 시간축 배치용 (청크 실제 시각 — 데이터 부족 청크는 건너뛰므로 값 배열과 길이 일치)
   });
+  /* 포락선 계열은 여기서 계산하지 않고 서버가 쌓아 둔 것을 읽는다.
+     다시 계산하면 청크마다 FFT를 두 번 더 돌리는 것도 문제지만, 더 큰 문제는 값이 두 벌이 되는
+     것이다 — 서버가 판정에 쓴 값과 다른 값이 화면에 그려지면 "알람은 났는데 차트엔 안 보이는" 상태가 된다.
+     저장 간격이 추출 주기(10분 이상)라 청크보다 성기다. 청크 시각마다 가장 가까운 앵커를 골라
+     같은 x 격자에 얹되, 한 칸 이상 떨어진 자리는 null로 비운다 — 없는 구간을 이어 그리면
+     대역 추출을 켜기 전 기간까지 값이 있는 것처럼 보인다. */
+  const envBands = [];
+  if (times.length) {
+    const key = eq.table + ':' + eq.name;
+    const gapMs = Math.max(600000, (toMs - fromMs) / Math.max(1, times.length));
+    const rows = await Promise.all(VC.BAND_ORDER.slice(VC.BAND_FREQ.length).map((bn) =>
+      DB.bandTrend(key + ':' + bn, eq._unit || 'min', fromMs, toMs).catch(() => [])));
+    rows.forEach((series, i) => {
+      if (!series.length) return;   // 품번 미지정·추출 미사용 — 계열 자체가 없다
+      const bn = VC.BAND_ORDER[VC.BAND_FREQ.length + i];
+      let p = 0;
+      const vals = times.map((t) => {
+        while (p + 1 < series.length && Math.abs(series[p + 1].ms - t) <= Math.abs(series[p].ms - t)) p++;
+        return Math.abs(series[p].ms - t) <= gapMs ? series[p].v : null;
+      });
+      if (vals.some((v) => v != null)) envBands.push({ key: bn, label: VC.BAND_KO[bn] || bn, color: ENV_COLOR[i % ENV_COLOR.length], vals });
+    });
+  }
   return {
     kurt,
-    bands: VC.BAND_ORDER.map((bn, i) => ({ label: VC.BAND_KO[bn] || bn, color: BAND_COLOR[i % BAND_COLOR.length], vals: bandVals[i] })),
+    // key를 함께 싣는다 — 화면이 배수 축으로 그릴 때 그 계열의 베이스라인을 찾아야 한다(라벨은 한글이라 못 쓴다)
+    bands: VC.BAND_FREQ.map((bn, i) => ({ key: bn, label: VC.BAND_KO[bn] || bn, color: BAND_COLOR[i % BAND_COLOR.length], vals: bandVals[i] }))
+      .concat(envBands),
     xLabels, xTips, times,
   };
 }

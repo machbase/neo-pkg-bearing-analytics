@@ -1,6 +1,5 @@
-// chart/index.js — 캔버스 차트 렌더러 + 숫자/시간 포맷터 + 팔레트 (vibe-engine에서 분리)
-// 라이브/목 공용 "그리는 붓". 데이터는 받기만 하고 만들지 않는다. DOM(canvas) 의존 — 브라우저 전용.
-// (report.html 데모는 루트의 vibe-engine.js 원본 사본을 계속 사용 — P4에서 정리)
+// chart/chart.js — 캔버스 차트 렌더러 + 숫자/시간 포맷터 + 팔레트
+// 데이터는 받기만 하고 만들지 않는다. DOM(canvas) 의존 — 브라우저 전용.
 (function (root, factory) {
   if (typeof module === 'object' && module.exports) module.exports = factory();
   else root.VibeChart = factory();
@@ -167,6 +166,11 @@
     var n = o.xLabels.length; ctx.clearRect(0, 0, W, H); if (n < 2) return;
     var mn = Infinity, mx = -Infinity;
     o.series.forEach(function (s) { for (var i2 = 0; i2 < s.vals.length; i2++) { if (s.vals[i2] < mn) mn = s.vals[i2]; if (s.vals[i2] > mx) mx = s.vals[i2]; } });
+    /* 그릴 값이 하나도 없으면 축을 만들 수 없다 — mn/mx가 초기값 그대로라 눈금이 -Infinity가 된다.
+       계열을 전부 끄거나(범례) 걸러낸 경우(배수 축에서 미학습 계열)가 여기로 온다. */
+    if (!isFinite(mn) || !isFinite(mx)) { if (!o.refLines) return; mn = 0; mx = 0; }
+    // 기준선도 축 범위에 넣는다 — 안 그러면 모든 계열이 기준선 아래일 때 선이 화면 밖으로 나간다
+    if (o.refLines) o.refLines.forEach(function (r) { mx = Math.max(mx, r.val); });
     var m = (mx - mn) * 0.12 || 1; mn = 0; mx += m; var range = mx - mn || 1, step = cw / (n - 1);
     // 시간축(선택) — drawLine과 동일 규칙: times+xFrom/xTo가 오면 실제 시각 위치, 없으면 등간격
     var tAxis = !!(o.times && o.times.length === n && o.xTo > o.xFrom);
@@ -175,6 +179,14 @@
       : function (i) { return pad.l + step * i; };
     ctx.strokeStyle = CC.grid; ctx.lineWidth = 1; ctx.fillStyle = CC.axis; ctx.font = '10px ' + MONO; ctx.textAlign = 'right';
     for (var i = 0; i <= 5; i++) { var y = pad.t + ch - ch * i / 5; ctx.beginPath(); ctx.moveTo(pad.l, y); ctx.lineTo(W - pad.r, y); ctx.stroke(); ctx.fillText(fmt(mn + range * i / 5), pad.l - 8, y + 3); }
+    if (o.refLines) o.refLines.forEach(function (r) {
+      var ry = pad.t + ch - (r.val - mn) / range * ch;
+      if (ry <= pad.t || ry >= pad.t + ch) return;
+      ctx.strokeStyle = r.color; ctx.lineWidth = 1; ctx.setLineDash([5, 4]);
+      ctx.beginPath(); ctx.moveTo(pad.l, ry); ctx.lineTo(W - pad.r, ry); ctx.stroke(); ctx.setLineDash([]);
+      ctx.fillStyle = r.color; ctx.font = '9px ' + FONT; ctx.textAlign = 'right';
+      ctx.fillText(r.label, W - pad.r - 2, ry - 3);
+    });
     ctx.save(); ctx.beginPath(); ctx.rect(pad.l, pad.t - 1, cw, ch + 2); ctx.clip();
     var mDense = n > 240, mW = Math.max(5, Math.round(n / 90));
     o.series.forEach(function (s) {

@@ -169,13 +169,13 @@ Setup is three steps.
 2. **Backfill past data** — rather than waiting for samples to accumulate, compute past intervals retroactively from raw data already in the DB. Progress and estimated time are shown, and stopping partway keeps whatever was filled.
 3. **Learn the normal reference** — once there are enough samples, train per band. This works like overall RMS learning and applies the same automatic filters.
 
-Per-channel status shows something like `trained 4/5`. On lower sample-rate sensors the upper bands fall outside the measurable range and cannot be trained, so filling all five is not always possible — that is normal. Untrained bands are excluded from evaluation.
+Per-channel status shows something like `trained 4/9`. The denominator is the number of series measurable on that tag — low sample rates drop the upper bands, and a missing bearing part number drops the fault-frequency series. That is normal. Untrained series are excluded from evaluation.
 
 > Train bands **only when healthy operation is certain**, for the same reason as above — a fault already in progress becomes the normal reference.
 
 ## Alarms
 
-This section covers monitoring mode (app vs. server), evaluation interval and RMS window, alarm behavior (entry and recovery hold, sustained re-notify), and notification channels with per-severity routing.
+This section covers monitoring mode (app vs. server), evaluation interval and RMS window, and notifications (entry and recovery hold, the webhook channel, per-severity delivery and re-notify). For webhook setup walkthroughs, see the guides in [Alarms & events](./alarms.en.md).
 
 It has enough depth to warrant its own page → [Alarms & events](./alarms.en.md)
 

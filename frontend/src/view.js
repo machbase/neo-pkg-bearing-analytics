@@ -4,8 +4,9 @@ import { html } from './html.js';
 
 export function view(v) {
   const {
-    activeCount, revPending, onKeepAllRevived, bandIvHint, bandLegend, aliasRows, aliasCountText, aliasEmpty, aliasMoreText, onAliasScroll, tagQuery, onTagQuery, blEmpty, blK, blRows, blWin, blOldCnt, capShow, capText, capHint, capRows, cardSize, cards, cardDrag, cepNote, csvFrom, csvTo, dateStyle, detBearing, detSpec, detailEmptyShow, detailShow, dlFmt, dlOpen, dxActions, dxAiFallback, dxAiIdle, dxAiLoading, dxAiSections, dxAiText, dxEvidence, dxLlmModel, dxOpen, dxStamp, dxToggleLabel, dxVerdict, envHint, envMarkers, equipRows, equipFilters, equipFilterEmpty, onEquipFilterAll, equipUnsetDot, escHold, escHoldOptions, evalBasisText, evalWinBad, evalWindowSel, evalWinCustom, evalWinCustomMin, onEvalWinMin, evalLoadText, evalLoadWarn, evalWindow, evalWindowOptions, evtCapped, evtCount, evtEmpty, evtEmptyText, evtRows, evtScopeChips, evtTagFilter, evtTagOptions, evtTypeFilter, evtTypeOptions, fftMarkers, fftRangeChips, fftRangeShow, filterNotice, genBtnLabel, genBtnStyle, genCancelLabel, genCancelStyle, genDateStyle, genKnobStyle, genLLMNotice, genPeriodCustomShow, genPeriodFrom, genPeriodNone, genPeriodPresetShow, genPeriodPresets, genPeriodShow, genPeriodSummary, genPeriodTo, genRunning, genSelAllLabel, genSteps, genTagsCount, genToggleStyle, goSettings, gridCols, indicsDesc, indicsTitle, isMonitor, isOllama, isSettings, kpiCells, kurtWarn, kurtWarnShow, kurtogramHint, kurtogramShow, lastEventText, lineHz, lineHzHint, lineHzShow, helpTip, healthWarns, bandOn, bandInterval, bandFillNone, bandIntervalKo, onBandIvOpen, bandFill, bandFillDesc, bandFillShort, bandFillBtnStyle, bandFillBarStyle, bandFillEta, onBandFill, onBandFillStop, bandIvOpen, bandIvNext, bandIvSame, onBandIvCancel, onBandIvPick, bandIvFacts, bandIvChoices, bandIvApplyStyle, onBandIvApply, bandToggleStyle, bandKnobStyle, bandRows, bandEmpty, bandLearnedN, bandTotalN, bandFillTargets, bandFillSkipTip, bandIvOptions, onBandIvPickDirect, bandSampleText, bandSampleWarn, bandWin, bandWinOptions, onBandWin, blSampleText, llmApiKey, llmModel, llmModelPh, llmProvOptions, llmProviderSel, llmProviders, llmProvsAvail, llmStatusColor, llmStatusText, llmTestColor, llmTestIcon, llmTestMsg, llmTestShow, llmTesting, logoFilter, mcDescBody, mcDescTitle, mcOptions, mcZones, monBlNotice, monBlUnlearned, monEmpty, monEventsShow, monKnobStyle, monModeBadgeShow, monModeBadgeStyle, monModeBadgeText, monModeOptions, monPillTitle, monToggleStyle, monitorDotColor, monitorDotRing, monitorInterval, monitorText, navTabs, notReady, notifChannels, ollamaUrl, onBlK, onBlLearnAll, onBlWin, onCancelGen, onCardSize, onClearFilter, onCloseDownload, onCloseRv, onConfirmCancel, onConfirmDiscard, onConfirmSave, onCsvFrom, onCsvTo, onDlFmt, onDoDownload, onDxExplain, onEscHold, onEvalAgg, onEvalWindow, onEvtTag, onEvtType, onFormChange, onFromChange, onGenFromChange, onGenReport, onGenSelectAll, onGenToChange, onGoSource, onBandToggle, onBandInterval, onBandLearnAll, onLineHz, onLlmKey, onLlmModel, onLlmProvPick, onMonToggle, onMonitorInterval, onOllamaUrl, onOpenDownload, onRecHold, onRefresh, onResetThresh, onRouteSelectAll, onRpNext, onRpPrev, onSaveSettings, onSrcDismiss, onSrcReload, onSrcSelectAll, onTagChange, onTestLLM, onToChange, onToggleDx, onToggleGenLLM, onToggleMonitor, onTotalClick, pendingNavOpen, periodFrom, periodPresets, periodTo, qualityShow, qualityText, recHold, recHoldOptions, renotifyOptions, renotifyRows, reportEmpty, reportEmptyShow, reportRows, reportShow, reportTags, rootClass, routeNoneWarn, routeRows, routeSelAllLabel, routeTimings, rpBtnStyle, rpPageText, rpPagerShow, rvFname, rvOpen, rvUrl, secCriteria, secData, secEquip, secLlm, secMonitor, secSource, selTag,
+    activeCount, revPending, onKeepAllRevived, bandIvHint, bandLegend, bandNorm, bandNormLabel, bandNormNote, bandNormReady, onBandNorm, aliasRows, aliasCountText, aliasEmpty, aliasMoreText, onAliasScroll, tagQuery, onTagQuery, blEmpty, blK, blRows, blWin, blOldCnt, capShow, capText, capHint, capRows, cardSize, cards, cardDrag, cepNote, csvFrom, csvTo, dateStyle, detBearing, detSpec, detailEmptyShow, detailShow, dlFmt, dlOpen, dxActions, dxAiFallback, dxAiIdle, dxAiLoading, dxAiSections, dxAiText, dxEvidence, dxLlmModel, dxOpen, dxStamp, dxToggleLabel, dxVerdict, envHint, envMarkers, equipRows, equipFilters, equipFilterEmpty, onEquipFilterAll, equipUnsetDot, escHold, escHoldOptions, evalBasisText, evalWinBad, evalWindowSel, evalWinCustom, evalWinCustomMin, onEvalWinMin, evalLoadText, evalLoadWarn, evalWindow, evalWindowOptions, evtCapped, evtCount, evtEmpty, evtEmptyText, evtRows, evtScopeChips, evtTagFilter, evtTagOptions, evtTypeFilter, evtTypeOptions, fftMarkers, fftRangeChips, fftRangeShow, filterNotice, tblFilterShow, tblOpen, tblOptions, tblChips, tblSelCount, tblTotal, tblAllOn, tblCaption, tblTip, tblNoneShow, tblQuery, tblNoMatch, tblMore, onTblQuery, onTblOpen, onTblClose, onTblMore, onTblSelectAll, onTblClearAll, genBtnLabel, genBtnStyle, genCancelLabel, genCancelStyle, genDateStyle, genKnobStyle, genLLMNotice, genPeriodCustomShow, genPeriodFrom, genPeriodNone, genPeriodPresetShow, genPeriodPresets, genPeriodShow, genPeriodSummary, genPeriodTo, genRunning, genSelAllLabel, genSteps, genTagsCount, genToggleStyle, goSettings, gridCols, indicsDesc, indicsTitle, isMonitor, isOllama, isSettings, kpiCells, kurtWarn, kurtWarnShow, kurtogramHint, kurtogramShow, lastEventText, lineHz, lineHzHint, lineHzShow, helpTip, healthWarns, bandOn, bandInterval, bandFillNone, bandIntervalKo, onBandIvOpen, bandFill, bandFillDesc, bandFillShort, bandFillBtnStyle, bandFillBarStyle, bandFillEta, onBandFill, onBandFillStop, bandIvOpen, bandIvNext, bandIvSame, onBandIvCancel, onBandIvPick, bandIvFacts, bandIvChoices, bandIvApplyStyle, onBandIvApply, bandToggleStyle, bandKnobStyle, bandRows, bandEmpty, bandLearnedN, bandTotalN, bandFillTargets, bandFillSkipTip, bandIvOptions, onBandIvPickDirect, bandSampleText, bandSampleWarn, bandWin, bandWinOptions, onBandWin, blSampleText, llmApiKey, llmModel, llmModelPh, llmProvOptions, llmProviderSel, llmProviders, llmProvsAvail, llmStatusColor, llmStatusText, llmTestColor, llmTestIcon, llmTestMsg, llmTestShow, llmTesting, logoFilter, mcDescBody, mcDescTitle, mcOptions, mcZones, monBlNotice, monBlUnlearned, monEmpty, monEventsShow, monKnobStyle, monModeBadgeShow, monModeBadgeStyle, monModeBadgeText, monModeOptions, monPillTitle, monToggleStyle, monitorDotColor, monitorDotRing, monitorInterval, monitorText, navTabs, notReady, notifChannels, ollamaUrl, onBlK, onBlLearnAll, onBlWin, onCancelGen, onCardSize, onClearFilter, onCloseDownload, onCloseRv, onConfirmCancel, onConfirmDiscard, onConfirmSave, onCsvFrom, onCsvTo, onDlFmt, onDoDownload, onDxExplain, onEscHold, onEvalAgg, onEvalWindow, onEvtTag, onEvtType, onFormChange, onFromChange, onGenFromChange, onGenReport, onGenSelectAll, onGenToChange, onGoSource, onBandToggle, onBandInterval, onBandLearnAll, onLineHz, onLlmKey, onLlmModel, onLlmProvPick, onMonToggle, onMonitorInterval, onOllamaUrl, onOpenDownload, onRecHold, onRefresh, onResetThresh, onRpNext, onRpPrev, onSaveSettings, onSrcDismiss, onSrcReload, onSrcSelectAll, onTagChange, onTestLLM, onToChange, onToggleDx, onToggleGenLLM, onToggleMonitor, onTotalClick, pendingNavOpen, periodFrom, periodPresets, periodTo, qualityShow, qualityText, recHold, recHoldOptions, renotifyOptions, alertRows, reportEmpty, reportEmptyShow, reportRows, reportShow, reportTags, rootClass, routeNoneWarn, routeTimings, rpBtnStyle, rpPageText, rpPagerShow, rvFname, rvOpen, rvUrl, secCriteria, secData, secEquip, secLlm, secMonitor, secSource, selTag,
     usageBusy, usageReady, onUsageRefresh, dataRows, dataFootnote, onGoCriteria,
+    orphanOpen, orphanRows, orphanTotalText, orphanBusy, onOrphanClose, onOrphanAll,
     purgePickShow, purgePickTitle, purgeFrom, purgeTo, purgeHaveText, purgePickReady, onPurgeFrom, onPurgeTo, onPurgePickCancel, onPurgePickNext,
     purgeShow, purgeTitle, purgeSub, purgeWhen, purgeCounting, purgeN, purgeKeep, purgeNone,
     purgeAsk, purgeBullets, purgeTable, purgeTyped, purgeTypeOk, onPurgeType, purgeReady, purgeBtnLabel, purgeRunning, onPurgeCancel, onPurgeConfirm, serverMon, setNav, settingsActiveStyle, settingsDirty, sevCards, sevColor, sevGradeKo, sevHold, sevHoldDetail, sevHoldNote, sevHoldWhy, sevLabel, sevMachine, sevReco, sevZones,showAdvanced, specIndics, srcNotice, srcSelAllLabel, srcSelCount, srcTables, srcTotal, statRows, stopClick, sumTotal, tagOptions, themeIcon, threshRows, toast, toastIcon, toastMsg, toastStyle, toggleTheme, totalStyle, unitChips, unitOptions
@@ -90,7 +91,37 @@ export function view(v) {
         </div>
 
         <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; gap: 12px; flex-wrap: wrap;">
-          <div style="display: flex; align-items: center; gap: 9px; font-size: 15px; font-weight: 600; color: var(--text-primary);"><span style="width: 3px; height: 15px; border-radius: 2px; background: var(--primary-base);"></span>설비 모니터링<span style="display: inline-flex; align-items: center; gap: 5px; font-size: 11px; font-weight: 500; color: #3aa76d; margin-left: 4px;"><span style="width: 7px; height: 7px; border-radius: 50%; background: #3aa76d; animation: vpulse 1.6s ease-in-out infinite;"></span>실시간</span><span style="display: inline-flex; align-items: center; gap: 6px; margin-left: 8px; padding: 3px 10px; border-radius: 6px; background: var(--bg-secondary); border: 1px solid var(--border-default); font-size: 12px; font-weight: 500; color: var(--text-secondary); font-family: var(--font-mono);"><span class="codicon codicon-history" style="font-size: 12px; color: var(--text-muted);"></span><span id="vclock">—</span></span></div>
+          <div style="display: flex; align-items: center; gap: 9px; font-size: 15px; font-weight: 600; color: var(--text-primary);"><span style="width: 3px; height: 15px; border-radius: 2px; background: var(--primary-base);"></span>설비 모니터링<span style="display: inline-flex; align-items: center; gap: 5px; font-size: 11px; font-weight: 500; color: #3aa76d; margin-left: 4px;"><span style="width: 7px; height: 7px; border-radius: 50%; background: #3aa76d; animation: vpulse 1.6s ease-in-out infinite;"></span>실시간</span><span style="display: inline-flex; align-items: center; gap: 6px; margin-left: 8px; padding: 3px 10px; border-radius: 6px; background: var(--bg-secondary); border: 1px solid var(--border-default); font-size: 12px; font-weight: 500; color: var(--text-secondary); font-family: var(--font-mono);"><span class="codicon codicon-history" style="font-size: 12px; color: var(--text-muted);"></span><span id="vclock">—</span></span>
+            ${(tblFilterShow) ? html`
+              <div style="position: relative; display: inline-flex; align-items: center; gap: 6px; margin-left: 4px;">
+                <button onClick=${onTblOpen} data-tip=${tblTip} style="display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 9px; border-radius: 6px; border: 1px solid ${(tblSelCount) ? 'rgba(0,108,210,.45)' : 'var(--border-medium)'}; background: var(--bg-elevated); color: var(--text-secondary); font-size: 12px; font-weight: 500; font-family: inherit; cursor: pointer;"><span class="codicon codicon-filter" style="font-size: 12px; color: var(--text-muted);"></span>테이블 필터<span style="height: 16px; padding: 0 5px; border-radius: 8px; background: ${(tblAllOn) ? 'var(--bg-primary)' : 'var(--primary-base)'}; color: ${(tblAllOn) ? 'var(--text-muted)' : '#fff'}; font-size: 10px; font-weight: 700; font-family: var(--font-mono); display: inline-flex; align-items: center;">${(tblAllOn) ? '전체' : tblSelCount + '/' + tblTotal}</span><span class="codicon codicon-chevron-down" style="font-size: 11px; color: var(--text-muted);"></span></button>
+                ${(tblCaption) ? html`<span style="font-size: 11px; font-weight: 500; color: var(--text-muted);">${tblCaption}</span>` : null}
+                ${(tblChips || []).map((c) => html`
+                  <span style="display: inline-flex; align-items: center; gap: 6px; height: 24px; padding: 0 8px; border-radius: 5px; border: 1px solid rgba(0,108,210,.35); background: rgba(0,108,210,.10); color: var(--primary-light); font-size: 11px; font-weight: 600; font-family: var(--font-mono);">${c.name}<span style="opacity: .6; font-weight: 500;">${c.count}</span><span onClick=${c.onRemove} class="codicon codicon-close" style="font-size: 11px; cursor: pointer; opacity: .8;"></span></span>
+                `)}
+                ${(tblMore > 0) ? html`<button onClick=${onTblMore} title="접힌 테이블 보기" style="height: 24px; padding: 0 8px; border-radius: 5px; border: 1px solid var(--border-medium); background: var(--bg-elevated); color: var(--text-secondary); font-size: 11px; font-weight: 600; font-family: var(--font-mono); cursor: pointer;">+${tblMore}</button>` : null}
+                ${(tblOpen) ? html`
+                  <div style="position: absolute; top: 32px; left: 0; z-index: 40; width: 272px; padding: 6px; border-radius: 8px; border: 1px solid var(--border-medium); background: var(--bg-elevated); box-shadow: 0 10px 28px rgba(0,0,0,.35);">
+                    <input type="text" value=${tblQuery} onInput=${onTblQuery} placeholder="테이블 검색" style="width: 100%; height: 30px; margin-bottom: 4px; padding: 0 9px; border-radius: 6px; border: 1px solid var(--border-medium); background: var(--bg-primary); color: var(--text-primary); font-size: 12px; font-family: inherit; box-sizing: border-box;" />
+                    <div style="max-height: 240px; overflow-y: auto;">
+                      ${(tblOptions || []).map((o) => html`
+                        <label style="display: flex; align-items: center; gap: 9px; padding: 7px 9px; border-radius: 5px; cursor: pointer; font-size: 12px; font-weight: 500; color: var(--text-primary);" class="vhov3">
+                          <input type="checkbox" checked=${o.checked} onChange=${o.onToggle} style="width: 14px; height: 14px; accent-color: var(--primary-base); cursor: pointer;" />
+                          <span style="font-family: var(--font-mono); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${o.name}</span>
+                          <span style="margin-left: auto; font-size: 11px; color: var(--text-muted); font-family: var(--font-mono);">${o.count}</span>
+                        </label>
+                      `)}
+                      ${(tblNoMatch) ? html`<div style="padding: 12px 9px; font-size: 11px; color: var(--text-muted);">일치하는 테이블이 없습니다</div>` : null}
+                    </div>
+                    <div style="display: flex; align-items: center; gap: 14px; margin-top: 4px; padding: 8px 9px 3px; border-top: 1px solid var(--border-light);">
+                      <button onClick=${onTblSelectAll} style="background: transparent; border: none; color: var(--text-muted); font-size: 11px; font-weight: 500; font-family: inherit; cursor: pointer; padding: 0;">전체 선택</button>
+                      <button onClick=${onTblClearAll} style="background: transparent; border: none; color: var(--text-muted); font-size: 11px; font-weight: 500; font-family: inherit; cursor: pointer; padding: 0;">전체 해제</button>
+                      <button onClick=${onTblClose} style="margin-left: auto; background: transparent; border: none; color: var(--primary-light); font-size: 11px; font-weight: 700; font-family: inherit; cursor: pointer; padding: 0;">닫기</button>
+                    </div>
+                  </div>
+                ` : null}
+              </div>
+            ` : null}</div>
           <div style="display: flex; align-items: center; gap: 16px;">
             <div style="display: flex; align-items: center; gap: 8px;"><span style="font-size: 11px; color: var(--text-muted);">카드 크기</span><input type="range" min="200" max="600" step="8" value=${cardSize} onChange=${onCardSize} style="width: 120px; accent-color: var(--primary-base); cursor: pointer;" /></div>
             ${(filterNotice) ? html`<button onClick=${onClearFilter} style="display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 10px; border-radius: 5px; border: 1px solid var(--primary-light); background: rgba(0,108,210,.10); color: var(--primary-light); font-size: 11px; font-weight: 600; cursor: pointer;">${filterNotice}<span class="codicon codicon-close" style="font-size: 11px;"></span></button>` : null}<span style="font-size: 11px; color: var(--text-muted);">심각도: ${evalBasisText} · 위험 등급순 · 클릭 시 상세분석</span>
@@ -105,13 +136,22 @@ export function view(v) {
             <button onClick=${onGoSource} style="margin-top: 4px; height: 34px; padding: 0 16px; border-radius: 6px; border: none; background: var(--primary-base); color: #fff; font-size: 13px; font-weight: 600; cursor: pointer;">데이터 소스 설정</button>
           </div>
         ` : null}
+        ${/* 테이블을 하나도 안 남기면 카드가 없다 — 위의 빈 상태는 "소스가 없다"는 뜻이라 여기 쓸 수 없다 */ ''}
+        ${(tblNoneShow) ? html`
+          <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; padding: 48px 20px; background: var(--bg-secondary); border: 1px dashed var(--border-default); border-radius: 10px; text-align: center;">
+            <span class="codicon codicon-filter" style="font-size: 28px; color: var(--text-muted);"></span>
+            <div style="font-size: 14px; font-weight: 600; color: var(--text-secondary);">표시할 테이블을 하나도 고르지 않았습니다</div>
+            <div style="font-size: 12px; color: var(--text-muted);">감시는 그대로 돌고 있습니다 — 테이블 필터에서 다시 고르면 카드가 나옵니다.</div>
+            <button onClick=${onTblSelectAll} style="margin-top: 4px; height: 30px; padding: 0 14px; border-radius: 6px; border: 1px solid var(--border-medium); background: var(--bg-elevated); color: var(--text-secondary); font-size: 12px; font-weight: 600; font-family: inherit; cursor: pointer;">전체 표시</button>
+          </div>
+        ` : null}
         <div style="display: grid; grid-template-columns: ${gridCols}; gap: 12px;">
           ${(cards || []).map((card) => html`
             <button onClick=${card.onClick} draggable="true" onDragStart=${cardDrag && cardDrag.onStart(card.id)} onDragOver=${cardDrag && cardDrag.onOver(card.id)} onDrop=${cardDrag && cardDrag.onDrop()} onDragEnd=${cardDrag && cardDrag.onEnd} style="${(cardDrag && cardDrag.dragId === card.id) ? 'opacity: .35;' : ''} text-align: left; background: var(--bg-secondary); border: 1px solid var(--border-default); border-radius: 8px; padding: 14px 15px 12px; cursor: ${cardDrag && cardDrag.dragId ? 'grabbing' : 'grab'}; transition: border-color .15s ease, transform .12s ease; ${card.cardStyle}" class="vhov2">
               <div style="display: flex; align-items: flex-start; justify-content: space-between; gap: 8px;">
                 <div style="min-width: 0;">
                   <div style="font-size: 14px; font-weight: 600; color: var(--text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${card.alias}</div>
-                  <div style="font-size: 11px; color: var(--text-muted); font-family: var(--font-mono); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 2px;">${card.name}</div>
+                  <div style="font-size: 11px; color: var(--text-muted); font-family: var(--font-mono); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 2px;">${card.sub}</div>
                 </div>
                 ${(card.flap) ? html`<span data-tip=${card.flap.tip} onClick=${card.flap.onFix} style="flex-shrink: 0; padding: 2px 7px; border-radius: 4px; font-size: 10px; font-weight: 700; cursor: pointer; color: #d99a2b; background: rgba(217,154,43,.14); border: 1px solid rgba(217,154,43,.35);">${card.flap.text}</span>` : null}
                 ${(card.hold) ? html`<span data-tip=${card.holdTip} style="flex-shrink: 0; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 700; cursor: help; color: var(--text-muted); background: var(--bg-elevated); border: 1px solid var(--border-default);">판정 보류</span>` : html`<span style="flex-shrink: 0; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 700; color: ${card.gradeColor}; background: ${card.gradeSoft};">${card.gradeKo}${(card.gradeNote) ? html`<span style="opacity: .75; font-weight: 600;"> · ${card.gradeNote}</span>` : null}</span>`}
@@ -321,7 +361,13 @@ export function view(v) {
           </div>
           <div style="background: var(--bg-primary); border: 1px solid var(--border-default); border-radius: 8px; padding: 16px 18px;">
             <div style="display: flex; align-items: center; gap: 9px; font-size: 15px; font-weight: 600; color: var(--text-primary); margin-bottom: 12px;"><span style="width: 3px; height: 15px; border-radius: 2px; background: var(--primary-base);"></span>결함 대역 에너지 추이 <span style="font-weight: 500; color: var(--text-muted); font-size: 13px;">Band Energy</span></div>
-            <div style="font-size: 12px; color: var(--text-muted); margin: -4px 0 12px;">주파수 대역별 에너지의 시간 변화 · 결함 대역 상승 = 결함 성장</div>
+            <!-- 축 전환 — 원값은 계열 간 크기가 네 자릿수까지 벌어져 작은 대역이 바닥에 붙는다 -->
+            <div style="display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin: -4px 0 12px; flex-wrap: wrap;">
+              <div style="font-size: 12px; color: var(--text-muted);">주파수 대역별 에너지의 시간 변화 · 결함 대역 상승 = 결함 성장</div>
+              <!-- 학습이 없으면 흐리게 — 눌러도 켜지지 않고 무엇이 필요한지 알린다(빈 차트를 보여주지 않는다) -->
+              <button onClick=${onBandNorm} title=${bandNormReady ? '' : '대역 베이스라인 학습이 필요합니다'} style="height: 26px; padding: 0 11px; border-radius: 6px; font-size: 11.5px; font-weight: 600; white-space: nowrap; font-family: inherit; cursor: pointer; opacity: ${(bandNorm || bandNormReady) ? 1 : .5}; border: 1px solid ${bandNorm ? 'var(--primary-base)' : 'var(--border-medium)'}; background: ${bandNorm ? 'rgba(0,108,210,.1)' : 'var(--bg-elevated)'}; color: ${bandNorm ? 'var(--primary-light)' : 'var(--text-secondary)'};">${bandNormLabel}</button>
+            </div>
+            ${(bandNormNote) ? html`<div style="font-size: 11px; color: var(--text-muted); margin: -6px 0 10px;">${bandNormNote}</div>` : null}
             <div style="position: relative;">
               <canvas id="vc-band" style="width: 100%; height: 220px; display: block;"></canvas>
             </div>
@@ -1039,8 +1085,8 @@ export function view(v) {
               <div style="font-size: 11px; color: var(--text-muted); margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--border-light); line-height: 1.7;">구간이 길면 짧은 진동이 하나의 상태로 합쳐집니다. 대시보드 등급도 같은 값을 씁니다.</div>
             </div>
             <div style="background: var(--bg-secondary); border: 1px solid var(--border-default); border-radius: 8px; padding: 20px; margin-top: 16px;">
-              <div style="font-size: 17px; font-weight: 600; color: var(--text-primary); margin-bottom: 4px;">알람 동작</div>
-              <div style="font-size: 12px; color: var(--text-muted); margin-bottom: 20px;">상태가 나빠질 때·좋아질 때·나쁜 상태가 이어질 때 알람을 언제 낼지 정합니다. 순간 스파이크와 경계 오르내림(플래핑)으로 인한 소음을 줄입니다</div>
+              <div style="font-size: 17px; font-weight: 600; color: var(--text-primary); margin-bottom: 4px;">알림</div>
+              <div style="font-size: 12px; color: var(--text-muted); margin-bottom: 20px;">알람을 언제 낼지(진입 확인·복귀 유지)와 어디로 어떻게 보낼지(채널·심각도별 방식·재알림)를 설정합니다. 순간 스파이크와 경계 오르내림(플래핑) 소음은 진입·복귀 시간이 걸러냅니다</div>
               <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 18px;">
                 <div>
                   <label style="display: block; font-size: 12px; font-weight: 600; color: var(--text-tertiary); margin-bottom: 7px;">진입 확인 시간</label>
@@ -1053,26 +1099,8 @@ export function view(v) {
                   <div style="font-size: 10px; color: var(--text-muted); margin-top: 5px;">주의·위험·심각 → 정상으로 바뀐 뒤 정상이 해당 옵션 시간 이상 유지돼야 '정상 복귀' 알람 — 경계 플래핑 방지</div>
                 </div>
               </div>
-              <label style="display: block; font-size: 12px; font-weight: 600; color: var(--text-tertiary); margin: 20px 0 4px;">지속 재알림</label>
-              <div style="font-size: 11px; color: var(--text-muted); margin-bottom: 12px;">비정상 상태가 계속될 때 심각도별로 다시 알릴 주기 (끔이면 상태 변화 때만 알림)</div>
-              <table style="width: 100%; border-collapse: collapse; font-size: 12px; max-width: 420px;">
-                <thead><tr>
-                  <th style="text-align: left; font-weight: 600; color: var(--text-tertiary); padding: 7px 8px; border-bottom: 1px solid var(--border-default); font-size: 11px;">심각도</th>
-                  <th style="text-align: left; font-weight: 600; color: var(--text-tertiary); padding: 7px 8px; border-bottom: 1px solid var(--border-default); font-size: 11px;">재알림 주기</th>
-                </tr></thead>
-                <tbody>
-                  ${(renotifyRows || []).map((r) => html`
-                    <tr style="border-bottom: 1px solid var(--border-light);">
-                      <td style="padding: 8px; white-space: nowrap;"><span style="display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: ${r.color}; margin-right: 8px; vertical-align: middle;"></span><span style="font-weight: 500; color: var(--text-primary);">${r.ko}</span></td>
-                      <td style="padding: 8px;"><select value=${r.value} onChange=${r.onChange} style="height: 30px; padding: 0 8px; border-radius: 5px; border: 1px solid var(--border-medium); background: var(--bg-elevated); color: var(--text-primary); font-size: 12px; min-width: 120px;">${(renotifyOptions || []).map((o) => html`<option value=${o.v}>${o.l}</option>`)}</select></td>
-                    </tr>
-                  `)}
-                </tbody>
-              </table>
-            </div>
-            <div style="background: var(--bg-secondary); border: 1px solid var(--border-default); border-radius: 8px; padding: 20px; margin-top: 16px;">
-              <div style="font-size: 17px; font-weight: 600; color: var(--text-primary); margin-bottom: 4px;">알림</div>
-              <div style="font-size: 12px; color: var(--text-muted); margin-bottom: 18px;">이벤트 발생 시 통지할 채널과 심각도별 발송 정책을 설정합니다</div>
+              <!-- 채널·심각도 표와 한 카드 — 언제 낼지와 어디로 보낼지를 나눠 두면 같은 심각도 3행을 두 번 그리게 된다 -->
+              <div style="border-top: 1px solid var(--border-light); margin: 20px 0;"></div>
               <label style="display: block; font-size: 12px; font-weight: 600; color: var(--text-tertiary); margin-bottom: 12px;">알림 채널</label>
               <div style="display: flex; flex-direction: column; gap: 14px; margin-bottom: 24px;">
                 ${(notifChannels || []).map((c) => html`
@@ -1090,25 +1118,21 @@ export function view(v) {
                   </div>
                 `)}
               </div>
-              <div style="display: flex; align-items: center; margin-bottom: 4px;"><label style="font-size: 12px; font-weight: 600; color: var(--text-tertiary);">심각도별 라우팅</label><button onClick=${onRouteSelectAll} style="margin-left: auto; height: 24px; padding: 0 10px; border-radius: 4px; border: 1px solid var(--border-medium); background: transparent; color: var(--text-secondary); font-size: 11px; font-weight: 600; cursor: pointer;">${routeSelAllLabel}</button></div>
-              <div style="font-size: 11px; color: var(--text-muted); margin-bottom: 12px;">심각도마다 어느 채널로 보낼지 지정합니다. 체크된 심각도의 이벤트만 알림이 나갑니다</div>
-              ${(routeNoneWarn) ? html`<div style="font-size: 11px; color: var(--warning); margin-bottom: 10px; padding: 8px 11px; background: rgba(199,125,10,.1); border: 1px solid rgba(199,125,10,.3); border-radius: 6px;">채널은 켜져 있지만 라우팅된 심각도가 없어 <b>알림이 발송되지 않습니다</b> — 아래에서 알림 받을 심각도를 체크하세요</div>` : null}
-              <table style="width: 100%; border-collapse: collapse; font-size: 12px;">
+              <label style="display: block; font-size: 12px; font-weight: 600; color: var(--text-tertiary); margin-bottom: 4px;">심각도별 알림</label>
+              <div style="font-size: 11px; color: var(--text-muted); margin-bottom: 12px;">심각도마다 알림 여부와, 비정상이 이어질 때 다시 알릴 주기를 정합니다. 재알림 이벤트는 발송과 별개로 이력에는 항상 남습니다</div>
+              ${(routeNoneWarn) ? html`<div style="font-size: 11px; color: var(--warning); margin-bottom: 10px; padding: 8px 11px; background: rgba(199,125,10,.1); border: 1px solid rgba(199,125,10,.3); border-radius: 6px;">채널은 켜져 있지만 모든 심각도가 '알림 안 함'이라 <b>알림이 발송되지 않습니다</b> — 아래에서 받을 심각도를 '즉시'로 바꾸세요</div>` : null}
+              <table style="width: 100%; border-collapse: collapse; font-size: 12px; max-width: 480px;">
                 <thead><tr>
                   <th style="text-align: left; font-weight: 600; color: var(--text-tertiary); padding: 7px 8px; border-bottom: 1px solid var(--border-default); font-size: 11px;">심각도</th>
-                  <th style="text-align: center; font-weight: 600; color: var(--text-tertiary); padding: 7px 8px; border-bottom: 1px solid var(--border-default); font-size: 11px;">웹훅</th>
-                  <th style="text-align: center; font-weight: 600; color: var(--text-tertiary); padding: 7px 8px; border-bottom: 1px solid var(--border-default); font-size: 11px;">이메일</th>
-                  <th style="text-align: center; font-weight: 600; color: var(--text-tertiary); padding: 7px 8px; border-bottom: 1px solid var(--border-default); font-size: 11px;">SMS</th>
-                  <th style="text-align: left; font-weight: 600; color: var(--text-tertiary); padding: 7px 8px; border-bottom: 1px solid var(--border-default); font-size: 11px;">통지 방식</th>
+                  <th style="text-align: left; font-weight: 600; color: var(--text-tertiary); padding: 7px 8px; border-bottom: 1px solid var(--border-default); font-size: 11px;">알림 방식</th>
+                  <th style="text-align: left; font-weight: 600; color: var(--text-tertiary); padding: 7px 8px; border-bottom: 1px solid var(--border-default); font-size: 11px;">지속 시 재알림</th>
                 </tr></thead>
                 <tbody>
-                  ${(routeRows || []).map((r) => html`
+                  ${(alertRows || []).map((r) => html`
                     <tr style="border-bottom: 1px solid var(--border-light);">
                       <td style="padding: 8px; white-space: nowrap;"><span style="display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: ${r.color}; margin-right: 8px; vertical-align: middle;"></span><span style="font-weight: 500; color: var(--text-primary);">${r.ko}</span></td>
-                      <td style="padding: 8px; text-align: center;"><input type="checkbox" checked=${r.webhook} onChange=${r.onWebhook} style="width: 15px; height: 15px; accent-color: var(--primary-base);" /></td>
-                      <td style="padding: 8px; text-align: center;"><input type="checkbox" checked=${r.email} onChange=${r.onEmail} style="width: 15px; height: 15px; accent-color: var(--primary-base);" /></td>
-                      <td style="padding: 8px; text-align: center;"><input type="checkbox" checked=${r.sms} onChange=${r.onSms} style="width: 15px; height: 15px; accent-color: var(--primary-base);" /></td>
-                      <td style="padding: 8px;"><select value=${r.timing} onChange=${r.onTiming} style="height: 30px; padding: 0 8px; border-radius: 5px; border: 1px solid var(--border-medium); background: var(--bg-elevated); color: var(--text-primary); font-size: 12px;">${(routeTimings || []).map((t) => html`<option value=${t}>${t}</option>`)}</select></td>
+                      <td style="padding: 8px;"><select value=${r.timing} onChange=${r.onTiming} style="height: 30px; padding: 0 8px; border-radius: 5px; border: 1px solid var(--border-medium); background: var(--bg-elevated); color: var(--text-primary); font-size: 12px; min-width: 110px;">${(routeTimings || []).map((t) => html`<option value=${t}>${t}</option>`)}</select></td>
+                      <td style="padding: 8px;"><select value=${r.reno} onChange=${r.onReno} style="height: 30px; padding: 0 8px; border-radius: 5px; border: 1px solid var(--border-medium); background: var(--bg-elevated); color: var(--text-primary); font-size: 12px; min-width: 110px;">${(renotifyOptions || []).map((o) => html`<option value=${o.v}>${o.l}</option>`)}</select></td>
                     </tr>
                   `)}
                 </tbody>
@@ -1168,6 +1192,8 @@ export function view(v) {
                       <button onClick=${r.act.onClick} style="height: 34px; padding: 0 14px; border-radius: 6px; font-size: 12.5px; font-weight: 700; white-space: nowrap; font-family: inherit; cursor: pointer; border: ${r.act.danger ? 'none' : '1px solid var(--border-medium)'}; background: ${r.act.danger ? '#e5484d' : 'var(--bg-elevated)'}; color: ${r.act.danger ? '#fff' : 'var(--text-secondary)'};">${r.act.label}</button>
                       <!-- 버튼 아래 한 줄 — 무엇을 더 할 수 있는지/무엇을 조심할지를 누르기 전에 알린다 -->
                       <div style="font-size: 10.5px; color: var(--text-muted); text-align: right;">${r.act.sub}</div>
+                      <!-- 태그별 정리 — 감시 목록 밖 태그가 있을 때만 나온다(없으면 누를 이유가 없다) -->
+                      ${(r.act2) ? html`<button onClick=${r.act2.onClick} style="height: 30px; padding: 0 12px; border-radius: 6px; font-size: 12px; font-weight: 600; white-space: nowrap; font-family: inherit; cursor: pointer; border: 1px solid var(--border-medium); background: var(--bg-elevated); color: var(--text-secondary);">${r.act2.label}</button>` : null}
                     </div>
                   ` : null}
                 </div>
@@ -1242,7 +1268,7 @@ export function view(v) {
           <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 14px;">
             <span style="font-size: 13px; font-family: var(--font-mono); color: var(--text-muted);">${bandIntervalKo}</span>
             <span class="codicon codicon-arrow-right" style="font-size: 12px; color: var(--text-muted);"></span>
-            <select value=${bandIvNext} onChange=${onBandIvPick} style="height: 32px; padding: 0 10px; border-radius: 6px; border: 1px solid var(--border-medium); background: var(--bg-elevated); color: var(--text-primary); font-size: 13px;"><option value="1m">1분</option><option value="5m">5분</option><option value="10m">10분</option><option value="30m">30분</option><option value="1h">1시간</option></select>
+            <select value=${bandIvNext} onChange=${onBandIvPick} style="height: 32px; padding: 0 10px; border-radius: 6px; border: 1px solid var(--border-medium); background: var(--bg-elevated); color: var(--text-primary); font-size: 13px;"><option value="10m">10분</option><option value="30m">30분</option><option value="1h">1시간</option></select>
           </div>
           <div style="font-size: 12px; color: var(--text-tertiary); line-height: 1.9; padding: 12px 14px; border-radius: 7px; background: var(--bg-secondary); margin-bottom: 16px;">
             ${(bandIvFacts || []).map((f) => html`<div style="display: flex; gap: 10px;"><span style="color: var(--text-muted); min-width: 118px;">${f.k}</span><span style="color: ${f.warn ? 'var(--warning)' : 'var(--text-secondary)'}; font-weight: ${f.warn ? '600' : '500'};">${f.v}</span></div>`)}
@@ -1266,6 +1292,35 @@ export function view(v) {
     ` : null}
 
     <!-- 삭제 1단계 — 날짜 고르기. 여기서는 아직 아무것도 지우지 않는다(다음 단계가 건수를 세고 확인받는다) -->
+    <!-- 태그별 정리 — 감시 목록에 없는 태그의 데이터를 골라 지운다. 기간 삭제로는 다른 태그까지 지워진다. -->
+    ${(orphanOpen) ? html`
+      <div style="position: fixed; inset: 0; z-index: 200; background: var(--overlay-scrim); display: flex; align-items: center; justify-content: center;">
+        <div style="width: 560px; max-width: calc(100vw - 40px); background: var(--bg-elevated); border: 1px solid var(--border-default); border-radius: 10px; padding: 22px; box-shadow: 0 8px 40px rgba(0,0,0,.5);">
+          <div style="font-size: 15px; font-weight: 600; color: var(--text-primary); margin-bottom: 4px;">감시 목록에 없는 태그</div>
+          <div style="font-size: 12px; color: var(--text-muted); margin-bottom: 14px; line-height: 1.55;">
+            데이터는 남아 있는데 지금 감시하지 않는 태그입니다 — 설비를 철거했거나 데이터 소스에서 뺀 경우입니다.
+            지우면 그 태그의 대역 추이·이벤트 이력·판정 상태가 함께 사라집니다. 되돌릴 수 없습니다.
+          </div>
+          ${(orphanTotalText) ? html`<div style="font-size: 11.5px; color: var(--text-secondary); font-variant-numeric: tabular-nums; margin-bottom: 10px;">${orphanTotalText}</div>` : null}
+          <div style="max-height: 320px; overflow-y: auto; border: 1px solid var(--border-light); border-radius: 8px;">
+            ${(orphanRows || []).map((r) => html`
+              <div style="display: grid; grid-template-columns: 1fr auto; gap: 12px; align-items: center; padding: 11px 13px; border-bottom: 1px solid var(--border-light);">
+                <div style="min-width: 0;">
+                  <div style="font-size: 13px; color: var(--text-primary); font-family: var(--font-mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${r.key}</div>
+                  <div style="font-size: 11px; color: var(--text-muted); margin-top: 3px; font-variant-numeric: tabular-nums;">${r.stat}</div>
+                </div>
+                <button onClick=${r.onDelete} disabled=${!!orphanBusy} style="height: 28px; padding: 0 12px; border-radius: 6px; border: 1px solid var(--border-medium); background: transparent; color: ${orphanBusy ? 'var(--text-muted)' : '#e5484d'}; font-size: 12px; font-weight: 600; font-family: inherit; cursor: ${orphanBusy ? 'not-allowed' : 'pointer'};">${r.busy ? '지우는 중…' : '삭제'}</button>
+              </div>
+            `)}
+          </div>
+          <div style="display: flex; gap: 8px; justify-content: space-between; align-items: center; margin-top: 16px;">
+            <button onClick=${onOrphanAll} disabled=${!!orphanBusy} style="height: 34px; padding: 0 14px; border-radius: 6px; border: none; font-size: 13px; font-weight: 600; color: #fff; background: ${orphanBusy ? 'var(--text-muted)' : '#e5484d'}; cursor: ${orphanBusy ? 'not-allowed' : 'pointer'}; font-family: inherit;">${orphanBusy === 'all' ? '지우는 중…' : '전부 삭제'}</button>
+            <button onClick=${onOrphanClose} style="height: 34px; padding: 0 14px; border-radius: 6px; border: 1px solid var(--border-default); background: transparent; color: var(--text-secondary); font-size: 13px; cursor: pointer; font-family: inherit;">닫기</button>
+          </div>
+        </div>
+      </div>
+    ` : null}
+
     ${(purgePickShow) ? html`
       <div style="position: fixed; inset: 0; z-index: 200; background: var(--overlay-scrim); display: flex; align-items: center; justify-content: center;">
         <div style="width: 420px; background: var(--bg-elevated); border: 1px solid var(--border-default); border-radius: 10px; padding: 22px; box-shadow: 0 8px 40px rgba(0,0,0,.5);">

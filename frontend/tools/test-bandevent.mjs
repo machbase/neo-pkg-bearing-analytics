@@ -108,6 +108,20 @@ chk(VC.bandJudge({ fault: 1.0 }, { one: BLS.one }, false) === null, '겹치는 �
      그래서 아무것도 넣어 주지 않고 그대로 평가한다 = TQL과 같은 조건. */
   const src = VC.bandJudgeSrc();
   const embedded = new Function('return ' + src)();
+
+  /* 판정 계열 목록이 두 벌이라는 것이 이 구조의 유일한 약점이다 — bandJudge는 TQL에 통째로
+     박혀 홀로 도느라 바깥 BAND_ORDER를 못 쓰고 제 안에 리터럴을 갖는다. 한쪽만 늘리면
+     학습은 되는데 판정만 조용히 건너뛰어, 값이 다 있는데 알람만 안 나는 상태가 된다.
+     문자열을 비교하지 않고 실제로 판정시켜 본다 — 목록이 어긋나면 그 계열이 걸러진다. */
+  {
+    const bl = { mu: 1, sigma: 0.1, k: 3 };
+    const judges = (bn) => { const r = embedded({ [bn]: 10 }, { [bn]: bl }, false); return !!(r && r.on); };
+    const missed = VC.BAND_ORDER.filter((bn) => !judges(bn));
+    chk(missed.length === 0, '임베드 판정기가 판정 계열을 하나도 빠뜨리지 않는다', missed.join(',') || '전부 판정');
+    // 반대 방향 — 저장 전용 계열을 판정하면 "반복주파수가 올랐다"를 이탈로 알린다
+    const extra = VC.BAND_CTX.filter(judges);
+    chk(extra.length === 0, '저장 전용 계열은 임베드 판정기도 무시한다', extra.join(',') || '없음');
+  }
   const cases = [[NOW, BLS, false], [NOW, BLS, true], [{ fault: 0.5 }, BLS, false], [null, BLS, false], [NOW, null, false]];
   const same = cases.every(([n, b, w]) => JSON.stringify(embedded(n, b, w)) === JSON.stringify(VC.bandJudge(n, b, w)));
   chk(same, '임베드본과 원본 bandJudge 판정 일치 (앱↔서버 드리프트 0)');
@@ -164,6 +178,51 @@ chk(VC.bandJudge({ fault: 1.0 }, { one: BLS.one }, false) === null, '겹치는 �
   chk(t('양호', 'recovery'), '정상 복귀도 동일');
   chk(!t('심각', 'band'), '미라우팅 심각도는 발송 안 함');
   chk(/bandrec/.test(N.serverSrc()), '서버 임베드 소스에도 bandrec 예외 포함');
+
+  /* 채널 체크박스를 없앤 뒤의 판정 — timing 하나가 전부다.
+     '무시'는 옛 저장본의 표기라 계속 꺼짐으로 읽어야 한다(이관 전 서버 TQL·설정 호환). */
+  const t2 = (routes) => N.shouldNotify('주의', 'band', 'webhook',
+    { channels: { webhook: { on: true, to: 'http://x' } }, routes });
+  chk(t2({ '주의': { timing: '즉시' } }), 'timing 즉시면 발송 — 체크박스 없이');
+  chk(!t2({ '주의': { timing: '알림 안 함' } }), "'알림 안 함'은 미발송");
+  chk(!t2({ '주의': { timing: '무시' } }), "옛 표기 '무시'도 미발송(저장본 호환)");
+  chk(t2({ '주의': { webhook: false, timing: '즉시' } }), '남은 webhook 키는 무시된다 — 이관이 timing으로 옮겨 둔다');
+
+  /* 대상별 페이로드 — Slack·Discord는 필드가 배타적이고, Google Chat은 protobuf 기반이라
+     모르는 필드가 하나라도 있으면 400으로 거부한다. 범용 페이로드(전 필드)를 보내면 안 되는
+     대상들이라 URL 판별이 정확해야 한다. */
+  const msg = { subject: 's', text: 's\nline2\nline3', html: '<b>h</b>', event: { gradeKo: '위험' } };
+  const P = (url) => N.payloadFor(msg, url);
+  {
+    // Discord는 embed — 평문이 연달아 쌓이면 등급이 눈에 안 들어와 색 막대로 구분한다
+    const d = P('https://discord.com/api/webhooks/1/x');
+    chk(!d.content && d.embeds && d.embeds.length === 1, 'Discord는 embed로 보낸다');
+    chk(d.embeds[0].title === 's' && d.embeds[0].description === 'line2\nline3', '제목은 title로, 본문에서 첫 줄은 뺀다');
+    chk(d.embeds[0].color === 0xe07b39, '심각도가 색으로 붙는다(위험=주황)');
+    chk(P('https://discord.com/api/webhooks/1/x') && N.payloadFor({ subject: 's', text: 's', event: { gradeKo: '심각' } }, 'https://discord.com/api/webhooks/1/x').embeds[0].color === 0xe5484d, '심각=적색');
+    chk(N.payloadFor({ subject: 's', text: 's', event: { gradeKo: '양호' } }, 'https://discord.com/api/webhooks/1/x').embeds[0].color === 0x3aa76d, '복귀(양호)=녹색');
+  }
+  chk(JSON.stringify(P('https://hooks.slack.com/services/x')) === JSON.stringify({ text: msg.text }), 'Slack은 text만');
+  chk(JSON.stringify(P('https://chat.googleapis.com/v1/spaces/A/messages?key=k&token=t')) === JSON.stringify({ text: msg.text }),
+    'Google Chat은 text만 — 모르는 필드는 400');
+  const gen = P('https://my-endpoint.example/hook');
+  chk(gen.text === msg.text && gen.subject === 's' && gen.body === '<b>h</b>' && !!gen.event, '자체 엔드포인트는 전 필드(메일형 포함)');
+  chk(/chat\\.googleapis\\.com/.test(N.serverSrc()), '서버 임베드 소스에도 Google Chat 판별 포함');
+
+  /* 메시지 본문 — 제목에 이미 있는 정보(등급·설비·유형)를 본문에 반복하지 않고,
+     값 줄은 유형마다 다르다. 유형 무관 한 틀이면 계측 이상이 "측정값 0.000"으로 나간다
+     (0은 자리 채움이지 측정이 아니다 — 받는 쪽은 측정값으로 읽는다). */
+  {
+    const m1 = N.eventMessage({ alias: '3번 펌프', tag: 'LOAD_03', typeKo: '임계 초과', gradeKo: '위험', etype: 'threshold', val: 5.753, lim: 2.8, unit: 'mm/s', timeText: 'T1' });
+    chk(m1.subject === '[위험] 3번 펌프 (LOAD_03) · 임계 초과', '제목 한 줄에 판정의 전부', m1.subject);
+    chk(m1.text.split('\n').length === 3, '본문은 값·시각 두 줄뿐(반복 없음)', String(m1.text.split('\n').length));
+    chk(/×2\.05/.test(m1.text), '기준 대비 비율이 붙는다', m1.text.split('\n')[1]);
+    const m2 = N.eventMessage({ alias: 'GATE_DC', tag: 'GATE_DC', typeKo: '계측 이상', gradeKo: '주의', etype: 'sensor_fault', val: 0, lim: 1.12, detail: 'DC 치우침 — 센서 바이어스 의심', timeText: 'T1' });
+    chk(!/측정값|0\.000/.test(m2.text), '계측 이상에 측정값 0.000을 찍지 않는다', m2.text);
+    chk(/DC 치우침/.test(m2.text), '대신 사유를 싣는다');
+    const m3 = N.eventMessage({ alias: 'C1', tag: 'C1', typeKo: '대역 이탈', gradeKo: '위험', etype: 'band', val: 3.12, lim: 1, detail: 'envBPFO=…', timeText: 'T1' });
+    chk(/알람 기준 대비 ×3\.12/.test(m3.text) && !/기준 1\.000/.test(m3.text), '대역은 비율만 — "측정값 3.12/기준 1.000"으로 찍지 않는다');
+  }
 }
 
 // ── 밀도 균일화 ────────────────────────────────────────────────────────────
@@ -256,13 +315,17 @@ chk(VC.bandJudge({ fault: 1.0 }, { one: BLS.one }, false) === null, '겹치는 �
   chk(VC.bandEdges(60, nyq(1000))[4][0] === 1000, '회전주파수를 바꿔도 하한 동일');
 
   // 1 kHz 샘플링: Nyquist 500 → 초고주파(1000~500)는 빈 대역
-  const able1k = VC.BAND_ORDER.filter((bn) => VC.bandMeasurable(bn, 30, 1000));
+  const able1k = VC.BAND_FREQ.filter((bn) => VC.bandMeasurable(bn, 30, 1000));
   chk(able1k.length === 4, '1 kHz 샘플링에서 측정 가능 대역은 4개', able1k.join(','));
   chk(!VC.bandMeasurable('vh1', 30, 1000), '1~2 kHz 측정 불가');
   chk(VC.bandMeasurable('high', 30, 1000), '고주파(300~1000)는 측정 가능');
 
   // 25.6 kHz면 전부 가능
-  chk(VC.BAND_ORDER.every((bn) => VC.bandMeasurable(bn, 30, 25600)), '25.6 kHz에서는 5개 전부 가능');
+  chk(VC.BAND_FREQ.every((bn) => VC.bandMeasurable(bn, 30, 25600)), '25.6 kHz에서는 대역 전부 가능');
+  /* 포락선 계열은 주파수 대역이 아니라 경계라는 것이 없다 — "측정 가능한가"가 성립하지 않으므로
+     통과시킨다. BAND_ORDER로 이 함수를 돌리면 bandEdges에 없는 칸을 물어 깨진다. */
+  chk(VC.BAND_ORDER.filter((bn) => VC.BAND_FREQ.indexOf(bn) < 0).every((bn) => VC.bandMeasurable(bn, 30, 1000)),
+    '포락선 계열은 대역 경계 검사를 통과한다');
 
   // 인자가 없으면 막지 않는다 — 판단 불가를 "불가"로 단정하면 학습이 통째로 막힌다
   chk(VC.bandMeasurable('vh1', 0, 0), '회전주파수·샘플레이트 불명이면 허용');
@@ -281,6 +344,69 @@ chk(VC.bandJudge({ fault: 1.0 }, { one: BLS.one }, false) === null, '겹치는 �
   const B = [[2, 15], [15, 45], [45, 300], [300, 1000], [1000, nyq]];
   chk(B[4][0] >= Math.min(B[4][1], nyq), '초고주파는 빈 대역이라 값이 0으로 나온다');
   chk(!VC.bandMeasurable('vh1', fr, fs), 'calc는 그 대역을 측정 불가로 판단(표시·학습용)');
+}
+
+// ── 마운팅 유효 상한 초과 대역 ─────────────────────────────────────────────
+/* 가속도계는 부착 방식이 믿을 수 있는 상한을 정한다. 그 위의 융기는 설비가 아니라 센서
+   부착부가 울린 것일 수 있으므로 확정 근거로 쓸 수 없다 — 그렇다고 빼지는 않는다.
+   빼면 베어링 초기 결함이 제일 먼저 나타나는 대역을 통째로 안 보게 되고, 마운트가
+   헐거워진 것도 못 알아챈다. 값은 남기고 등급만 '주의'로 묶는다. */
+{
+  const fr = 30, fs = 25600;
+  chk(JSON.stringify(VC.softBands(fr, fs, 'magnet')) === JSON.stringify(['vh2', 'vh3', 'vh4']),
+    '자석(2 kHz): 상한을 걸치는 vh2부터 잠정', VC.softBands(fr, fs, 'magnet').join(','));
+  chk(JSON.stringify(VC.softBands(fr, fs, 'stud')) === JSON.stringify(['vh4']),
+    '스터드(10 kHz): vh4만 잠정', VC.softBands(fr, fs, 'stud').join(','));
+  chk(VC.softBands(fr, fs, 'probe').length === 4, '프로브(1 kHz): vh1~vh4 전부 잠정');
+  // 상한과 대역 상한이 정확히 같으면 잠정이 아니다 — 그 대역은 상한 안에서 끝난다
+  chk(VC.softBands(fr, fs, 'magnet').indexOf('vh1') < 0, '1~2 kHz는 자석 상한(2 kHz)에 딱 맞아 유효');
+  // 미상은 제한하지 않는다 — 모르는 것을 자석으로 가정하면 과잉 차단이 된다
+  chk(VC.softBands(fr, fs, '').length === 0 && VC.softBands(fr, fs, 'unknown').length === 0, '마운팅 미상이면 제한 없음');
+  chk(VC.softBands(0, fs, 'magnet').length === 0 && VC.softBands(fr, 0, 'magnet').length === 0, '회전주파수·샘플레이트 불명이면 제한 없음');
+
+  const BL3 = { mu: 1.0, sigma: 0.1, k: 3 };          // 한계 1.3
+  const lim3 = VC.baselineLimit(BL3);
+  const hot = { vh3: lim3 * 4.0 };                     // 상한 위 대역만 ×4.0
+  chk(VC.bandJudge(hot, { vh3: BL3 }, false).gi === 3, '상한 미적용이면 ×4.0 → 심각(gi=3)');
+  const soft = VC.bandJudge(hot, { vh3: BL3 }, false, ['vh3']);
+  chk(soft.on, '잠정 대역이어도 이탈은 이탈 — 알람 자체를 없애지 않는다');
+  chk(soft.gi === 1, '잠정 대역만 이탈 → 주의(gi=1)로 묶임', 'gi=' + soft.gi);
+  chk(soft.soft === true, '잠정 판정 플래그');
+  chk(Math.abs(soft.maxR - 4.0) < 0.01, '배수 자체는 깎지 않는다(값은 사실이다)', '×' + soft.maxR.toFixed(2));
+  chk(/vh3=.*\(잠정\)/.test(soft.detail), 'DETAIL에 잠정 표식', soft.detail);
+  const rt = VC.bandParse(soft.detail);
+  chk(rt.length === 1 && rt[0].soft === true, '저장된 DETAIL에서도 잠정이 읽힌다');
+
+  /* 믿을 수 있는 대역이 함께 이탈했으면 등급은 그쪽 배수로만 정한다 —
+     잠정 대역이 더 크게 올라갔다고 심각까지 올리면 확정 근거 없는 값으로 설비를 세우게 된다. */
+  const BLf = { mu: 1.0, sigma: 0.1, k: 3 };
+  const both = { fault: VC.baselineLimit(BLf) * 2.0, vh3: lim3 * 4.0 };
+  const mixed = VC.bandJudge(both, { fault: BLf, vh3: BL3 }, false, ['vh3']);
+  chk(mixed.gi === 2, '유효 대역 ×2.0 + 잠정 ×4.0 → 위험(유효 배수 기준)', 'gi=' + mixed.gi);
+  chk(mixed.soft === false, '유효 대역이 함께 걸리면 잠정 판정이 아니다');
+  chk(mixed.over.length === 2 && mixed.over.some((o) => o.soft), '잠정 대역도 이탈 목록에는 남는다');
+
+  // 인자를 안 주면 예전과 완전히 같아야 한다 — 옛 호출부·저장된 TQL이 그대로 돈다
+  chk(JSON.stringify(VC.bandJudge(NOW, BLS, false, undefined)) === JSON.stringify(VC.bandJudge(NOW, BLS, false)),
+    'softKeys 미지정은 기존 동작과 동일');
+}
+
+// ── 마운팅 상한의 서버 모드 동등성 ─────────────────────────────────────────
+{
+  const Mon = (await import('../../cgi-bin/monitor/monitor.js')).default;
+  const embedded = new Function('return ' + VC.bandJudgeSrc())();
+  const BL3 = { mu: 1.0, sigma: 0.1, k: 3 };
+  const hot = { vh3: VC.baselineLimit(BL3) * 4.0 };
+  chk(JSON.stringify(embedded(hot, { vh3: BL3 }, false, ['vh3'])) === JSON.stringify(VC.bandJudge(hot, { vh3: BL3 }, false, ['vh3'])),
+    '임베드본도 잠정 강등을 같게 판정 (앱↔서버 드리프트 0)');
+  const tql = Mon.buildMonitorTql({
+    judgeSrc: judgeTick.toString(), limitSrc: VC.baselineLimit.toString(),
+    bandSrc: VC.bandJudgeSrc(), bandOrder: VC.BAND_ORDER, bandWinMs: 7200000,
+    tags: [{ tbl: 'T', tag: 'A', alias: 'a', unit: 'mm/s', zones: [1, 2, 3], bl: BL3, bb: { vh3: BL3 }, soft: ['vh3'] }],
+    cfg: { escHold: 0, recHold: 0, reno: {} },
+  });
+  chk(/bandJudge\(bandNow\(t\), t\.bb, !!\(prev&&prev\.bb\), t\.soft\)/.test(tql), '서버 TQL이 상한 초과 대역을 판정에 전달');
+  chk(/"soft":\["vh3"\]/.test(tql), '태그 스펙에 잠정 대역 목록이 값으로 구워짐');
 }
 
 console.log(fail ? `\n=== FAIL ${fail}건 ===` : '\n=== 전부 통과 ===');

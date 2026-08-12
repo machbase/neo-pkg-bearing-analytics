@@ -116,7 +116,7 @@ Each band learns a normal reference the same way the baseline does, and is grade
 
 Multiple bands breaching at once collapse into **one event per machine**. It is normal for a single fault to show up across several bands, so alarming per band would multiply the noise. Which bands were exceeded, and by how much, is recorded in the event detail.
 
-> On lower sample-rate sensors the upper bands fall outside the measurable range and cannot be trained. Those bands are excluded from evaluation, and the screen shows something like "4 of 5 trained".
+> On lower sample-rate sensors the upper bands fall outside the measurable range and cannot be trained, and without a bearing part number the envelope fault-frequency series do not accumulate. Untrained series are excluded from evaluation, and the screen shows something like "4/9 series trained".
 
 ### Deciding the grade
 

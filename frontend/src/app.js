@@ -3,8 +3,8 @@
 import { Component } from 'preact/compat';
 import { view } from './view.js';
 import { listTagTables, listTags, tagStats, rollupTrend, loadConfig, saveConfig, saveConfigPartial, buildLiveData, liveDetail, emptyDet, rollupBatch, loadTrendChunks , timerStates, MON_TIMER, BAND_TIMER, WD_TIMER, createWdTimer, deleteWdTimer, rawWindow, CAPS, pkgBase} from './data/live.js';
-import { ensureMonTables, loadEventsRange, countEvents, loadBaselines, saveBaseline, deleteBaseline, insertEvent, loadMonState, saveMonState, createMonitorTimer, deleteMonitorTimer, createBandTimer, deleteBandTimer, bandRaw, bandTrend, bandBackfill, bandTimes } from './data/live.js';
-import { usageStats, countRange, deleteEventsRange, deleteEventsOfTag, deleteBandRange, deleteBandOfTag, deleteMonState } from './data/live.js';
+import { ensureMonTables, loadEventsRange, countEvents, loadBaselines, saveBaseline, deleteBaseline, insertEvent, loadMonState, saveMonState, createMonitorTimer, deleteMonitorTimer, createBandTimer, deleteBandTimer, bandRaw, bandLatest, bandTrend, bandBackfill, bandTimes } from './data/live.js';
+import { usageStats, countRange, tagUsage, deleteEventsRange, deleteEventsOfTag, deleteBandRange, deleteBandOfTag, deleteMonState } from './data/live.js';
 import { runTql } from './data/live.js';
 import Monitor from '../../cgi-bin/monitor/monitor.js';
 import Band from '../../cgi-bin/monitor/band.js';
@@ -13,8 +13,6 @@ import Notify from '../../cgi-bin/notify/notify.js';
 // 별칭 편집이 한 번에 그리는 줄 수 — 목록 자체는 전부이고, 넘치는 만큼은 검색으로 좁혀 찾는다
 var ALIAS_ROWS_MAX = 200;
 var GRADE_WORDS = ['양호', '주의', '위험', '심각']; // 이벤트 GRADE 저장·표시용(인덱스 ↔ 단어)
-// 이벤트 유형 표시명 (목록·내보내기·알림 문구 공용)
-// 백필 튜닝 — 실측 태그당 1.25초(32,768샘플 조회+FFT+INSERT)
 // 대역 학습 기간 — 표본이 성겨서 RMS보다 긴 선택지가 필요하다. 1시간은 어떤 추출 주기로도
 // 최소 표본(30)을 못 채워 아예 넣지 않는다(10분 주기면 6개).
 var BAND_WIN_H = { '6h': 6, '24h': 24, '3d': 72, '7d': 168 };
@@ -36,7 +34,7 @@ var ISO_TTL_QUIET_MS = 300000;
    소진되면 손을 떼고 사유를 그대로 보여준다. */
 /* 감시자 주기 — 하는 일이 남의 심박 조회뿐이라 짧게 잡아도 부담이 없다. 앱이 닫혀 있을 때
    감시가 죽으면 이 주기 안에 되살아난다. */
-/* 대역 추출 한 태그당 예상 소요(초) — 원본 조회 ~0.2초 + FFT(32,768점) ~0.7초 실측(goja).
+/* 대역 추출 한 태그당 예상 소요(초) — 원본 조회 + FFT(32,768점).
    주기를 고를 때 "이 설치에서 한 회차가 몇 초인지"를 계산하는 데 쓴다. */
 var BAND_TAG_SEC = 0.9;
 /* "타이머가 없는 것이 맞는 상태"를 나타내는 서명. 서명을 null로 두면 다음 확인 때 또 지우러
@@ -50,9 +48,8 @@ var RECOVER_GAP_MS = 120000;      // 시도 간격 — 등록 직후엔 아직 �
 var RECOVER_CALM_MS = 1800000;    // 이만큼 조용하면 처음부터 다시 센다
 
 /* 저장·복원하는 설정 키 — state 키와 이름이 같다.
-   저장(_cfgFromState)과 복원(_applyLive)이 같은 목록을 쓴다. 예전엔 양쪽이 따로 적혀 있어
-   새 설정을 저장 쪽에만 추가하면 파일엔 남는데 켤 때 안 읽히는 일이 생겼다(카드 순서·대역 학습 기간).
-   여기 추가한 키는 db.js CONFIG_FILES에도 넣어야 파일에 실제로 쓰인다(스모크가 확인한다). */
+   저장(_cfgFromState)과 복원(_applyLive)이 이 한 목록을 공유한다(따로 적으면 저장만 되고 복원이 안 되는 키가 생긴다).
+   여기 추가한 키는 db.js CONFIG_FILES에도 넣어야 파일에 실제로 쓰인다. */
 var CFG_KEYS = ['srcSel', 'machineClass', 'classThresh', 'unitThresh',
   'equipCls', 'equipRpm', 'equipBearing', 'equipGeo', 'equipUnit', 'equipMeta', 'lineHz', 'cardOrder',
   'knownTags', 'revived',
@@ -63,7 +60,11 @@ var CFG_KEYS = ['srcSel', 'machineClass', 'classThresh', 'unitThresh',
    형상·벨트는 값마다 칸이 따로라 여기서도 따로 다룬다. */
 var GEO_F = { geoN: 'n', geoBd: 'Bd', geoPd: 'Pd', geoPhi: 'phi' };
 var BELT_F = { beltD1: 'd1', beltD2: 'd2', beltLen: 'len' };
-var IV_KO = { '1m': '1분', '5m': '5분', '10m': '10분', '30m': '30분', '1h': '1시간' };
+/* 대역 추출 주기 — 10분 아래를 두지 않는다. 추출 창이 2^15 샘플 고정이라 샘플레이트가 낮으면
+   실제 길이가 분 단위가 되고(128 Hz면 4.3분), 그보다 짧은 주기는 같은 구간을 겹쳐 잰다.
+   짧은 간격 표본은 서로 상관이 강해 개수만 늘고 σ 추정이 나아지지도 않는다.
+   급격한 이상은 광대역 감시(monitor.tql, 초 단위)가 따로 보므로 안전이 깎이지 않는다. */
+var IV_KO = { '10m': '10분', '30m': '30분', '1h': '1시간' };
 // 사람이 읽는 소요 시간 — 초/분/시간 한 단위만(정밀도보다 감이 중요)
 function fmtDur(ms) {
   if (!(ms > 0)) return '0초';
@@ -100,12 +101,13 @@ function srcSig(s) {
 // 심각도별 기본 라우팅 — 채널만 켜면 위험·심각은 바로 알림이 가야 한다(주의는 소음이라 기본 꺼짐).
 // 사용자가 한 번이라도 건드린 심각도는 저장된 값이 그대로 우선한다.
 var ROUTE_ORDER = ['주의', '위험', '심각'];
-var ROUTE_DEFAULT_ON = { '주의': false, '위험': true, '심각': true };
+/* 심각도별 기본 알림 방식 — 발송 여부는 timing 하나로만 정한다(채널이 웹훅 하나라 별도 체크박스는 이중 부정이 된다). */
+var ROUTE_DEFAULT_TIMING = { '주의': '알림 안 함', '위험': '즉시', '심각': '즉시' };
 function routesWithDefaults(routes) {
   var out = {};
   ROUTE_ORDER.forEach(function (k) {
     var r = (routes || {})[k];
-    out[k] = r ? r : { webhook: ROUTE_DEFAULT_ON[k], email: false, sms: false, timing: '즉시' };
+    out[k] = r ? r : { timing: ROUTE_DEFAULT_TIMING[k] };
   });
   return out;
 }
@@ -124,17 +126,27 @@ function durMs(s) {
   return m ? +m[1] * 1000 : 0;
 }
 // ms → 사람이 읽는 라벨 (직접 입력값도 초/분/시간으로 보여준다)
+/* 경과 시간·구간 길이 표기. 소수를 쓰지 않는다 — "6.2분 전"은 읽는 사람이 소수점을 분으로
+   환산하게 만들고(0.2분이 12초라는 것을 계산해야 한다), 있지도 않은 정밀도를 주장한다.
+   대신 아래 단위를 붙인다: 1시간 54분. 서버 판정기의 durAgo와 같은 규칙이어야 한다
+   (이벤트 DETAIL과 화면이 같은 사건을 다르게 적으면 같은 것인지 알 수 없다). */
 function durKo(ms) {
   if (!(ms > 0)) return '0';
   if (ms < 60000) return Math.round(ms / 1000) + '초';
-  if (ms < 3600000) return (ms % 60000 ? (ms / 60000).toFixed(1) : ms / 60000) + '분';
-  return (ms % 3600000 ? (ms / 3600000).toFixed(1) : ms / 3600000) + '시간';
+  if (ms < 3600000) { var m = Math.round(ms / 60000); return m >= 60 ? '1시간' : m + '분'; }
+  if (ms < 86400000) {
+    var h = Math.floor(ms / 3600000), hm = Math.round((ms % 3600000) / 60000);
+    if (hm === 60) { h++; hm = 0; }
+    return h + '시간' + (hm ? ' ' + hm + '분' : '');
+  }
+  var d = Math.floor(ms / 86400000), dh = Math.round((ms % 86400000) / 3600000);
+  if (dh === 24) { d++; dh = 0; }
+  return d + '일' + (dh ? ' ' + dh + '시간' : '');
 }
 /* 판정 틱과 카탈로그 틱을 분리한다 — 태그 증감은 사람이 하는 일이라 매 판정마다 확인할 이유가 없다.
-   기존 구조는 한 틱에서 tagStats(테이블당 129ms) + rollupTrend(태그당 개별)를 돌아
-   6태그면 조회 7회에 900ms가 걸렸다. 배치 조회로 묶으면 테이블당 1회(128ms)로 끝난다. */
+   판정 조회는 배치(NAME IN)로 묶어 테이블당 1회다. */
 var CAT_TICK_MS = 10000;   // 카탈로그(태그 증감) 확인 주기
-/* RMS 구간의 끝을 지금으로 잡으면 마지막 버킷이 아직 적재 중이다(실측 875~901 / 정상 1000개).
+/* RMS 구간의 끝을 지금으로 잡으면 마지막 버킷이 아직 적재 중이다.
    여유를 두고 조회하고, 미완성 버킷은 windowRms가 cnt로 걸러낸다. */
 var WIN_LAG_MS = 4000;
 // 순수 판정 상태머신 — 한 태그의 한 틱. 앱·서버 타이머 공통 규칙의 단일 출처(서버 TQL도 이 로직을 미러링).
@@ -183,8 +195,7 @@ function judgeTick(prev, rg, breach, now, cfg, bandState, run) {
              recovery : 완전 정상 도달       → 작업지시 종료
            하나로 합치면 "recovery(위험)"처럼 등급과 뜻이 어긋나고, 단계마다 내면
            심각→위험→주의→양호에서 3건이 되어 소음이 된다. 에피소드당 각 1건씩만 낸다.
-           양호 도달만 복귀로 보면 존 경계 위에 상주하는 설비는 영영 해제되지 않는다
-           (실측 7,036건 중 recovery 0건이 그 상태였다) — improve가 그걸 메운다. */
+           양호 도달만 복귀로 보면 존 경계 위에 상주하는 설비는 영영 해제되지 않는다 — improve가 그걸 메운다. */
         var aG = prev.alarmG || 0;
         if (rg === 0 && aG > 0) {
           events.push({ etype: 'recovery', gi: 0 });
@@ -200,12 +211,8 @@ function judgeTick(prev, rg, breach, now, cfg, bandState, run) {
     }
   }
   /* 베이스라인 이탈 — 등급 전이와 독립. 진입은 escHold, 해제(재무장)는 recHold를 요구한다.
-
-     해제에 지속 요구가 없으면 한계 근처를 오가는 신호가 매번 새 이탈로 잡힌다(측정 90건/시간).
-     진입 쪽은 원래 즉시였는데, 그러면 사용자가 진입 확인 시간을 올려도 이 경로만 안 듣는다 —
-     누적 이벤트의 34%가 베이스라인이라 사실상 옵션이 절반만 걸리는 상태였다. 한계가 대개
-     μ×1.2(평소의 1.2배)로 잡혀 부하 변동만으로도 넘기 때문에 진입 지속 요구가 특히 필요하다.
-
+     해제에 지속 요구가 없으면 한계 근처를 오가는 신호가 매번 새 이탈로 잡히고,
+     한계가 대개 μ×1.2라 부하 변동만으로도 넘으므로 진입 쪽에도 지속 요구가 필요하다.
      bos = 이탈 후보가 시작된 시각 · bcs = 해제 후보가 시작된 시각. */
   var wasB = !!(prev && prev.b), bcs = prev ? prev.bcs : null, bos = prev ? prev.bos : null, nowB = wasB;
   if (breach) {
@@ -263,6 +270,13 @@ export class App extends Component {
       viewUnit: null, // 상세분석 표시 물리량: null=센서 원단위 · 'g'/'mm/s'/'μm'로 적분/미분 변환
       events: [], reports: [],
       setSection: 'source', machineClass: '', gradeFilter: null, // 선택 UI는 저장 전 미선택 (판정 폴백은 Class II)
+      /* 모니터링 테이블 필터 — 화면 상태다(CFG_KEYS에 없다). 감시 대상을 영구히 정하는 것은
+         설정 → 데이터 소스이고 그 값은 서버 타이머에도 구워진다. 여기는 잠깐 좁혀 보는 수단이라
+         저장하지 않는다.
+         고른 것이 아니라 숨긴 것을 기억한다 — 기본이 '전체 선택'이라, 고른 목록을 들고 있으면
+         나중에 생긴 테이블이 그 목록에 없어서 말없이 화면에서 빠진다(감시는 도는데 카드가 없다).
+         빈 배열 = 전체 표시. */
+      tblHide: [], tblOpen: false, tblQuery: '',
       equipBearing: {}, equipRpm: {}, equipAdv: {}, equipGeo: {}, equipUnit: {},
       // 설비 정보 목록의 화면 상태 — 저장 대상이 아니다(CFG_KEYS에 없다)
       equipFilter: 'all',  // 'all' | 'unset' | 'incomplete'
@@ -277,8 +291,8 @@ export class App extends Component {
       // 리포트 탭 조회 기간 — 상세분석(period/from/to)과 분리. 대상 태그가 없으면 기간도 없다('')
       genPeriod: '', genFrom: '', genTo: '',
       dirty: false, toast: null, pendingNav: null, monitorInterval: '3s', cardSize: 232,
-      notifCh: { webhook: false, email: false, sms: false }, // 알람 채널 기본 전부 비활성
-      notifTo: { webhook: '', email: '', sms: '' }, // 채널별 대상(웹훅 URL·수신 주소·번호)
+      notifCh: { webhook: false }, // 알람 채널은 웹훅 하나 — 이메일·SMS는 발송 수단이 없다(저장본 잔존 키는 무시됨)
+      notifTo: { webhook: '' }, // 발송 대상 URL
       notifTest: null, // 테스트 발송 결과 {ch, ok, msg}
       routes: {}, // 심각도별 라우팅 {심각도: {email,slack,sms,timing}} — 기본 전부 비활성
       /* 서버 타이머는 앱을 닫아도 계속 도는 상주물이라 말없이 만들지 않는다 — 설정에서
@@ -370,19 +384,27 @@ export class App extends Component {
         if (!DUR_MS[cfg.evalWindow] || cfg.evalWindow === '0') cfg.evalWindow = '10s';
         if (durMs(cfg.evalWindow) > 3600000) cfg.evalWindow = '10s';
         if (!DUR_MS[cfg.monitorInterval]) cfg.monitorInterval = '3s';
-        /* 진입 확인 시간 기본값이 0(즉시)이었다 — 단발 스파이크 하나가 그대로 알람이 됐고,
-           복귀는 5분을 요구하는데 진입만 즉시라 비대칭이 뒤집혀 있었다. 옛 기본값과 정확히
-           같을 때만 새 기본으로 올린다(사용자가 일부러 고른 값은 건드리지 않는다). */
+        // 옛 설정의 1분·5분은 추출 창보다 짧을 수 있어 10분으로 올린다(IV_KO 주석 참조)
+        if (cfg.bandInterval === '1m' || cfg.bandInterval === '5m') cfg.bandInterval = '10m';
+        // 옛 기본값(진입 즉시)과 정확히 같을 때만 새 기본으로 올린다 — 사용자가 일부러 고른 값은 건드리지 않는다.
         if (cfg.escHold === '0') cfg.escHold = '1m';
+        /* 라우팅 이관 — 옛 저장본의 webhook:false·'무시'는 전부 '알림 안 함'으로 옮긴다
+           (꺼둔 의도가 보존되어야 이관 후 조용히 켜지는 일이 없다). */
+        if (cfg.routes) Object.keys(cfg.routes).forEach(function (k) {
+          var r = cfg.routes[k];
+          if (!r || typeof r !== 'object') return;
+          if (r.webhook === false || r.timing === '무시') r.timing = '알림 안 함';
+          if (!r.timing) r.timing = ROUTE_DEFAULT_TIMING[k] || '즉시';
+          delete r.webhook; delete r.email; delete r.sms;
+        });
         if (!Array.isArray(cfg.cardOrder)) cfg.cardOrder = [];   // 설비 카드 순서 — 없으면 심각도순
         /* knownTags가 없으면 '첫 실행'이다 — 빈 배열(아는 태그가 하나도 없음)과 구분해야 한다.
            둘을 같게 두면 이 기능이 처음 도는 순간 학습된 모든 태그가 "처음 보는 태그"로 걸린다. */
         if (!Array.isArray(cfg.knownTags)) cfg.knownTags = null;
         if (!cfg.revived || typeof cfg.revived !== 'object') cfg.revived = {};
         delete cfg.evalAgg;                     // 집계 방식은 제거됨 — 구간 RMS가 곧 집계
-        /* 지속 재알림 옛 기본값(위험 1시간·심각 30분)을 끔으로 옮긴다 — 규모가 커지면 폭주한다
-           (100태그가 전부 심각이면 4,800건/일). 사용자가 직접 고른 값은 건드리지 않으므로,
-           옛 기본값과 정확히 같을 때만 바꾼다. */
+        /* 지속 재알림 옛 기본값(위험 1시간·심각 30분)은 끔으로 옮긴다 — 규모가 커지면 폭주한다.
+           옛 기본값과 정확히 같을 때만 바꾼다(사용자가 직접 고른 값은 유지). */
         var _rn = cfg.renotify;
         if (_rn && _rn['주의'] === '0' && _rn['위험'] === '1h' && _rn['심각'] === '30m') {
           cfg.renotify = { '주의': '0', '위험': '0', '심각': '0' };
@@ -474,8 +496,7 @@ export class App extends Component {
   // 5초 주기 라이브 갱신 — 통계 뷰(V$_STAT, 초경량) 기반 변동 감지:
   //  · 태그별 MAX_TIME이 전진했을 때만 해당 태그의 새 구간을 sec-롤업으로 갱신 (실시간·과거 벌크 유입 모두 감지)
   //  · 통계에 처음 보는 태그가 나타나면 자동 재적재 (테이블 변동 반영)
-  /* 타이머 두 개 — 판정과 카탈로그. 하나로 묶으면 태그 증감 확인(129ms/테이블)이
-     판정 주기마다 붙어 조회의 대부분을 차지한다(기존 구조가 그랬다). */
+  /* 타이머 두 개 — 판정과 카탈로그. 하나로 묶으면 태그 증감 확인이 판정 주기마다 붙어 조회의 대부분을 차지한다. */
   _startTimers() {
     var self = this;
     if (this._live) clearInterval(this._live);
@@ -485,7 +506,7 @@ export class App extends Component {
     this._cat = setInterval(function () { self._catalogTick(); }, CAT_TICK_MS);
   }
   /* 판정 틱 — RMS 구간만큼의 롤업 버킷을 테이블당 한 번에 받아 태그별로 나눠 담고 판정한다.
-     · 배치 조회(NAME IN)라 비용이 태그 수가 아니라 테이블 수에 비례한다(실측 128ms/테이블)
+     · 배치 조회(NAME IN)라 비용이 태그 수가 아니라 테이블 수에 비례한다
      · 태그 증감 확인(tagStats)은 여기서 하지 않는다 — _catalogTick이 따로 본다
      · 화면은 이 틱 끝에서 갱신한다. 별도 조회가 없으므로 갱신을 자주 해도 비용이 없다 */
   _tickLive() {
@@ -531,12 +552,9 @@ export class App extends Component {
       }
       self._refreshRunState(now);   // 정지·두절 표시용 — 판정과 별개로 서버 모드에서도 화면에 나와야 한다
       self._judgeLive().then(function (n) { if (n) self._loadEventsLive(); }); // 새 이벤트가 났을 때만 목록 갱신
-      /* 설정 화면은 이 틱으로 다시 그리지 않는다.
-         입력칸이 전부 제어 입력(value=상태)이라, 타이핑 도중 다시 그리면 preact가 옛 상태값을
-         DOM에 도로 써넣어 입력이 지워진다. onChange는 포커스가 빠질 때 발화하므로 그전에 글자가
-         날아가면 저장될 값 자체가 없다 — 임계값이 "저장이 안 된다"고 보인 원인이 이것이다.
-         판정·알림은 그대로 돈다(여기서 막는 것은 화면 갱신뿐이고, 설정 화면에는 이 틱으로
-         바뀌어야 할 내용이 없다). */
+      /* 설정 화면은 이 틱으로 다시 그리지 않는다 — 입력칸이 전부 제어 입력(value=상태)이라
+         타이핑 도중 다시 그리면 preact가 옛 상태값을 DOM에 도로 써넣어 입력이 지워진다.
+         판정·알림은 그대로 돈다(막는 것은 화면 갱신뿐). */
       if (self.state.tab !== 'settings') self.forceUpdate();
     }).catch(function () { self._ticking = false; });
   }
@@ -598,7 +616,7 @@ export class App extends Component {
       var lim = revived ? null : VC.baselineLimit(b);
       var bg = (lim != null && wide > lim) ? Math.max(1, zg) : 0;
       var bnow = (self._bandNow || {})[key];
-      var bj = (bnow && !revived) ? VC.bandJudge(bnow, self._bandBaselines(eq), false) : null;
+      var bj = (bnow && !revived) ? VC.bandJudge(bnow, self._bandBaselines(eq), false, self._softBands(eq)) : null;
       var wg = VC.worstGrade(zg, bg, bj && bj.on ? bj.gi : 0);
       /* 카드가 세 축을 한 줄로 보여주려면 각 축의 "값"이 필요하다 — 등급만으로는
          왜 그 등급인지 설명이 안 된다. 베이스라인은 한계 대비 배수, 대역은 최대 배수. */
@@ -864,6 +882,9 @@ export class App extends Component {
       return {
         tbl: eq.table, tag: eq.name, alias: eq.alias || eq.name, unit: eq.unit || '', // 알림 문구용
         fs: eq.fs || 0,                       // ISO 대역제한 판단·필터 설계에 필요
+        /* 마운팅 상한 초과 대역 — 서버는 bandEdges를 부를 수 없다(bandJudge가 자체 완결형이라
+           바깥 이름을 참조하면 첫 회차에서 죽는다). 앱이 계산해 값으로 구워 넣는다. */
+        soft: self._softBands(eq),
         // 확인 대기 중인 태그는 학습값을 굽지 않는다 — 서버도 같은 이유로 멈춰야 한다
         zones: eq.zones, bl: (b && !self._isRevived(eq.table + ':' + eq.name)) ? { mu: b.mu, sigma: b.sigma, k: b.k || 3 } : null,
         bb: self._isRevived(eq.table + ':' + eq.name) ? null : bb,
@@ -897,8 +918,8 @@ export class App extends Component {
       wd: this._wdSpec('mon'),   // 대역 추출이 멎으면 여기서 되살린다
     };
   }
-  /* 감시자와 감시 대상들이 서로를 보는 고리. 앱 자동 복구는 앱이 열려 있을 때만 돌아서,
-     닫아두면 오늘 아침처럼 방치된다. 별개 프로세스라 한쪽이 죽어도 다른 쪽이 남는다.
+  /* 감시자와 감시 대상들이 서로를 보는 고리. 앱 자동 복구는 앱이 열려 있을 때만 돌므로
+     서버 쪽에도 감시자가 필요하다. 별개 프로세스라 한쪽이 죽어도 다른 쪽이 남는다.
 
        NEO_VIBE_WD(5분)  → 감시·대역 추출을 본다
        감시(10초)·대역(10분) → 감시자를 본다
@@ -907,9 +928,16 @@ export class App extends Component {
      때문이다. 대역 추출은 원인 분석용이고, 감시가 살아있는지는 안전 기능이다.
      죽었다고 볼 기준은 상대의 주기에서 나온다 — 감시는 앱과 같은 규칙(주기의 6배), 대역 추출은
      한 회차가 길고 건너뛰는 회차도 있어 넉넉히 3배·최소 30분, 감시자는 하는 일이 적어 3배. */
+  /* 브라우저가 접속한 포트는 "힌트"일 뿐이다 — 우리가 필요한 건 서버가 자기 자신을 부르는
+     포트인데, 리버스 프록시가 끼면 둘이 다르다(:8080으로 보이지만 Neo는 5654). 브라우저는
+     그 뒤를 볼 수 없고 서버의 127.0.0.1을 찔러볼 수도 없다(mixed content·다른 호스트).
+     확인은 jsh 쪽에서 한다 — 거기선 127.0.0.1이 Neo 자신이다. 여기서는 힌트만 넘긴다. */
   _wdBase() {
-    var base = 'http://127.0.0.1:' + ((typeof location !== 'undefined' && location.port) || '5654');
-    return { base: base, authPath: '/work' + pkgBase() + '/cgi-bin/config/neo-auth.json' };
+    var port = String((typeof location !== 'undefined' && location.port) || '5654');
+    return { port: port, base: 'http://127.0.0.1:' + port,
+      authPath: '/work' + pkgBase() + '/cgi-bin/config/neo-auth.json',
+      // 확정된 포트를 남길 자리 — 언인스톨은 앱이 없는 시점에 돌아서 이 파일로만 알 수 있다
+      endpointPath: '/work' + pkgBase() + '/cgi-bin/config/neo-endpoint.json' };
   }
   _wdTarget(who) {
     var S = this.state;
@@ -944,7 +972,7 @@ export class App extends Component {
      지우기 전에 있는지 먼저 본다 — 없는 타이머를 지우면 Neo가 500을 돌려주고, 새 설치는
      이 경로를 10초마다 지나가므로 실패 요청이 화면을 덮는다(그걸 고장으로 읽는다).
      그리고 한 번 확인했으면 기억한다: 상태가 바뀌기 전에는 조회조차 하지 않는다.
-     상태를 못 읽었으면(연결 실패) 예전처럼 지워 본다 — 남아서 도는 것보다 낫다. */
+     상태를 못 읽었으면(연결 실패) 그냥 지워 본다 — 남아서 도는 것보다 낫다. */
   _dropTimer(sigKey, del, name) {
     if (this[sigKey] === SIG_NONE) return Promise.resolve();
     var self = this;
@@ -989,17 +1017,15 @@ export class App extends Component {
       return this._dropTimer('_specSig', deleteMonitorTimer, MON_TIMER)
         .then(function () { if (!silent) self._toast('감시할 태그가 없어 서버 감시를 만들지 않았습니다', 'warn'); });
     }
-    /* 서명에 생성된 TQL 자체를 넣는다 — 설정뿐 아니라 코드가 바뀌어도 다시 구워야 한다.
-       예전엔 설정값만 넣었는데("코드는 런타임에 안 변한다"는 전제였다), 그 전제는 배포하면 깨진다:
-       패키지를 업데이트해도 서명이 같아 옛 TQL이 계속 돌았다. 이벤트 표 스키마를 바꿨을 때
-       구워진 INSERT가 옛 컬럼을 그대로 써서 서버가 이벤트를 통째로 못 남긴 적이 있다. */
+    /* 서명에 생성된 TQL 자체를 넣는다 — 설정뿐 아니라 코드가 바뀌어도 다시 구워야 한다
+       (설정값만 서명하면 패키지 업데이트 후에도 옛 TQL이 계속 돈다). */
     var tql = Monitor.buildMonitorTql(spec);
     var sig = JSON.stringify(spec.tags) + '|' + JSON.stringify(spec.cfg) + '|' + sched + '|' + spec.bandWinMs + '|' + spec.winMs
       + '|' + srcSig(tql);
     if (silent && sig === this._specSig) return Promise.resolve(); // 변경 없음 — 굽지 않는다
-    /* 임베드 소스를 미리 실행해 본다. 타이머는 등록은 성공하고 첫 실행에서 죽으므로,
-       여기서 막지 않으면 감시가 멈춘 것을 아무도 모른다(실제로 하루 넘게 그랬다).
-       기존 타이머는 건드리지 않는다 — 망가진 것으로 갈아끼우느니 옛 것이 도는 편이 낫다. */
+    /* 임베드 소스를 미리 실행해 본다 — 타이머는 등록은 성공하고 첫 실행에서 죽으므로
+       여기서 막지 않으면 감시가 멈춘 것을 아무도 모른다.
+       검증 실패 시 기존 타이머는 건드리지 않는다 — 망가진 것으로 갈아끼우느니 옛 것이 도는 편이 낫다. */
     var bad = Monitor.validateSpec(spec);
     if (bad) {
       this._specSig = null;
@@ -1048,9 +1074,7 @@ export class App extends Component {
          존은 ISO 절대 기준이라 표준이 정의한 양(10~1000 Hz)을 써야 한다.
          베이스라인은 자기 학습값 대비라 전대역이 맞다 — 어느 주파수든 평소보다 커지면 잡히는
          가장 넓은 그물이고, 여기까지 대역제한을 걸면 1 kHz 위에서 자라는 결함을 놓친다.
-
-         예전에는 둘이 같은 값을 썼다. "존 양호인데 베이스라인 이탈"을 설명할 수 없다는 이유였는데,
-         분리하고 나면 그 조합 자체가 진단 정보가 된다 — 초과분이 1 kHz 위에 있다는 뜻이다. */
+         "존 양호인데 베이스라인 이탈" 조합은 그 자체가 진단 정보다 — 초과분이 1 kHz 위에 있다는 뜻. */
       var iso = self._isoValue(eq, wide);
       var prevG = (self._monState[key] || {}).g || 0;
       var val = iso.pending ? null : iso.v;                  // 존 판정값
@@ -1089,7 +1113,7 @@ export class App extends Component {
       if (sens.on) run = false;                              // 계측을 못 믿는 동안은 판정 동결
       // 대역 판정 — 추출 타이머가 적재한 최신 대역값 vs 대역별 베이스라인. 설비당 1건으로 합성된다.
       var bj = null, bnow = (self._bandNow || {})[key];
-      if (bnow && !revived && !sens.on) bj = VC.bandJudge(bnow, self._bandBaselines(eq), !!(prev && prev.bb));
+      if (bnow && !revived && !sens.on) bj = VC.bandJudge(bnow, self._bandBaselines(eq), !!(prev && prev.bb), self._softBands(eq));
       var r = judgeTick(prev, rg, breach, nowW, cfg, bj, run);
       // 계측 이상·복귀는 진동 이벤트와 별개 축이라 그대로 이어 붙인다
       sens.events.forEach(function (ev) { r.events.push(ev); });
@@ -1115,12 +1139,12 @@ export class App extends Component {
              무엇이 일어났는지는 "얼마나 안 들어왔나"뿐이라 그것을 DETAIL에 적는다(서버 판정기와 같은 문구). */
           /* 대역·베이스라인 이벤트에는 충격성 근거를 덧붙인다 — 같은 에너지 상승이라도
              임펄스인지 광대역 잡음인지에 따라 볼 곳이 다르다(베어링 vs 유동·부착). */
-          detail: ev.etype === 'band' ? [(bj ? bj.detail : ''), _impTxt].filter(Boolean).join(' · ')
+          detail: ev._detail = (ev.etype === 'band' ? [(bj ? bj.detail : ''), _impTxt].filter(Boolean).join(' · ')
             : ev.etype === 'baseline' ? _impTxt
             : isSens ? (ev.detail || '')
-            : ev.etype === 'signal_lost' ? durKo(nowW - eq.lastSeen) + ' 무수신' : '',
+            : ev.etype === 'signal_lost' ? durKo(nowW - eq.lastSeen) + ' 무수신' : ''),
         }).catch(function () {}));
-        self._notifyEvent(eq, ev, ev_val, ev_lim, nowW); // 라우팅에 걸리면 알림 발송
+        self._notifyEvent(eq, ev, ev_val, ev_lim, nowW); // 라우팅에 걸리면 알림 발송(_detail 포함 — 이벤트와 같은 사유)
       });
       /* 표시 등급 — 세 판정 중 가장 나쁜 것과 그 원인. 카드·KPI·필터가 이걸 쓴다.
          존만 쓰면 고주파가 지배하는 센서에서 베어링이 나빠져도 화면이 양호로 남는다. */
@@ -1403,13 +1427,20 @@ export class App extends Component {
     var self = this, S = this.state;
     var base = eq.table + ':' + eq.name;
     var H = BAND_WIN_H[S.bandWin] || 24;   // 대역 전용 기간 — RMS와 표본 밀도가 달라 따로 둔다
-    var to = Date.now(), from = to - H * 3600000;
+    /* 창의 끝은 벽시계가 아니라 그 태그의 마지막 데이터다(_learnBaseline과 같은 규칙).
+       적재가 끝난 테이블은 대역 앵커도 그 시점에 멈춰 있어, 벽시계로 잡으면 창이 통째로
+       데이터 뒤에 놓여 "값 없음"이 된다. */
+    var to = eq.lastSeen || Date.now(), from = to - H * 3600000;
     var k = parseFloat(S.blK) || 3;
     var grid = durMs(S.bandInterval); // 밀도 균일화 격자 = 의도된 추출 주기
     return Promise.all(VC.BAND_ORDER.map(function (bn) {
       var key = base + ':' + bn;
       return bandRaw(key, from, to).then(function (rows) {
         var raw = rows.filter(function (r) { return isFinite(r.v); });
+        /* 행이 하나도 없는 것과 0만 쌓인 것은 원인이 다르다 — 앞은 추출이 안 돌았거나 기간이
+           짧은 것이고, 뒤는 그 대역을 원리적으로 못 재는 것이다. 한 문구로 묶으면 대역 추출을
+           켠 적도 없는 태그에 "Nyquist보다 높습니다"라고 말하게 된다. */
+        if (!raw.length) return { bn: bn, err: '값 없음 — 대역 추출이 돌지 않았거나 학습 기간에 쌓인 값이 없습니다' };
         /* 추출 주기를 격자로 밀도를 고른다 — 주기 변경·타이머 중단으로 구간별 밀도가 달라지면
            촘촘한 구간이 표본을 지배해 그 구간이 곧 기준이 된다(그래서 학습이 조용히 오염된다). */
         var vals = VC.evenSample(raw, grid);
@@ -1419,7 +1450,10 @@ export class App extends Component {
            (예: 1× 30 Hz면 초고주파 하한이 990 Hz인데 302 Hz 샘플링은 151 Hz까지만 본다).
            그대로 배우면 μ=0·σ=0 → 한계 0이 되어 0보다 큰 값이 한 번만 나와도 이탈로 잡힌다. */
         var nz = ss.vals.filter(function (v) { return v > 0; });
-        if (!nz.length) return { bn: bn, err: '측정 범위 밖 — 대역 하한이 Nyquist보다 높습니다' };
+        // 값이 없는 이유가 계열마다 다르다 — 대역은 샘플레이트, 포락선은 설정이다
+        if (!nz.length) return { bn: bn, err: VC.BAND_FREQ.indexOf(bn) >= 0
+          ? '측정 범위 밖 — 대역 하한이 Nyquist보다 높습니다'
+          : '값 없음 — 베어링 품번 미지정이거나 복조 대역이 성립하지 않습니다' };
         var fit = VC.baselineFit(ss.vals);
         if (!fit) return { bn: bn, err: '표본 ' + ss.vals.length + '개(최소 ' + VC.BASELINE_MIN_N + ')' };
         var obj = { mu: +fit.mu.toFixed(5), sigma: +fit.sigma.toFixed(5), k: k, n: fit.n, band: bn, at: Date.now(),
@@ -1446,18 +1480,20 @@ export class App extends Component {
     this._bandNowBusy = true;
     this._bandNowAt = now;
     var eqs = this._activeEqs();
-    // 설비 × 대역 최신 1건씩 — 조회는 설비당 1회(대역 5종을 한 번에)
+    /* 설비 × 판정 계열 최신 1건씩 — 조회는 설비당 1회(계열 전부를 NAME IN 한 번에).
+       계열마다 따로 물으면 문장 수가 태그수 × 계열수라, 계열이 늘 때마다 그만큼 늘어난다. */
     Promise.all(eqs.map(function (eq) {
       var base = eq.table + ':' + eq.name;
-      return Promise.all(VC.BAND_ORDER.map(function (bn) {
-        return bandRaw(base + ':' + bn, now - iv * 3, now)
-          .then(function (rows) { return rows.length ? rows[rows.length - 1].v : null; })
-          .catch(function () { return null; });
-      })).then(function (vals) {
-        var o = null;
-        VC.BAND_ORDER.forEach(function (bn, i) { if (vals[i] != null) { o = o || {}; o[bn] = vals[i]; } });
-        return { key: base, bands: o };
-      });
+      var keys = VC.BAND_ORDER.map(function (bn) { return base + ':' + bn; });
+      return bandLatest(keys, now - iv * 3, now).catch(function () { return {}; })
+        .then(function (m) {
+          var o = null;
+          VC.BAND_ORDER.forEach(function (bn) {
+            var v = m[base + ':' + bn];
+            if (v != null) { o = o || {}; o[bn] = v; }
+          });
+          return { key: base, bands: o };
+        });
     })).then(function (res) {
       var m = {};
       res.forEach(function (r) { if (r.bands) m[r.key] = r.bands; });
@@ -1475,9 +1511,12 @@ export class App extends Component {
       unbusy();
       var nm = eq.alias || eq.name;
       if (r.ok === 0) {
-        // 실패 사유는 대역마다 같은 경우가 대부분(표본 부족) — 대표 하나만 보여준다
-        var why = (r.fail[0] && r.fail[0].err) || '사유 불명';
-        self._toast(nm + ' 대역 학습 불가 — ' + why, 'warn');
+        /* 사유가 대역마다 다를 수 있다 — 저속 샘플링 태그는 고주파 대역만 "측정 범위 밖"이고
+           나머지는 "값 없음"이다. 첫 번째를 대표로 쓰면 소수 사유가 전체를 대변해 엉뚱한 곳을
+           고치게 된다(실제로 값이 없는 태그에 Nyquist 이야기를 했다). 가장 많은 사유를 고른다. */
+        var cnt = {}, why = '사유 불명', top = 0;
+        r.fail.forEach(function (f) { var e2 = f.err || ''; cnt[e2] = (cnt[e2] || 0) + 1; if (cnt[e2] > top) { top = cnt[e2]; why = e2; } });
+        self._toast(nm + ' 대역 학습 불가 — ' + why + (r.fail.length > top ? ' (' + top + '/' + r.fail.length + ')' : ''), 'warn');
       } else {
         self._toast(nm + ' 대역 베이스라인 ' + r.ok + '/' + VC.BAND_ORDER.length + ' 학습 완료'
           + (r.fail.length ? ' · ' + r.fail.length + '개 대역 실패' : ''), r.fail.length ? 'warn' : 'ok');
@@ -1509,18 +1548,40 @@ export class App extends Component {
     });
     return out;
   }
+  /* 이 태그에서 값을 확정 근거로 쓸 수 없는 대역 — 가속도계 마운팅 유효 상한을 넘는 칸들.
+     fr은 _bandSpec과 같은 규칙으로 고른다: 대역 경계를 그 fr로 구워 적재했으므로,
+     여기서 다른 fr을 쓰면 판정이 실제 적재된 것과 다른 경계를 가정하게 된다.
+     마운팅은 저장본(eq.meta)보다 화면 상태를 먼저 본다 — 고른 즉시 판정에 반영되어야
+     설정 화면의 "그 위 대역은 제외됩니다" 안내와 실제 동작이 어긋나지 않는다. */
+  _softBands(eq) {
+    var det = (this._detailCache[eq.id] || {}).det;
+    var fr = (det && det.frMeas && det.frMeas.f > 0) ? det.frMeas.f : (eq.rpm / 60);
+    var mount = ((this.state.equipMeta || {})[eq.id] || {}).mount || (eq.meta || {}).mount;
+    return VC.softBands(fr, eq.fs, mount);
+  }
   /* 대역 추출 타이머 — 판정 타이머와 같은 서명 비교 방식. 태그가 늘거나 회전수 설정이 바뀌면
      다시 굽는다(대역 경계가 1× 상대라 RPM이 바뀌면 다른 주파수를 재게 된다).
      판정 타이머와 분리한 이유는 주기 차이다 — 판정 10초 / 대역 추출은 태그당 FFT라 10분. */
   /* 대역 추출 대상 — 대역 경계가 1× 상대라 회전주파수(RPM 또는 실측 1×)가 없으면 정의할 수 없다.
      조용히 거르면 "왜 6개 중 1개만 채워지나"를 알 수 없으므로 제외 사유를 함께 돌려준다. */
+  /* 이 태그의 베어링 형상 — 카탈로그 품번이면 표에서, 직접 입력이면 저장된 형상에서.
+     품번이 없거나 슬리브(구름체가 없다)면 결함주파수 자체가 정의되지 않는다. */
+  _bearingGeo(eq) {
+    var S = this.state, model = (S.equipBearing || {})[eq.id] || '';
+    if (!model || model === 'sleeve') return null;
+    return VC.BEARINGS[model] || Object.assign({}, eq.bearing, (S.equipGeo || {})[eq.id] || {});
+  }
   _bandSpec() {
     var self = this;
     var all = this._activeEqs().map(function (eq) {
       var det = (self._detailCache[eq.id] || {}).det;
       // 실측 1×가 있으면 그걸 쓴다 — 명판과 다르면 대역이 통째로 어긋난다
       var fr = (det && det.frMeas && det.frMeas.f > 0) ? det.frMeas.f : (eq.rpm / 60);
+      var mount = ((self.state.equipMeta || {})[eq.id] || {}).mount || (eq.meta || {}).mount;
       return { tbl: eq.table, tag: eq.name, fr: Math.round(fr * 100) / 100, fs: eq.fs,
+        /* 복조 대역은 설정에서만 정해지는 값이라 앵커마다 같다 — 추세가 성립하려면 고정이어야 한다.
+           결함주파수는 굽지 않고 계수만 굽는다: 서버가 앵커마다 fr을 실측하므로 그때 곱해야 따라간다. */
+        demod: VC.demodBand(eq.fs, mount), bf: VC.faultCoeffs(self._bearingGeo(eq)),
         stat: eq.stat || null, label: self._tagLabel(eq) };
     });
     var skipped = all.filter(function (t) { return !(t.fs > 0 && t.fr > 0); })
@@ -1540,22 +1601,27 @@ export class App extends Component {
     var H = BAND_WIN_H[ov.bandWin || S.bandWin] || 24;   // 채울 구간도 대역 학습 기간에 맞춘다
     var span = H * 3600000;
     var perTag = Math.floor(span / iv);
-    /* 태그마다 실제 데이터가 있는 구간만 센다 — 원본이 없는 시각은 band.js가 조용히 건너뛰므로
-       그대로 두면 "완료 0개"가 되고 그 이유를 알 수 없다(BEARING처럼 옛 데이터만 있는 경우). */
-    var now = Date.now(), per = {};
-    var total = 0;
+    /* 창의 끝을 태그의 마지막 데이터에 맞춘다 — 벽시계로 잡으면 적재가 끝난 테이블에서
+       창이 통째로 데이터 뒤에 놓여 아무것도 못 센다.
+       원본이 없는 시각은 band.js가 조용히 건너뛰므로 그대로 두면 "완료 0개"가 되고 이유를 알 수 없다.
+       RMS 학습(_learnBaseline)이 이미 eq.lastSeen을 쓰는 규칙이라 여기서도 같게 맞춘다.
+       라이브 테이블은 lastSeen ≈ 지금이라 동작이 그대로다. */
+    var now = Date.now(), per = {}, ends = {}, froms = {};
+    var total = 0, oldest = now;
     spec.tags.forEach(function (t) {
       var mx = t.stat && t.stat.maxMs, mn = t.stat && t.stat.minMs;
-      var n2 = perTag;
-      if (mx > 0 && mn > 0) {
-        var from = Math.max(now - span, mn);
-        n2 = Math.max(0, Math.floor((Math.min(now, mx) - from) / iv));
-      }
-      per[t.tbl + ':' + t.tag] = n2;
+      var end = (mx > 0) ? Math.min(now, mx) : now;
+      var from = (mn > 0) ? Math.max(end - span, mn) : end - span;
+      var n2 = (mx > 0 && mn > 0) ? Math.max(0, Math.floor((end - from) / iv)) : perTag;
+      var k = t.tbl + ':' + t.tag;
+      per[k] = n2; ends[k] = end; froms[k] = from;
+      if (from < oldest) oldest = from;
       total += n2;
     });
     return { tags: spec.tags, skipped: spec.skipped, tagTotal: spec.total, iv: iv, span: span,
-      perTag: perTag, per: per, total: total, etaMs: total * BAND_PER_MS, minN: VC.BASELINE_MIN_N };
+      // 태그마다 창이 다르다 — 조회는 가장 이른 시작으로 한 번에 하고, 세는 것은 태그별 창에서 한다
+      per: per, ends: ends, froms: froms, oldest: oldest,
+      perTag: perTag, total: total, etaMs: total * BAND_PER_MS, minN: VC.BASELINE_MIN_N };
   }
   /* 채움 현황 — 태그별로 학습 창 안에 어느 격자 칸이 이미 채워져 있는지.
      TAG 테이블은 같은 NAME+TIME 중복 삽입을 막지 않으므로, 이걸 모르면 다시 채울 때마다
@@ -1564,17 +1630,20 @@ export class App extends Component {
   _refreshBandCov(ov) {
     var self = this, plan = this._bandPlan(ov);
     if (!this.live || !plan.tags.length) { this.setState({ bandCov: null }); return Promise.resolve(); }
-    var now = Date.now(), probe = VC.BAND_ORDER[0];
+    var now = Date.now(), probe = VC.BAND_FREQ[0];
     var keys = plan.tags.map(function (t) { return t.tbl + ':' + t.tag + ':' + probe; });
-    return bandTimes(keys, now - plan.span, now).then(function (m) {
+    // 조회는 가장 이른 창 시작부터 한 번에 — 태그마다 창이 달라(적재가 끝난 시점이 다르다) 세는 것만 나눈다
+    return bandTimes(keys, plan.oldest, now).then(function (m) {
       var cov = {};
       plan.tags.forEach(function (t) {
         var key = t.tbl + ':' + t.tag, set = {}, n = 0;
+        var lo = plan.froms[key], hi = plan.ends[key];
         (m[key + ':' + probe] || []).forEach(function (ms) {
+          if (ms < lo || ms > hi) return;   // 다른 태그의 창에 걸친 값은 이 태그의 채움이 아니다
           var b = Math.floor(ms / plan.iv);
           if (!set[b]) { set[b] = 1; n++; }
         });
-        cov[key] = { set: set, have: n, need: plan.perTag };
+        cov[key] = { set: set, have: n, need: plan.per[key] };
       });
       self.setState({ bandCov: cov });
       return cov;
@@ -1596,8 +1665,11 @@ export class App extends Component {
       var jobs = [], total = 0;
       // 태그별 앵커 목록(최신 → 과거). 격자에 스냅해 타이머가 찍을 시각과 같은 위치에 놓는다.
       plan.tags.forEach(function (t) {
-        var had = ((cov || {})[t.tbl + ':' + t.tag] || {}).set || {};
-        var anchors = VC.bandAnchors(now, plan.iv, plan.per[t.tbl + ':' + t.tag] || 0, had);
+        var k = t.tbl + ':' + t.tag;
+        var had = ((cov || {})[k] || {}).set || {};
+        /* 앵커의 기준 시각은 벽시계가 아니라 그 태그의 마지막 데이터다 — 적재가 끝난 테이블에서
+           벽시계로 잡으면 원본이 없는 구간을 채우려 들고, band.js가 전부 건너뛰어 0개로 끝난다. */
+        var anchors = VC.bandAnchors(plan.ends[k] || now, plan.iv, plan.per[k] || 0, had);
         if (anchors.length) { jobs.push({ t: t, anchors: anchors }); total += anchors.length; }
       });
       if (!total) { self._toast('이미 다 채워져 있습니다 — 새로 계산할 구간이 없습니다', 'ok'); return; }
@@ -2372,6 +2444,36 @@ export class App extends Component {
         + (det.kgCapped ? ' · 그 위 대역은 탐색에서 제외' : ' · 샘플링 상 제외된 대역 없음')
         + (det.kurtogram && det.kurtogram.best ? ' · 선택 대역 ' + (det.kurtogram.best.loHz / 1000).toFixed(1) + '–' + (det.kurtogram.best.hiHz / 1000).toFixed(1) + ' kHz' : ''));
     }
+    /* 대역 베이스라인 이탈 — 감시가 이미 아는 관측이다. 여기까지 오지 않으면 리포트는
+       "상한 위는 탐색에서 뺐다"고만 말하고 그 자리에서 무엇이 올랐는지는 말하지 못한다.
+       위의 대역 분배는 ISO 방법(10–1000 Hz)이라 상한 위 대역이 표에 아예 없다 —
+       빼놓고 침묵하면 정비팀은 센서 부착 불량도 베어링 초기 결함도 알 수 없다. */
+    var bnow = (this._bandNow || {})[eq.table + ':' + eq.name], bbls = this._bandBaselines(eq);
+    var softM = {};
+    this._softBands(eq).forEach(function (k) { softM[k] = 1; });
+    var bandDev = null;
+    if (bnow && bbls) {
+      bandDev = [];
+      VC.BAND_ORDER.forEach(function (bn) {
+        var v = bnow[bn], b = bbls[bn], lim = b ? VC.baselineLimit(b) : 0;
+        if (!(v > 0) || !(lim > 0)) return;   // 학습 없음·측정 불가 대역은 비교 자체가 성립하지 않는다
+        bandDev.push({ k: bn, ko: VC.BAND_KO[bn] || bn, v: v, lim: lim, r: v / lim, soft: !!softM[bn] });
+      });
+    }
+    if (bandDev && bandDev.length) {
+      var _dOver = bandDev.filter(function (d) { return d.r > 1; });
+      B.push('■ 대역 베이스라인 이탈(학습된 한계 대비 비율 · 알람과 같은 값): '
+        + (_dOver.length
+          ? _dOver.map(function (d) { return d.ko + ' ×' + d.r.toFixed(2) + (d.soft ? '⚠상한 초과 — 잠정' : ''); }).join(' · ')
+            + ' · 나머지 ' + (bandDev.length - _dOver.length) + '개 대역 정상'
+          : '전 ' + bandDev.length + '개 대역 정상(최대 ×'
+            + bandDev.reduce(function (a, d) { return Math.max(a, d.r); }, 0).toFixed(2) + ')')
+        + (_dOver.some(function (d) { return d.soft; })
+          ? ' — 잠정 대역은 결함 대역 탐색에서 제외된 구간이다. 상승은 사실이나 설비 진동인지 센서 부착부 공진인지 구분할 수 없으므로, 결함으로 단정하지 말고 센서 부착 상태 확인을 먼저 권고할 것'
+          : ''));
+    } else {
+      B.push('■ 대역 베이스라인 이탈: 비교 불가(' + (!bnow ? '대역 추출 미사용 또는 적재값 없음' : '대역 베이스라인 미학습') + ') — 대역별 변화는 이 리포트의 근거가 아니다');
+    }
     // 음성 소견(R4) — "찾았으나 없었다"는 보고할 결과다
     var negatives = [];
     if (bm.known && !bm.hit) negatives.push('베어링 결함주파수 ' + bm.negatives.join('/') + ' 미검출' + (bm.weak ? '(' + bm.weak.key + ' 근접하나 하모닉 ' + bm.weak.harm + '개로 부족)' : ''));
@@ -2392,6 +2494,8 @@ export class App extends Component {
     var unmeasurable = conf.filter(function (c) { return c.na; }).map(function (c) { return c.f; });
     return { block: B.join('\n'), confLines: confLines.join('\n'), conf: conf, top: conf[0], impulsive: impulsive,
       hasBearing: !!bf, domSync: domSync, gate: gate, frMeas: frM,
+      // bandDev는 프롬프트뿐 아니라 HTML까지 간다 — 프롬프트에만 넣으면 정비팀이 받는 문서에는 없다
+      bandDev: bandDev, mountFmax: det.mountFmax || 0, mount: det.mount || '',
       negatives: negatives, unmeasurable: unmeasurable, unexplained: unexplained, missing: missing, acq: acq };
   }
   // 첨도 포화 판정(첨도 추이+RMS 추이) — 화면 경고·LLM 소견·리포트 공용
@@ -2476,7 +2580,10 @@ export class App extends Component {
       + '7) unexplained[] 성분을 목록에서 빼지 않는다. "미설명"으로 남기고, 무엇이 있으면 닫히는지(구동 계통도 등)를 적는다.\n'
       + '8) window.minutes를 넘는 시간 스케일을 주장하지 않는다. 창이 60분 미만이면 "말기", "열화 진행", "수개월 내" 같은 표현을 쓰지 않고 "관측 창이 짧아 추세 판단 불가"로 쓴다.\n'
       + '9) 등급을 부풀리지 않는다. 평균이 양호한데 순간값으로 "위험"이라 쓰지 않는다. 조치는 등급에 맞춘다 — "즉시 정지"로 단정하지 말고(정지는 설비 중요도·추가 증상 고려), 위험 등급은 "조기·우선순위 높은 점검", 심각 등급은 "긴급 점검 · 중요도에 따라 정지 여부 검토"로 쓴다.\n'
-      + '10) missing_metadata[]가 있으면 [권장 조치]에 "이 항목을 채우면 무엇이 닫히는지"를 한 줄로 적는다.\n\n'
+      + '10) missing_metadata[]가 있으면 [권장 조치]에 "이 항목을 채우면 무엇이 닫히는지"를 한 줄로 적는다.\n'
+      + '11) "대역 베이스라인 이탈"에 ⚠상한 초과(잠정) 표시가 있으면, 그 대역의 상승을 결함 근거로 단정하지 않는다. '
+        + '상승 사실은 반드시 인쇄하되(빼면 센서 부착 불량도 초기 결함도 보고되지 않는다) "설비 진동인지 센서 부착부 공진인지 구분 불가"로 쓰고, '
+        + '[권장 조치] 첫 줄을 "센서 부착 상태 확인"으로 둔다.\n\n'
       + '[출력 형식]\n'
       + '다음 6개 섹션을 순서대로, 각각 "## 소제목" 한 줄로 시작해 작성하세요:\n'
       + '## 진동 상태 요약\n## 시간영역 지표 해석\n## 주파수 분석\n## 결함 메커니즘 추정\n## 추세 및 예후\n## 권장 조치\n'
@@ -2601,10 +2708,24 @@ export class App extends Component {
     var band = bandC;
     // 꺼둔 계열은 그리지도 않는다 — 축 범위도 남은 계열 기준으로 다시 잡혀야 작은 대역이 보인다
     var _hide = this.state.bandHide || {};
-    if (tr && tr.bands && tr.bands.length) this._lastBandSeries = tr.bands.map(function (x) { return { label: x.label, color: x.color }; });
+    if (tr && tr.bands && tr.bands.length) this._lastBandSeries = tr.bands.map(function (x) { return { key: x.key, label: x.label, color: x.color }; });
     if (band && tr && tr.bands && tr.bands.length && tr.bands[0].vals.length) {
-      var bS = tr.bands.filter(function (s) { return !_hide[s.label]; }).map(function (s) { return { label: s.label, color: s.color, vals: s.vals }; });
-      var db = function (s, e) { var w = kWin(s, e); E.drawMultiLine(band, { series: bS.map(function (sr) { return { label: sr.label, color: sr.color, vals: sr.vals.slice(s, e) }; }), times: kTs.slice(s, e), xFrom: w.xFrom, xTo: w.xTo, xLabels: kxl.slice(s, e), height: 220 }, CC); };
+      /* 배수 축 — 각 계열을 자기 베이스라인 한계로 나눈다. 원값은 계열 간 크기가 네 자릿수까지
+         벌어져(저주파 0.0016 vs 고주파 0.42) 작은 대역이 바닥에 붙는다. 나누면 전부 무차원이라
+         한 축에서 비교되고, ×1 기준선이 곧 판정선이라 "알람은 났는데 차트엔 안 보인다"가 사라진다.
+         물리량을 대역마다 다르게 주는 대신 이 길을 택한 이유: 단위를 나누면 축을 공유할 수 없어
+         비교가 오히려 더 안 되고, 뭉쳐진 스칼라를 사후 변환하면 대역 중심주파수 가정이 들어간다. */
+      var _bl = this._bandBaselines(eq) || {};
+      var _norm = !!this.state.bandNorm;
+      var bS = tr.bands.filter(function (s) { return !_hide[s.label]; }).map(function (s) {
+        if (!_norm) return { label: s.label, color: s.color, vals: s.vals };
+        var lim = s.key ? VC.baselineLimit(_bl[s.key]) : 0;
+        // 학습이 없는 계열은 나눌 기준이 없다 — 1로 눌러 그리면 "정상"으로 읽히므로 아예 뺀다
+        if (!(lim > 0)) return null;
+        return { label: s.label, color: s.color, vals: s.vals.map(function (v) { return v == null ? null : v / lim; }) };
+      }).filter(Boolean);
+      var refs = _norm ? [{ val: 1, color: '#e07b39', label: '알람 기준' }] : null;
+      var db = function (s, e) { var w = kWin(s, e); E.drawMultiLine(band, { series: bS.map(function (sr) { return { label: sr.label, color: sr.color, vals: sr.vals.slice(s, e) }; }), times: kTs.slice(s, e), xFrom: w.xFrom, xTo: w.xTo, xLabels: kxl.slice(s, e), height: 220, refLines: refs }, CC); };
       E.zoomDraw(band, kxl.length, db, zk);
     }
   }
@@ -2704,9 +2825,8 @@ export class App extends Component {
     (tables || []).forEach(function (tb) {
       if (self._tagCache[tb] && !force) return;
       if (!self._tagCache[tb]) self._tagCache[tb] = [];
-      /* 테이블의 태그를 전부 받는다 — 예전엔 상한을 안 넘겨 db 기본값 20으로 잘렸다.
-         이 목록은 감시 대상이 아니라 "이 테이블에 무엇이 있는가"를 보여주는 자리다.
-         감시 상한에 맞춰 자르면, 사용자는 테이블에 태그가 그것뿐인 줄 알게 된다. */
+      /* 테이블의 태그를 전부 받는다(상한을 크게 넘긴다) — 이 목록은 감시 대상이 아니라
+         "이 테이블에 무엇이 있는가"를 보여주는 자리라 감시 상한으로 자르면 안 된다. */
       listTags(tb, 100000).then(function (tags) { self._tagCache[tb] = tags; self.forceUpdate(); }).catch(function () {});
     });
   }
@@ -2724,9 +2844,9 @@ export class App extends Component {
   /* ── ISO 존 판정값 ────────────────────────────────────────────────────────
 
      ISO 존 경계는 10~1000 Hz 속도 RMS 기준이라, 전대역 값을 대면 다른 양을 재게 된다
-     (BEARING:C1 실측: 에너지 82%가 1 kHz 위 → 전대역이 49% 부풀어 주의가 위험으로 뒤집힘).
+     (고주파 에너지가 많은 센서에서 등급이 뒤집힌다).
 
-     그렇다고 매 판정마다 원본을 받아 필터를 돌리면 태그당 0.21초가 든다. 대신 상한 성질을 쓴다:
+     그렇다고 매 판정마다 원본을 받아 필터를 돌리면 비싸다. 대신 상한 성질을 쓴다:
      에너지는 더해지기만 하므로 항상 ISO ≤ 전대역이다. 단 비교하는 창을 맞춰야 한다 —
      ISO는 최근 1초에서 재고 판정값은 평가창 전체(기본 10초)의 실효값이라, 평가창 값을
      경계에 대면 조용한 9초 뒤 마지막 1초만 튄 경우를 양호로 확정해 버린다.
@@ -3000,9 +3120,41 @@ export class App extends Component {
     var self = this;
     if (!this.live) return Promise.resolve();
     this.setState({ usageBusy: true });
-    return usageStats()
-      .then(function (u) { self.setState({ usage: u, usageBusy: false }); })
+    // 태그별 보유량은 총계와 함께 읽는다 — 화면이 "감시 대상 밖 N건"을 표에 바로 적어야 한다
+    return Promise.all([usageStats(), tagUsage().catch(function () { return null; })])
+      .then(function (r) { self.setState({ usage: r[0], tagUsage: r[1], usageBusy: false }); })
       .catch(function (e) { self.setState({ usageBusy: false }); self._toast('현황 조회 실패: ' + (e.message || e), 'err'); });
+  }
+  /* 감시 대상 밖 태그의 데이터를 지운다 — 대역 계열 전부 + 이벤트 + 판정 상태.
+     삭제 순서는 데이터 먼저, 태그 이름(메타)은 그 뒤다. 메타 정리는 "데이터가 하나도 안 남은
+     이름"만 지우므로 순서가 바뀌면 아무것도 안 지워지고 철거한 설비가 목록에 계속 남는다
+     (db.deleteBandOfTag·deleteEventsOfTag가 그 순서를 갖고 있다).
+     학습값은 여기서 건드리지 않는다 — 태그당 몇 행이라 늘지 않고, 같은 이름이 돌아오면
+     되살아남 확인이 오용을 막는다. */
+  _purgeOrphan(rows) {
+    var self = this;
+    if (!rows || !rows.length) return Promise.resolve();
+    var one = rows.length === 1;
+    this.setState({ orphanBusy: one ? rows[0].key : 'all' });
+    return rows.reduce(function (p, r) {
+      var parts = r.key.split(':'), tbl = parts[0], tag = parts[1];
+      return p.then(function () {
+        return Promise.all([
+          r.band ? deleteBandOfTag(tbl, tag).catch(function () {}) : null,
+          r.events ? deleteEventsOfTag(tbl, tag).catch(function () {}) : null,
+          deleteMonState(r.key).catch(function () {}),
+        ]);
+      });
+    }, Promise.resolve()).then(function () {
+      // 화면이 보는 판정 상태 캐시도 같이 비운다 — 안 비우면 지운 태그가 '감시 대상 밖'으로 계속 세진다
+      rows.forEach(function (r) { if (self._monState) delete self._monState[r.key]; });
+      self._toast(one ? rows[0].key + ' 데이터를 지웠습니다' : rows.length + '개 태그의 데이터를 지웠습니다', 'ok');
+      self.setState({ orphanBusy: null });
+      return self._refreshUsage();
+    }).catch(function (e) {
+      self.setState({ orphanBusy: null });
+      self._toast('정리 실패: ' + (e.message || e), 'err');
+    });
   }
   /* 삭제 확인 — 고른 조건으로 실제 건수를 먼저 센 뒤에 대화상자를 연다.
      세기 전에 열면 사용자가 "얼마나 지워지는지 모른 채" 확인을 누르게 된다. */
@@ -3022,8 +3174,8 @@ export class App extends Component {
   /* 확인받은 삭제를 실행한다. 되돌릴 수 없으므로 여기까지 오는 길은 하나뿐이다 —
      날짜 고르기 → 실제 건수 세기 → 확인. 실행 뒤에는 현황을 다시 읽어 화면 숫자를 맞춘다.
 
-     TAG 표는 삭제 직후 NAME 인덱스 반영에 약간 시차가 있어(실측 ~1초) 바로 다시 세면
-     옛 숫자가 나온다. 잠깐 기다렸다 갱신한다 — 사용자에겐 "지웠는데 그대로"로 보이기 때문이다. */
+     TAG 표는 삭제 직후 NAME 인덱스 반영에 약간 시차가 있어 바로 다시 세면 옛 숫자가 나온다.
+     잠깐 기다렸다 갱신한다 — 사용자에겐 "지웠는데 그대로"로 보이기 때문이다. */
   _runPurge() {
     var self = this, p = this.state.purge;
     if (!p || p.counting || !p.n) return Promise.resolve();
@@ -3077,18 +3229,33 @@ export class App extends Component {
     };
     var msOrphan = orphan(this._monState);
     var openPick = function (kind) { self.setState({ purgePick: kind, purgeFrom: null, purgeTo: null }); };
+    /* 감시 대상 밖 태그의 보유량 — 설비를 철거했거나 센서를 뗐는데 이력만 남은 경우다.
+       기간 삭제로는 못 지운다(멀쩡한 다른 태그까지 같이 지워진다). 총계만 보여주면 정리할
+       대상을 고를 수가 없어서 태그별로 센다. */
+    var tu = S.tagUsage || null;
+    var orphanRows = tu ? Object.keys(tu).filter(function (k) { return !live[k]; }).map(function (k) {
+      return { key: k, band: tu[k].band || 0, events: tu[k].events || 0 };
+    }).filter(function (r) { return r.band || r.events; })
+      .sort(function (a, b) { return (b.band + b.events) - (a.band + a.events); }) : [];
+    var orphanTot = orphanRows.reduce(function (a, r) { return { band: a.band + r.band, events: a.events + r.events }; }, { band: 0, events: 0 });
+    base.orphanCount = orphanRows.length;
+    var openOrphan = function () { self.setState({ orphanOpen: true, orphanBusy: null }); };
     base.dataRows = u ? [
       {
         id: 'events', name: '이벤트 이력', table: 'NEO_VIBE_EVENTS', kind: 'TAG',
-        stat: this._num(u.events.rows || 0) + '건 · ' + span(u.events.span),
+        stat: this._num(u.events.rows || 0) + '건 · ' + span(u.events.span)
+          + (orphanTot.events ? ' · 감시 대상 밖 ' + this._num(orphanTot.events) + '건' : ''),
         note: '알람 이력입니다. 지우면 그 기간을 다룬 리포트를 다시 만들 수 없습니다. 설비를 철거했다면 그 태그의 이력만 따로 지울 수 있습니다.',
-        act: { label: '기간 삭제…', danger: true, sub: '태그 단위 삭제도 가능', onClick: function () { openPick('events'); } },
+        act: { label: '기간 삭제…', danger: true, sub: '기간 안 모든 태그', onClick: function () { openPick('events'); } },
+        act2: orphanRows.length ? { label: '태그별 정리…', onClick: openOrphan } : null,
       },
       {
         id: 'band', name: '대역 에너지 추이', table: 'NEO_VIBE_BAND', kind: 'TAG',
-        stat: this._num(u.band.rows || 0) + '행 · ' + span(u.band.span),
+        stat: this._num(u.band.rows || 0) + '행 · ' + span(u.band.span)
+          + (orphanTot.band ? ' · 감시 대상 밖 ' + this._num(orphanTot.band) + '행' : ''),
         note: '대역 이탈 판정과 추세 차트가 쓰는 데이터입니다. 넷 중 유일하게 시간에 비례해 커집니다 — 학습에 쓰인 구간을 지우면 대역 베이스라인을 다시 학습해야 합니다.',
         act: { label: '기간 삭제…', danger: true, sub: '학습 구간 포함 주의', onClick: function () { openPick('band'); } },
+        act2: orphanRows.length ? { label: '태그별 정리…', onClick: openOrphan } : null,
       },
       {
         id: 'monstate', name: '판정 상태', table: 'NEO_VIBE_MONSTATE', kind: 'LOOKUP',
@@ -3108,6 +3275,26 @@ export class App extends Component {
       ? '학습값(NEO_VIBE_BASELINE · ' + this._num(u.baseline.rows || 0) + '행)은 재학습이 같은 자리를 덮어써 늘지 않습니다 — 정리 대상이 아니라 판정 기준에서 관리합니다.'
       : '';
     base.onGoCriteria = function () { self.setState({ setSection: 'criteria' }); self._refreshBandCov(); };
+    /* 태그별 정리 — 기간 삭제로는 못 하는 일이다. 설비 하나를 철거했는데 그 이력만 지우려면
+       기간으로는 멀쩡한 다른 태그까지 같이 지워진다.
+       확인 절차를 기간 삭제만큼 무겁게 두지 않는 이유: 대상이 이미 감시 목록 밖이라 판정에
+       쓰이지 않고, 무엇이 몇 건 지워지는지가 목록에 그대로 적혀 있다. */
+    base.orphanOpen = !!S.orphanOpen;
+    base.orphanBusy = S.orphanBusy || null;
+    base.orphanRows = orphanRows.map(function (r) {
+      var parts = r.key.split(':');
+      return {
+        key: r.key, table: parts[0], tag: parts[1],
+        stat: [r.band ? self._num(r.band) + '행' : '', r.events ? self._num(r.events) + '건' : ''].filter(Boolean).join(' · '),
+        busy: S.orphanBusy === r.key,
+        onDelete: function () { self._purgeOrphan([r]); },
+      };
+    });
+    base.orphanTotalText = orphanRows.length
+      ? orphanRows.length + '개 태그 · 대역 ' + this._num(orphanTot.band) + '행 · 이벤트 ' + this._num(orphanTot.events) + '건'
+      : '';
+    base.onOrphanClose = function () { self.setState({ orphanOpen: false }); };
+    base.onOrphanAll = function () { self._purgeOrphan(orphanRows); };
     /* 기간 고르기 — 기본은 보관 중인 전체 구간(min~max)이다. 사용자는 여기서 좁힌다.
        "전체가 기본"이 위험해 보이지만, 실행 직전에 표 이름을 직접 입력해야 하고 그 화면이
        삭제 건수와 '삭제 후 남는 데이터 0건'을 크게 보여준다 — 모르고 지나갈 수 있는 구조가 아니다.
@@ -3357,6 +3544,12 @@ export class App extends Component {
       kurtWarn: rptSat && rptSat.flag ? rptSat.msg : null,
       levels: det.levels, isoUnit: eq.unit, isoZoneBC: E.fmt(eq.zones[1]),
       evidence: ev.conf, negatives: ev.negatives, unexplained: ev.unexplained, missing: ev.missing, acq: ev.acq,
+      /* 대역 이탈은 감시가 아는 관측이라 리포트 본문까지 실어야 한다 — 위 대역 분배는 ISO 방법이라
+         1 kHz까지이고, 마운팅 상한 위 대역은 결함 대역 탐색에서도 빠져 어디에도 안 남는다. */
+      bandDev: (ev.bandDev && ev.bandDev.length)
+        ? { rows: ev.bandDev.map(function (d) { return { ko: d.ko, v: E.fmt(d.v), lim: E.fmt(d.lim), r: d.r.toFixed(2), over: d.r > 1, soft: d.soft }; }),
+          mount: ev.mount, fmaxKHz: ev.mountFmax > 0 ? (ev.mountFmax / 1000).toFixed(1) : '' }
+        : null,
       // 요약 모드(30초 판독용) — 게이트 상태에 따라 첫 줄이 바뀐다. 측정 불가·음성 소견·미설명은
       // 게이트와 무관하게 항상 인쇄한다(계측 구성·메타데이터가 만든 것이라 센서를 다시 붙여도 남는다).
       summary: (function () {
@@ -3436,8 +3629,7 @@ export class App extends Component {
       exHighZoneKo: det.velExHigh != null ? E.STATUS[VC.gradeFor(det.velExHigh, eq.zones)].ko : '',
       parsevalOk: !det.parseval || det.parseval.ok !== false, parsevalErr: det.parseval ? (det.parseval.relErr * 100).toFixed(1) : '',
       /* 감시 블록 — 리포트에 "지금 감시가 뭐라고 보고 있나"를 싣는다.
-         예전엔 최신 1초 광대역 RMS였고 리포트도 "규격 판정 아님"이라고 못박아 뒀는데, 이제 감시도
-         ISO 대역제한 구간 RMS를 쓴다. 값과 설명이 어긋나지 않게 실제 판정값·근거를 그대로 넘긴다. */
+         감시도 ISO 대역제한 구간 RMS를 쓰므로, 값과 설명이 어긋나지 않게 실제 판정값·근거를 그대로 넘긴다. */
       mon: (function () {
         var gs = (self._gradeState || {})[eq.table + ':' + eq.name] || {};
         var gi = self._severityOf(eq);
@@ -3557,7 +3749,7 @@ export class App extends Component {
       self._persistCfg(); // setState 반영 후 저장
       if (self.state.monitorOn) self._judgeLive(true).then(function () { self._loadEventsLive(); }); // 켜는 즉시 1회 판정
     }, 0);
-    this._toast(on ? '알람이 켜졌습니다' : '알람이 꺼졌습니다 — 임계 초과 시에도 통지가 발송되지 않습니다', on ? 'ok' : 'warn');
+    this._toast(on ? '알람이 켜졌습니다' : '알람이 꺼졌습니다 — 임계를 넘어도 알림이 발송되지 않습니다', on ? 'ok' : 'warn');
   }
   _navTo(id) {
     if (this.state.tab === 'settings' && this.state.dirty && id !== 'settings') { this.setState({ pendingNav: id }); return; }
@@ -3593,6 +3785,8 @@ export class App extends Component {
     var msg = Notify.eventMessage({
       alias: eq.alias || eq.name, tag: eq.name, table: eq.table,
       typeKo: TYPEKO[ev.etype] || ev.etype, gradeKo: gradeKo,
+      // etype·detail — 값 줄이 유형마다 다르다(계측 이상은 사유만, 대역은 비율만). 없으면 옛 틀로 찍힌다.
+      etype: ev.etype, detail: ev._detail || ev.detail || '',
       val: val, lim: lim, unit: eq.unit, timeText: this.E.fmtDT(nowMs || Date.now()),
     });
     runTql(Notify.buildWebhookTql(to, Notify.payloadFor(msg, to))).catch(function () {});
@@ -3664,7 +3858,15 @@ export class App extends Component {
     base.indicsDesc = this.live ? '원시 파형 구간에서 직접 산출한 충격·에너지 특성 지표' : '스펙트럼에서 직접 산출된 충격·에너지 특성 지표';
     if (!S.ready || !this.data) return base;
     this.data.equipment.forEach(function (e) { e.cls = S.equipCls[e.id] || e.baseCls || e.cls; e.zones = self._effZones(e); e.grade = VC.gradeFor(e.rms, e.zones); });
-    var eqs = this._activeEqs(), counts = [0, 0, 0, 0];
+    var eqsAll = this._activeEqs(), counts = [0, 0, 0, 0];
+    /* 테이블 필터 — 모니터링 화면에서만 모집단을 좁힌다(판정 대상은 그대로다).
+
+       등급 필터와 성격이 다르다. 등급은 KPI가 세어 둔 것 중 하나를 집는 것이라 KPI 숫자는
+       그대로여야 하고, 테이블은 모집단 자체를 줄이는 것이라 KPI도 같이 줄어야 한다 —
+       안 그러면 "심각 2"라고 떠 있는데 목록이 비어 그 숫자를 못 믿게 된다.
+       설정에서 소스를 뺀 테이블이 필터에 남아 있으면 무시한다(선택은 저장되지 않는다). */
+    var _hide = (S.tblHide || []).filter(function (t) { return (S.srcSel || []).indexOf(t) >= 0; });
+    var eqs = _hide.length ? eqsAll.filter(function (e) { return _hide.indexOf(e.table) < 0; }) : eqsAll;
     /* 판정 보류는 등급으로 세지 않는다 — 못 믿는 값으로 매긴 등급이 "위험 5대"에 섞이면
        그 숫자를 못 믿게 된다. 대신 자기 칸에서 세고, 내역(사유별)은 호버로 내린다. */
     var holdN = 0, holdBy = { gate: 0, lost: 0, stop: 0 };
@@ -3696,12 +3898,80 @@ export class App extends Component {
         style: 'flex: 1 1 0; min-width: 96px; padding: 14px 18px; border: none; border-right: 1px solid var(--border-default); background: ' + (act ? 'rgba(0,108,210,.10)' : 'transparent') + '; text-align: left; cursor: pointer; font-family: inherit;' + (act ? ' box-shadow: inset 0 -2px 0 var(--primary-light);' : ''),
         onClick: function () { self.setState({ gradeFilter: act ? null : k.g }); } };
     });
-    base.activeCount = eqs.length;
-    base.monEmpty = eqs.length === 0;
+    /* 이 둘은 필터를 따라가지 않는다 — 빈 상태 화면은 "감시할 설비가 없다"는 뜻이라,
+       필터로 0이 된 것을 그렇게 보여주면 소스를 다시 고르라고 엉뚱한 안내를 하게 된다.
+       설정의 태그 수(activeCount)도 모니터링 화면 필터와 무관한 값이다. */
+    base.activeCount = eqsAll.length;
+    base.monEmpty = eqsAll.length === 0;
     base.monEventsShow = base.isMonitor && !base.monEmpty;
     base.detailShow = base.isDetail && !base.monEmpty; base.detailEmptyShow = base.isDetail && base.monEmpty;
     base.diagShow = base.isDiag && !base.monEmpty; base.diagEmptyShow = base.isDiag && base.monEmpty;
     base.reportShow = base.isReport && !base.monEmpty; base.reportEmptyShow = base.isReport && base.monEmpty;
+    /* 테이블 필터 UI — 소스가 둘 이상일 때만 나온다. 하나뿐인 설치에서는 늘 같은 값만 든
+       칩이 되어 화면 소음이 된다. 태그 수를 함께 적는 이유는 0개인 테이블(선택은 했는데 데이터가
+       없는 경우)을 고르면 목록이 비는데, 그것이 필터 탓인지 설비가 없는 탓인지 구분하려면
+       고르기 전에 수가 보여야 하기 때문이다. */
+    var _tblAll = (S.srcSel || []).slice().sort();
+    var _tblCnt = {};
+    eqsAll.forEach(function (e) { _tblCnt[e.table] = (_tblCnt[e.table] || 0) + 1; });
+    var _q = String(S.tblQuery || '').trim().toLowerCase();
+    // 검색은 지금 보이는 목록만 바꾼다 — 걸린 필터는 건드리지 않는다(찾다가 필터가 풀리면 놀란다)
+    var _tblShown = _q ? _tblAll.filter(function (t) { return t.toLowerCase().indexOf(_q) >= 0; }) : _tblAll;
+    var _vis = _tblAll.filter(function (t) { return _hide.indexOf(t) < 0; });
+    base.tblFilterShow = _tblAll.length >= 2;
+    base.tblOpen = !!S.tblOpen;
+    /* 버튼은 "무엇을 하는 것인지"를 말해야 한다 — 이름만 적으면 누르는 것이 아니라 읽는 것으로
+       보인다. 기본은 전부 켜져 있으므로 그때는 수 대신 '전체'라고 적는다: 5/5는 세어 보게 만들고,
+       좁혀 놓았을 때만 분수가 뜻을 갖는다(숫자 하나만 적으면 고른 수인지 있는 수인지 모른다). */
+    base.tblAllOn = _hide.length === 0;
+    base.tblSelCount = _vis.length;
+    base.tblTotal = _tblAll.length;
+    base.tblCaption = base.tblAllOn ? '전체 테이블 표시 중' : '';
+    base.tblTip = '표시할 테이블만 고릅니다 — 화면만 좁힐 뿐,\n감시·알람은 선택한 소스 전체에서 그대로 돕니다.';
+    base.tblQuery = S.tblQuery || '';
+    base.onTblQuery = function (ev) { self.setState({ tblQuery: ev.target.value }); };
+    // 열고 닫을 때 검색어를 비운다 — 다시 열었을 때 목록이 잘려 있으면 없는 테이블로 읽힌다
+    base.onTblOpen = function () { self.setState({ tblOpen: !S.tblOpen, tblQuery: '' }); };
+    base.onTblClose = function () { self.setState({ tblOpen: false, tblQuery: '' }); };
+    /* 고르는 즉시 반영된다 — 확인 버튼을 두지 않는다. 이 필터는 보기만 바꾸고 판정에는
+       영향이 없어서, 잘못 골라도 되돌리는 값이 싸다(칩의 ×가 항상 옆에 있다). */
+    var _pick = function (t) {
+      var h = (self.state.tblHide || []).slice(), i = h.indexOf(t);
+      if (i >= 0) h.splice(i, 1); else h.push(t);
+      self.setState({ tblHide: h });
+    };
+    base.tblOptions = _tblShown.map(function (t) {
+      return { name: t, count: _tblCnt[t] || 0, checked: _hide.indexOf(t) < 0,
+        onToggle: function () { _pick(t); } };
+    });
+    base.tblNoMatch = _tblAll.length > 0 && _tblShown.length === 0;
+    /* 전체 선택·해제는 "지금 보이는 것"에 대해서다 — 검색으로 걸러 놓고 누르면 화면 밖의 것까지
+       바뀌는 쪽이 더 놀랍다. 검색어가 없으면 그대로 전체가 된다. */
+    base.onTblSelectAll = function () {
+      self.setState({ tblHide: (self.state.tblHide || []).filter(function (t) { return _tblShown.indexOf(t) < 0; }) });
+    };
+    base.onTblClearAll = function () {
+      var h = (self.state.tblHide || []).slice();
+      _tblShown.forEach(function (t) { if (h.indexOf(t) < 0) h.push(t); });
+      self.setState({ tblHide: h });
+    };
+    /* 하나도 안 남기면 카드가 없다 — 그 자리를 비워 두면 필터 탓인지 설비가 없는 탓인지
+       구분이 안 된다. 빈 상태 화면(monEmpty)은 소스 문제를 말하는 자리라 여기서 쓸 수 없다. */
+    base.tblNoneShow = base.isMonitor && _tblAll.length > 0 && _vis.length === 0;
+    /* 칩은 앞의 몇 개만 내놓고 나머지는 +N으로 접는다 — 테이블이 늘어날수록 제목줄이 통째로
+       칩에 먹힌다. +N은 목록을 다시 여는 버튼이다(접힌 것이 무엇인지는 거기서 보면 된다).
+       전부 켜져 있을 때는 칩 대신 문구 하나만 둔다 — 있는 것을 다 나열하는 칩은 정보가 아니다. */
+    var CHIP_MAX = 3;
+    base.tblChips = base.tblAllOn ? [] : _vis.slice(0, CHIP_MAX).map(function (t) {
+      return { name: t, count: _tblCnt[t] || 0, onRemove: function (ev) {
+        if (ev && ev.stopPropagation) ev.stopPropagation();
+        var h = (self.state.tblHide || []).slice();
+        if (h.indexOf(t) < 0) h.push(t);
+        self.setState({ tblHide: h });
+      } };
+    });
+    base.tblMore = base.tblAllOn ? 0 : Math.max(0, _vis.length - CHIP_MAX);
+    base.onTblMore = function () { self.setState({ tblOpen: true, tblQuery: '' }); };
     base.onGoSource = function () { self.setState({ tab: 'settings', setSection: 'source' }); };
     base.lastEventText = S.events.length ? E.ago(S.events[0].ms, Date.now()) + ' · ' + S.events[0].tagAlias : '없음'; // 이벤트는 벽시계 기준
     base.srcNotice = S.srcNotice;
@@ -3848,7 +4118,11 @@ export class App extends Component {
           + '\n\n두 값 차이가 크면 1 kHz 위(충격·베어링·기어)에 에너지가 몰려 있다는 뜻입니다.';
       }
       if (_ax.length) valTip = (valTip ? valTip + '\n\n' : '') + _ax.join('\n');
-      return { mainUnit: mainUnit, hold: !!_hold, holdTip: holdTip, gradeNote: gradeNote, valTip: valTip, runBadge: runBadge, flap: flap, id: e.id, alias: e.alias || e.name, name: e.name, unit: e.unit, cls: e.cls, gradeKo: g.ko, gradeColor: g.color, gradeSoft: g.soft, rmsText: E.fmt(mainVal), sparkLine: e.spark.line, sparkArea: e.spark.area, sparkColor: g.color, sparkFill: g.soft, sparkH: sparkH, lastText: E.ago(e.lastSeen, self.data.now), onClick: function () { self._gotoDetail(e.id); }, cardStyle: 'border-left: 3px solid ' + g.color + ';' };
+      /* 큰 글씨는 사용자가 붙인 별칭, 작은 글씨는 실제 태그명이다. 소스가 둘 이상이면 테이블까지
+         적는다 — 판정 키는 '테이블:태그'라 서로 다른 설비인데, 이름이 같으면 카드가 똑같이 보인다
+         (별칭 기본값이 태그명이라 기본 상태가 그렇다). */
+      return { mainUnit: mainUnit, hold: !!_hold, holdTip: holdTip, gradeNote: gradeNote, valTip: valTip, runBadge: runBadge, flap: flap, id: e.id, alias: e.alias || e.name, name: e.name,
+        sub: e.name + (base.tblFilterShow ? ' (' + e.table + ')' : ''), unit: e.unit, cls: e.cls, gradeKo: g.ko, gradeColor: g.color, gradeSoft: g.soft, rmsText: E.fmt(mainVal), sparkLine: e.spark.line, sparkArea: e.spark.area, sparkColor: g.color, sparkFill: g.soft, sparkH: sparkH, lastText: E.ago(e.lastSeen, self.data.now), onClick: function () { self._gotoDetail(e.id); }, cardStyle: 'border-left: 3px solid ' + g.color + ';' };
     });
     /* 설비 카드 드래그 — 놓는 순간 순서를 바꾸고 저장한다.
        순서는 화면에 보이는 카드만이 아니라 저장된 전체 목록을 기준으로 다시 만든다
@@ -4136,15 +4410,18 @@ export class App extends Component {
       var g = E.STATUS[e.grade];
       /* 상세 — "얼마나"를 앞에, 그 근거를 뒤에. 열이 반쯤 산문이라 숫자열로 세울 수 없고,
          행마다 앞에 오는 것이 달라지면 왼쪽 끝을 훑어 내려갈 수가 없다.
-          · 대역   — 값이 "평소 대비 배수"라 단위가 없다(mm/s를 붙이면 절대값으로 오독된다)
+          · 대역   — 값이 "한계 대비 비율"이라 단위가 없다(mm/s를 붙이면 절대값으로 오독된다)
           · 두절   — 지표값 자체가 없다. 0을 보여주면 "0을 측정했다"로 읽히므로 무수신 시간만 쓴다
           · 나머지 — 판정값과 그때 넘은 기준 */
       var isBand = e.type === 'band' || e.type === 'bandrec';
       var valText, noteText;
+      /* 이탈한 대역이 전부 마운팅 상한 위면 '잠정'을 붙인다 — 등급이 '주의'로 묶인 이유가
+         진동이 작아서가 아니라 값을 확정 근거로 못 쓰기 때문임을 목록에서 바로 읽어야 한다. */
+      var _bSoft = !!(e.bands && e.bands.length) && e.bands.every(function (b) { return b.soft; });
       if (isBand) {
         valText = '×' + (e.value || 0).toFixed(2);
         noteText = (e.bands && e.bands.length)
-          ? e.bands.length + '개 대역(' + e.bands.map(function (b) { return b.ko; }).join('·') + ')'
+          ? e.bands.length + '개 대역(' + e.bands.map(function (b) { return b.ko; }).join('·') + ')' + (_bSoft ? ' · 잠정' : '')
           : '전 대역 정상';
       } else if (e.type === 'signal_lost') {
         valText = e.detail || '무수신';   // 옛 이벤트는 DETAIL이 비어 있다 — 시간 없이 사실만
@@ -4155,8 +4432,11 @@ export class App extends Component {
       }
       return { id: e.id, timeText: E.fmtDT(e.ms), agoText: E.ago(e.ms, _wallNow), tagAlias: e.tagAlias, tagName: e.tagName, typeKo: e.typeKo, valText: valText, noteText: noteText, gradeKo: g.ko, gradeColor: g.color, gradeSoft: g.soft,
         bandTip: (isBand && e.bands && e.bands.length)
-          ? e.bands.map(function (b) { return b.ko + '  ' + b.v.toFixed(3) + ' → 한계 ' + b.lim.toFixed(3) + '  (×' + b.r.toFixed(2) + ')'; }).join('\n')
-            + '\n\n대역 이탈은 평소 대비 배수로 판정합니다(ISO 존과 무관). 함께 오른 대역 조합이 결함 종류를 가리킵니다.'
+          ? e.bands.map(function (b) { return b.ko + (b.soft ? '(잠정)' : '') + '  ' + b.v.toFixed(3) + ' → 한계 ' + b.lim.toFixed(3) + '  (×' + b.r.toFixed(2) + ')'; }).join('\n')
+            + '\n\n대역 이탈은 학습된 한계(μ+kσ) 대비 비율로 판정합니다 — ×1이 한계이지 평소가 아닙니다(ISO 존과 무관). 함께 오른 대역 조합이 결함 종류를 가리킵니다.'
+            + (e.bands.some(function (b) { return b.soft; })
+              ? '\n\n(잠정) 표시는 가속도계 마운팅의 유효 주파수 상한을 넘는 대역입니다. 값이 오른 것은 사실이지만 설비 진동인지 센서 부착부 공진인지 구분할 수 없어, 그 대역만 이탈했으면 등급을 주의로 묶습니다. 정비 전 센서 부착 상태를 먼저 확인하세요.'
+              : '')
           : '',
         onGo: function () { self._gotoDetail(e.tagId, e.ms); }, onExplain: function () { self._explain(e); } };
     });
@@ -4322,7 +4602,7 @@ export class App extends Component {
       });
     });
     /* 검색 — 목록이 수십 줄이 되면 스크롤로 특정 태그를 찾는 게 사실상 불가능하다.
-       입력칸은 원래 있었는데 핸들러가 없어 동작하지 않았다. 원명·별칭 어느 쪽으로도 찾게 한다. */
+       원명·별칭 어느 쪽으로도 찾는다. */
     var _tq = (S.tagQuery || '').trim().toLowerCase();
     var _hit = _tq
       ? aliasRows.filter(function (r) { return r.name.toLowerCase().indexOf(_tq) >= 0 || (r.alias || '').toLowerCase().indexOf(_tq) >= 0; })
@@ -4548,7 +4828,7 @@ export class App extends Component {
     base.helpTip = {
       '단위': '센서가 저장하는 물리량입니다. mm/s는 속도, g는 가속도, μm는 변위이며, 데이터를 넣을 때 이미 정해진 값이라 모르면 계측 담당자에게 확인하세요. ISO 10816 존 판정은 속도(mm/s) 기준이고, 다른 단위를 고르면 단위별 임계값으로 판정합니다.',
       'Class': 'ISO 10816 기계 등급으로, 기계의 출력과 기초 강성에 따라 정합니다. I은 소형(15 kW 이하), II는 중형(15~75 kW), III·IV는 대형(각각 강성·연성 기초)입니다. 같은 진동값이라도 등급에 따라 양호/위험 판정이 달라집니다. 비워두면 Class II 기준(1.12 / 2.80 / 7.10 mm/s)으로 판정합니다.',
-      'RPM': '명판에 적힌 회전수입니다. 인버터로 속도를 바꿔 쓰는 설비라면 실제 운전 속도를 넣으세요. 모든 주파수 해석이 이 값을 기준으로 하기 때문에, 비워두면 1800 rpm으로 가정하며 실제와 다르면 해석이 통째로 어긋납니다. 스펙트럼에서 회전 피크가 또렷하게 잡히면 실측값을 우선 사용합니다.',
+      'RPM': '명판에 적힌 회전수입니다. 정확할 필요는 없습니다 — 스펙트럼에서 이 값의 ±12% 안을 뒤져 회전 피크를 찾고, 또렷하게 잡히면 실측값을 씁니다(슬립·부하로 인한 2~5% 차이는 자동 보정). 대신 자릿수는 맞아야 합니다: 3600 rpm 설비에 1800을 넣으면 찾는 범위 자체가 빗나가 실측이 안 되고, 모든 주파수 해석과 대역 경계가 절반으로 어긋납니다. 비워두면 1800 rpm으로 가정합니다.',
       '베어링 모델': '설치된 구름베어링의 품번입니다. 베어링 외륜의 각인이나 정비 이력에서 확인할 수 있습니다. 품번을 고르면 결함 주파수(BPFO/BPFI/BSF/FTF)가 자동 계산되어 베어링 결함을 판정할 수 있게 됩니다. 저널(유막) 베어링이면 sleeve를, 목록에 없는 품번이면 직접 입력을 고르세요. 비워두면 베어링 결함은 판정하지 않습니다.',
       '마운팅 방식': '센서를 기계에 붙인 방법입니다. 나사로 고정했으면 스터드, 본드로 붙였으면 접착, 자석이면 자석, 손으로 대고 재면 핸드프로브를 고르세요. 방식에 따라 믿을 수 있는 주파수 상한이 달라서(스터드 10, 접착 5, 자석 2, 프로브 1 kHz) 그보다 높은 대역은 기계가 아니라 마운팅이 울린 것으로 보고 결함 탐색에서 제외합니다. 모르면 비워두세요. 대신 고주파 분석을 제한 없이 신뢰하게 되므로, 자석 마운트라면 꼭 선택하는 것이 좋습니다.',
       '구동방식': '모터의 힘이 기계로 전달되는 방식입니다. 축이 커플링으로 바로 이어져 있으면 직결, 벨트가 보이면 벨트, 기어박스를 거치면 기어입니다. 벨트를 고르고 풀리 지름을 넣으면 종동축 회전수가 계산되어, 정체를 알 수 없던 진동 성분이 종동축 것인지 밝힐 수 있습니다.',
@@ -4701,6 +4981,36 @@ export class App extends Component {
       return { label: sr.label, color: sr.color, on: !_bh[sr.label],
         onClick: function () { var h = Object.assign({}, self.state.bandHide || {}); if (h[sr.label]) delete h[sr.label]; else h[sr.label] = 1; self.setState({ bandHide: h }); } };
     });
+    /* 배수 축 토글 — 계열마다 크기가 네 자릿수까지 벌어져 원값으로는 작은 대역이 안 보인다.
+       배수로 보면 전부 무차원이라 한 축에서 비교되고, ×1이 곧 판정선이다.
+
+       그릴 수 있는 계열 수를 그리기 전에 센다. 그림 그리는 쪽에서 세어 두면 그 값을 읽는 것은
+       다음 렌더라, 토글한 회차의 안내가 한 박자 늦은 사실을 말한다(학습이 없는데 있다고 한다). */
+    var _nEq = this._activeEq(S.selTag);
+    var _nBl = _nEq ? (this._bandBaselines(_nEq) || {}) : {};
+    var _nAll = (this._lastBandSeries || []).length;
+    var _nOk = (this._lastBandSeries || []).filter(function (sr) { return sr.key && VC.baselineLimit(_nBl[sr.key]) > 0; }).length;
+    /* 나누는 수는 평소(μ)가 아니라 알람이 나는 값(max(μ+kσ, μ×1.2))이다. 그래서 1.0이 곧
+       알람선이고, 0.88은 "평소의 0.88배"가 아니라 "알람 기준의 88%"다 — 평소보다 높을 수 있다.
+       "한계"·"μ+kσ" 같은 말 대신 알람으로 부르는 이유가 그것이다: 사용자가 이 눈금에서 알고 싶은
+       것은 통계량이 아니라 "알람까지 얼마나 남았나"다. */
+    base.bandNorm = !!S.bandNorm;
+    base.bandNormReady = _nOk > 0;
+    base.bandNormLabel = base.bandNorm ? '원값으로 보기' : '알람 기준으로 보기';
+    /* 학습이 하나도 없으면 켜지 않는다 — 켜면 나눌 기준이 없어 빈 차트가 나오는데, 그건
+       "정상"으로 읽히거나 고장으로 읽힌다. 무엇이 필요한지 말해 주고 원값을 유지한다. */
+    base.onBandNorm = function () {
+      if (!self.state.bandNorm && !(_nOk > 0)) {
+        self._toast('대역 베이스라인 학습이 필요한 기능입니다 — 판정 기준에서 먼저 학습하세요', 'warn');
+        return;
+      }
+      self.setState({ bandNorm: !self.state.bandNorm });
+    };
+    // 일부만 학습됐으면 그대로 그리되 몇 개가 왜 빠졌는지 말해 준다
+    base.bandNormNote = (base.bandNorm && _nOk)
+      ? '알람이 나는 값을 1.0으로 놓고 본 비율 — 1.0을 넘으면 이탈'
+        + (_nOk < _nAll ? ' · 학습되지 않은 ' + (_nAll - _nOk) + '개 계열은 빠집니다' : '')
+      : '';
     base.onBlLearnAll = function () { blEqs.forEach(function (eq) { if (self._blLearnable(eq)) self._learnBaseline(eq); }); };
     /* 확인 대기 중인 태그 수 — 목록을 훑지 않고도 "몇 개가 막혀 있는지" 보이게 한다.
        답할 때까지 그 태그들은 학습 기반 판정이 멈춰 있다. */
@@ -4725,8 +5035,7 @@ export class App extends Component {
     base.monKnobStyle = 'position: absolute; top: 2px; left: ' + (S.monitorOn ? '19px' : '2px') + '; width: 17px; height: 17px; border-radius: 50%; background: #fff; transition: left .15s;';
     base.onMonToggle = function () { self.setState({ monitorOn: !S.monitorOn, dirty: true }); };
     /* 판정 주기(얼마나 자주)와 RMS 구간(얼마나 넓게)은 다른 축이다.
-       구간이 주기보다 짧으면 그 사이 데이터가 판정에 한 번도 안 들어간다(기존 '실시간'=1초 구간이
-       주기 10초와 맞물려 90%가 빠졌다) — 그래서 주기보다 짧은 구간은 고를 수 없게 막는다. */
+       구간이 주기보다 짧으면 그 사이 데이터가 판정에 한 번도 안 들어간다 — 주기보다 짧은 구간은 고를 수 없게 막는다. */
     var _ivMs = durMs(S.monitorInterval) || 3000;
     base.evalWindow = S.evalWindow;
     /* 프리셋 + 직접 입력 — 진동 주기는 현장마다 다르므로(부하 변동·간헐 운전 주기)
@@ -4775,24 +5084,16 @@ export class App extends Component {
     base.recHoldOptions = [{ v: '0', l: '즉시' }, { v: '1m', l: '1분' }, { v: '5m', l: '5분' }, { v: '10m', l: '10분' }];
     base.onEscHold = function (ev) { self.setState({ escHold: ev.target.value, dirty: true }); };
     base.onRecHold = function (ev) { self.setState({ recHold: ev.target.value, dirty: true }); };
-    var RENO_OPTS = [{ v: '0', l: '끔' }, { v: '30m', l: '30분' }, { v: '1h', l: '1시간' }, { v: '2h', l: '2시간' }, { v: '6h', l: '6시간' }];
+    var RENO_OPTS = [{ v: '0', l: '꿈' }, { v: '30m', l: '30분' }, { v: '1h', l: '1시간' }, { v: '2h', l: '2시간' }, { v: '6h', l: '6시간' }];
     base.renotifyOptions = RENO_OPTS;
-    base.renotifyRows = [{ ko: '주의', color: '#d99a2b' }, { ko: '위험', color: '#e07b39' }, { ko: '심각', color: '#e5484d' }].map(function (mt) {
-      return {
-        ko: mt.ko, color: mt.color, value: (S.renotify || {})[mt.ko] || '0',
-        onChange: function (ev) { var all = Object.assign({}, S.renotify); all[mt.ko] = ev.target.value; self.setState({ renotify: all, dirty: true }); },
-      };
-    });
     // 베이스라인 미학습 경고(판정기준 카드) — 학습 가능한데 미학습인 태그 수 (setNav의 _blUnCnt와 동일 기준)
     base.monBlUnlearned = _blUnCnt;
     base.monBlNotice = _blUnCnt > 0;
     var _wl = durKo(durMs(S.evalWindow));
     base.evalBasisText = _wl + ' 구간 RMS';
     /* 주기를 바꾸면 조회 부하가 그만큼 달라진다 — 미리 보여준다.
-       값은 판정 틱이 실제로 잰 소요(_tickCostMs)를 쓴다. 첫 틱 전에는 모델로 추정한다:
-       배치 조회(NAME IN)라 비용이 결과 행 수가 아니라 NAME 개수에 붙고 태그당 0.35ms 선형이다
-       (로컬 실측 200태그 67ms · 1,000태그 346ms · 2,510태그 918ms, 같은 태그 수에서 결과 행이
-       11배가 돼도 22%만 증가). 다만 이 상수는 환경에 따라 크게 달라지므로 추정은 잠깐만 쓰인다. */
+       값은 판정 틱이 실제로 잰 소요(_tickCostMs)를 쓴다. 첫 틱 전에는 태그 수 선형 모델로 추정하되,
+       이 상수는 환경에 따라 크게 달라지므로 추정은 잠깐만 쓰인다. */
     var _nTbl = (S.srcSel || []).length || 1;
     var _nTag = this._activeEqs().length;
     var _measured = this._tickCostMs != null;
@@ -4804,13 +5105,12 @@ export class App extends Component {
     base.evalLoadWarn = _duty >= 50;
     // 구간이 주기보다 짧으면 데이터에 구멍이 생긴다 — 저장 전에 화면에서 막는다
     base.evalWinBad = durMs(S.evalWindow) < _ivMs;
-    /* 학습 구간이 지금과 달라도 배너를 띄우지 않는다 — 실측 σ 차이가 0.1% 미만이고,
-       한계가 μ×1.2 클램프로 결정되는 태그는 구간과 무관하게 값이 같다(실제 태그 4개 중 3개).
-       고칠 것 없는 경고를 상시로 두면 진짜 경고가 묻힌다. 정보는 태그별 툴팁에 "N초 구간 기준"으로 남긴다. */
+    /* 학습 구간이 지금과 달라도 배너를 띄우지 않는다 — 값 차이가 무시할 수준이라
+       고칠 것 없는 경고가 진짜 경고를 묻는다. 정보는 태그별 툴팁에 "N초 구간 기준"으로 남긴다. */
+    /* 채널은 웹훅 하나다 — jsh에 SMTP가 없어 직접 발송은 불가능하고,
+       되는 길(HTTP API·자동화 도구 경유)은 전부 웹훅 URL로 표현된다. */
     base.notifChannels = [
-      { key: 'webhook', label: '웹훅', hint: 'Slack · Teams · Discord · 자체 엔드포인트 URL', ph: 'https://hooks.slack.com/services/…', ready: true },
-      { key: 'email', label: '이메일', hint: '사내 SMTP 릴레이 경유 (준비 중)', ph: 'ops@plant.com, manager@plant.com', ready: false },
-      { key: 'sms', label: 'SMS', hint: '공급자 API 경유 (준비 중)', ph: '010-1234-5678, 010-9876-5432', ready: false }
+      { key: 'webhook', label: '웹훅', hint: 'Slack · Teams · Discord · Google Chat · 자체 엔드포인트 — 이메일·문자는 n8n 등 자동화 도구를 이 URL로 받아 중계', ph: 'https://hooks.slack.com/services/…', ready: true }
     ].map(function (c) {
       var on = !!S.notifCh[c.key];
       var val = (S.notifTo || {})[c.key] || '';
@@ -4830,37 +5130,27 @@ export class App extends Component {
         onTest: function () { self._testNotify(c.key); },
       };
     });
-    // 심각도별 라우팅 — 미설정 심각도는 ROUTE_DEFAULT_ON 적용(위험·심각 켜짐)
-    var ROUTE_META = [{ ko: '주의', color: '#d99a2b', defTiming: '즉시' }, { ko: '위험', color: '#e07b39', defTiming: '즉시' }, { ko: '심각', color: '#e5484d', defTiming: '즉시' }];
-    var _routes = routesWithDefaults(S.routes); // 화면 체크 상태 = 실제 발송 판정과 동일 소스
-    base.routeRows = ROUTE_META.map(function (mt) {
+    /* 심각도별 알림 — 방식(즉시/알림 안 함)과 재알림 주기를 한 표에.
+       같은 심각도 3행을 두 카드에 따로 그리던 것을 합쳤다(사용자 제안).
+       재알림은 '알림 안 함'이어도 남겨 둔다 — sustained 이벤트는 발송과 별개로 이력에 쌓인다. */
+    var ROUTE_META = [{ ko: '주의', color: '#d99a2b' }, { ko: '위험', color: '#e07b39' }, { ko: '심각', color: '#e5484d' }];
+    var _routes = routesWithDefaults(S.routes); // 화면 상태 = 실제 발송 판정과 동일 소스
+    base.alertRows = ROUTE_META.map(function (mt) {
       var r = _routes[mt.ko];
-      var set = function (kk, vv) {
-        var all = Object.assign({}, S.routes);
-        all[mt.ko] = Object.assign({ timing: mt.defTiming }, r);
-        all[mt.ko][kk] = vv;
-        self.setState({ routes: all, dirty: true });
-      };
       return {
-        ko: mt.ko, color: mt.color, webhook: !!r.webhook, email: !!r.email, sms: !!r.sms, timing: r.timing || mt.defTiming,
-        onEmail: function (ev) { set('email', ev.target.checked); },
-        onWebhook: function (ev) { set('webhook', ev.target.checked); },
-        onSms: function (ev) { set('sms', ev.target.checked); },
-        onTiming: function (ev) { set('timing', ev.target.value); },
+        ko: mt.ko, color: mt.color,
+        timing: r.timing || ROUTE_DEFAULT_TIMING[mt.ko],
+        onTiming: function (ev) {
+          var all = Object.assign({}, S.routes);
+          all[mt.ko] = Object.assign({}, r, { timing: ev.target.value });
+          self.setState({ routes: all, dirty: true });
+        },
+        reno: (S.renotify || {})[mt.ko] || '0',
+        onReno: function (ev) { var all = Object.assign({}, S.renotify); all[mt.ko] = ev.target.value; self.setState({ renotify: all, dirty: true }); },
       };
     });
-    // 채널은 켰는데 어느 심각도도 라우팅 안 된 상태 — 알림이 한 건도 안 나가므로 경고
-    base.routeNoneWarn = !!S.notifCh.webhook && !ROUTE_ORDER.some(function (k) { return _routes[k].webhook && _routes[k].timing !== '무시'; });
-    var routeAllOn = base.routeRows.every(function (r2) { return r2.webhook && r2.email && r2.sms; });
-    base.routeSelAllLabel = routeAllOn ? '전체 해제' : '전체 선택';
-    base.onRouteSelectAll = function () {
-      var next = {};
-      ROUTE_META.forEach(function (mt) {
-        var cur = (S.routes || {})[mt.ko] || {};
-        next[mt.ko] = { webhook: !routeAllOn, email: !routeAllOn, sms: !routeAllOn, timing: cur.timing || mt.defTiming };
-      });
-      self.setState({ routes: next, dirty: true });
-    };
+    // 채널은 켰는데 전 심각도가 '알림 안 함' — 한 건도 안 나가는 상태라 경고
+    base.routeNoneWarn = !!S.notifCh.webhook && !ROUTE_ORDER.some(function (k) { return _routes[k].timing === '즉시'; });
     /* 대역 베이스라인 — 베이스라인 카드와 같은 형태(태그별 상태 + 학습/삭제).
        자동 학습을 하지 않는 이유: 데이터가 쌓였다고 알아서 학습하면 그 순간 설비가 이상해도
        그것을 "정상"으로 굳힌다. "지금이 정상이다"는 사람이 판단해야 하고, 그 판단을 버튼으로 받는다. */
@@ -4879,8 +5169,13 @@ export class App extends Component {
            영영 도달할 수 없는 5/5를 목표로 보여주게 된다(1 kHz 샘플링이면 초고주파가 빈 대역). */
         var _d0 = (self._detailCache[eq.id] || {}).det;
         var _fr0 = (_d0 && _d0.frMeas && _d0.frMeas.f > 0) ? _d0.frMeas.f : (eq.rpm / 60);
-        var able = VC.BAND_ORDER.filter(function (bn) { return VC.bandMeasurable(bn, _fr0, eq.fs); }).length;
-        status = learned + '/' + able + ' 대역 학습됨 · ' + parts.map(function (bn) { return VC.BAND_KO[bn]; }).join('·');
+        /* 분모 = 주파수 대역 + 이 태그에서 성립하는 포락선 계열. 분자(learned)가 포락선까지 세므로
+           분모가 대역 8개만 세면 12/8처럼 분자가 분모를 넘는다. 포락선은 복조 대역이 성립해야
+           주기성 1계열이 생기고, 베어링 품번까지 있으면 결함주파수 3계열이 더 생긴다. */
+        var _mnt = ((S.equipMeta || {})[eq.id] || {}).mount || (eq.meta || {}).mount;
+        var envAble = VC.demodBand(eq.fs, _mnt) ? (1 + (VC.faultCoeffs(self._bearingGeo(eq)) ? 3 : 0)) : 0;
+        var able = VC.BAND_FREQ.filter(function (bn) { return VC.bandMeasurable(bn, _fr0, eq.fs); }).length + envAble;
+        status = learned + '/' + able + ' 계열 학습됨 · ' + parts.map(function (bn) { return VC.BAND_KO[bn]; }).join('·');
         tip = parts.map(function (bn) {
           var b = bls[bn];
           return VC.BAND_KO[bn] + '  μ ' + b.mu.toFixed(4) + ' · σ ' + b.sigma.toFixed(4) + ' → 한계 ' + VC.baselineLimit(b).toFixed(4) + '  (표본 ' + (b.n || '?') + ')';
@@ -4890,11 +5185,16 @@ export class App extends Component {
         var miss = VC.BAND_ORDER.filter(function (bn) { return !bls[bn]; });
         if (miss.length) {
           tip += '\n\n학습 안 됨\n' + miss.map(function (bn) {
-            var e = (_fr0 > 0 && eq.fs > 0) ? VC.bandEdges(_fr0, eq.fs / 2)[VC.BAND_ORDER.indexOf(bn)] : null;
+            // 대역 경계는 주파수 대역(BAND_FREQ)에만 있다 — 포락선 계열은 인덱스가 8 이상이라 경계가 없다
+            var fi = VC.BAND_FREQ.indexOf(bn);
+            var e = (fi >= 0 && _fr0 > 0 && eq.fs > 0) ? VC.bandEdges(_fr0, eq.fs / 2)[fi] : null;
             if (e && !VC.bandMeasurable(bn, _fr0, eq.fs)) {
               return VC.BAND_KO[bn] + '  측정 불가 — 하한 ' + Math.round(e[0]) + ' Hz > Nyquist '
                 + Math.round(eq.fs / 2) + ' Hz (샘플레이트 ' + eq.fs + ' Hz)';
             }
+            if (fi < 0 && !VC.demodBand(eq.fs, _mnt)) return VC.BAND_KO[bn] + '  복조 대역 불성립 — 샘플레이트가 낮거나 마운팅 상한이 낮습니다';
+            if ((bn === 'envBPFO' || bn === 'envBPFI' || bn === 'envBSF') && !VC.faultCoeffs(self._bearingGeo(eq)))
+              return VC.BAND_KO[bn] + '  베어링 품번 미지정 — 설비 정보에서 품번을 넣으면 쌓이기 시작합니다';
             return VC.BAND_KO[bn] + '  표본 부족 또는 학습 실패';
           }).join('\n');
         }
@@ -4917,9 +5217,8 @@ export class App extends Component {
       var fill = null;
       if (cv) {
         var enough = cv.have >= VC.BASELINE_MIN_N;
-        /* 분모를 안 보여준다 — 격자 경계 때문에 100%는 원리적으로 안 나온다.
-           창 시작이 칸 중간을 자르고(앞 1칸), 지금 칸은 아직 추출 전이며 직전 칸은 적재 지연이라(뒤 2칸),
-           실측에서 중간 구멍이 0개여도 142/144로 보인다 — "항상 뭔가 부족한" 인상만 준다.
+        /* 분모를 안 보여준다 — 격자 경계 때문에 100%는 원리적으로 안 나온다
+           (창 시작이 칸 중간을 자르고, 지금 칸은 아직 추출 전이며 직전 칸은 적재 지연).
            판단에 필요한 건 "학습에 충분한가"이므로 상태와 개수만 남긴다. */
         var near = cv.need > 0 && cv.have >= cv.need - 3;   // 경계 3칸은 정상 결손
         fill = {
@@ -5028,19 +5327,14 @@ export class App extends Component {
     base.bandIvNext = S.bandIvNext || base.bandInterval;
     base.bandIvSame = base.bandIvNext === base.bandInterval;
     base.onBandIvOpen = function () { self.setState({ bandIvOpen: true, bandIvNext: self.state.bandInterval || '10m', bandIvAct: 'keep' }); };
-    /* 회차보다 짧은 주기는 고를 수 없게 한다.
-
-       한 태그에 원본 조회 ~0.2초 + FFT(32,768점) ~0.7초가 든다(goja 실측). 태그가 62개면
-       한 회차가 56초라, 1분 주기로는 회차가 겹쳐 서로 밀다가 한 번도 완주하지 못한다 —
-       타이머는 RUNNING인데 표는 영영 비어 있고, 화면 어디에도 이유가 안 나온다(실제로 겪었다).
-       그래서 못 쓰는 선택지는 잠그고, 왜 못 쓰는지를 라벨에 적는다. 태그가 적은 설치에서는
-       1분도 멀쩡하므로 목록에서 빼지는 않는다 — 규모에 따라 달라지는 값이다. */
+    /* 회차보다 짧은 주기는 고를 수 없게 한다 — 태그가 많으면 한 회차(태그당 약 1초)가 주기를 넘겨
+       회차가 겹쳐 서로 밀다가 한 번도 완주하지 못한다.
+       못 쓰는 선택지는 잠그고 이유를 라벨에 적되, 규모에 따라 달라지는 값이라 목록에서 빼지는 않는다. */
     var _bandN = (this._bandSpec().tags || []).length;
     var _passSec = Math.round(_bandN * BAND_TAG_SEC);
     base.bandPassSec = _passSec;
     base.bandIvOptions = [
-      { v: '1m', l: '1분', sec: 60 }, { v: '5m', l: '5분', sec: 300 }, { v: '10m', l: '10분', sec: 600 },
-      { v: '30m', l: '30분', sec: 1800 }, { v: '1h', l: '1시간', sec: 3600 },
+      { v: '10m', l: '10분', sec: 600 }, { v: '30m', l: '30분', sec: 1800 }, { v: '1h', l: '1시간', sec: 3600 },
     ].map(function (o) {
       // 여유 2배 — 딱 맞으면 태그가 몇 개만 늘어도 바로 겹친다
       var bad = _passSec > 0 && o.sec < _passSec * 2;
@@ -5048,7 +5342,8 @@ export class App extends Component {
     });
     base.bandIvHint = _passSec > 0
       ? '감시 태그 ' + _bandN + '개 → 한 회차 약 ' + _passSec + '초. 그보다 짧은 주기는 회차가 겹쳐 아무것도 쌓이지 않습니다.'
-      : '주기가 짧을수록 표본이 빨리 쌓입니다';
+      // 10분이 하한인 이유를 여기서 한 번 말한다 — 선택지에서 사라진 것을 사용자가 설명 없이 마주치지 않게
+      : '추출 창이 샘플레이트에 따라 최대 4분대라 그보다 짧은 주기는 같은 구간을 겹쳐 잽니다. 급격한 이상은 광대역 감시가 초 단위로 따로 봅니다.';
     /* 드롭다운에서 고르면 바로 적용하지 않고 확인 절차를 연다 — 주기를 바꾸면 이전 구간과
        밀도가 갈려 학습이 편향될 수 있고, 이미 채운 값의 간격과도 어긋난다. */
     base.onBandIvPickDirect = function (ev) {
@@ -5073,7 +5368,7 @@ export class App extends Component {
     base.onBandIvApply = function () { self._applyBandInterval(); };
     base.bandToggleStyle = 'width: 40px; height: 23px; border-radius: 12px; position: relative; cursor: pointer; transition: background .15s; flex-shrink: 0; background: ' + (S.bandOn ? 'var(--primary-base)' : 'var(--border-medium)') + ';';
     base.bandKnobStyle = 'position: absolute; top: 2px; left: ' + (S.bandOn ? '19px' : '2px') + '; width: 17px; height: 17px; border-radius: 50%; background: #fff; transition: left .15s;';
-    base.routeTimings = ['즉시', '무시']; // 묶음(digest)은 미구현 — 동작 안 하는 선택지를 두지 않는다
+    base.routeTimings = ['즉시', '알림 안 함']; // 묶음(digest)은 미구현 — 동작 안 하는 선택지를 두지 않는다
     base.settingsDirty = S.dirty;
     base.onSaveSettings = function () { self._saveSettings(); };
     base.onFormChange = function () { self._markDirty(); };

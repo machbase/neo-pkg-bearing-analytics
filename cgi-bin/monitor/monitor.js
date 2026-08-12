@@ -139,15 +139,10 @@
       // 밀리초까지 찍는 시각 문자열 — 1초 창을 정확히 자르려면 초 단위로는 부족하다
       'function dtms(ms){ var d=new Date(ms); function p(n,w){var s2=""+n;while(s2.length<w)s2="0"+s2;return s2;}',
       '  return p(d.getFullYear(),4)+"-"+p(d.getMonth()+1,2)+"-"+p(d.getDate(),2)+" "+p(d.getHours(),2)+":"+p(d.getMinutes(),2)+":"+p(d.getSeconds(),2)+" "+p(d.getMilliseconds(),3); }',
-      /* 존 판정값 — 전대역이 양호 경계 미만이면 ISO도 반드시 양호라 계산을 건너뛴다.
-         넘었을 때만 원본 1초를 받아 밴드패스로 정확히 잰다(실측 goja 210ms/태그).
-         직전에 잰 값이 TTL 안이면 그걸 쓴다 — 경계를 오가도 조회가 폭주하지 않게.
-
-         { v, fresh }를 돌려준다. fresh는 "이번에 실제로 쟀다"는 뜻이고, 이때만 호출측이
-         isoAt에 지금 시각을 찍는다. 예전엔 "전대역이 경계를 넘었나"로 스탬프를 찍었는데,
-         그러면 캐시에서 꺼낸 값에도 시각이 갱신돼 판정 주기(10초)가 TTL(30초)보다 짧은 한
-         만료가 구조적으로 불가능했다 — 임계를 한 번 넘은 설비의 ISO 값이 그 순간 값으로
-         영구 고정되고, B→C→D로 자라도 등급이 안 변한다. */
+      /* 존 판정값 — 전대역이 양호 경계 미만이면 ISO도 반드시 양호라 계산을 건너뛰고,
+         넘었을 때만 원본 1초를 받아 밴드패스로 정확히 잰다. 직전에 잰 값이 TTL 안이면 그걸 쓴다.
+         반환 { v, fresh } — fresh는 "이번에 실제로 쟀다"는 뜻이고, 이때만 호출측이 isoAt을 갱신한다
+         (캐시값에 시각을 찍으면 TTL이 영원히 만료되지 않는다). */
       'var GRAW={};',   // 원본으로 본 게이트 결과 — isoValue가 채운다
       'var IMP={};',    // 충격성 근거(Crest·첨도) — 같은 원본에서 함께 잰다
       'function isoValue(t, wide, prev, key, near){',
@@ -162,20 +157,23 @@
       '  var v = isoRms(vals, t.fs);',
       '  return v==null ? {v:wide, fresh:false, hold:true} : {v:v, fresh:true};',
       '}',
-      'function durAgo(ms){ if(ms<60000) return Math.round(ms/1000)+"초"; if(ms<3600000) return Math.round(ms/60000)+"분"; return (ms/3600000).toFixed(1)+"시간"; }',
+      // 화면의 durKo와 같은 규칙 — 같은 사건을 이벤트와 화면이 다르게 적으면 같은 것인지 알 수 없다
+      'function durAgo(ms){ if(ms<60000) return Math.round(ms/1000)+"초";'
+      + ' if(ms<3600000){ var m=Math.round(ms/60000); return m>=60?"1시간":m+"분"; }'
+      + ' if(ms<86400000){ var h=Math.floor(ms/3600000), hm=Math.round((ms%3600000)/60000); if(hm===60){h++;hm=0;} return h+"시간"+(hm?" "+hm+"분":""); }'
+      + ' var d=Math.floor(ms/86400000), dh=Math.round((ms%86400000)/3600000); if(dh===24){d++;dh=0;} return d+"일"+(dh?" "+dh+"시간":""); }',
       'function fmtTs(ms){ var d=new Date(ms); function p(n){return (n<10?"0":"")+n;} return d.getFullYear()+"-"+p(d.getMonth()+1)+"-"+p(d.getDate())+" "+p(d.getHours())+":"+p(d.getMinutes())+":"+p(d.getSeconds()); }',
-      'function notifyEvent(t, ev, v, l){',
+      'function notifyEvent(t, ev, v, l, d){',
       '  if(!NOTIFY.channels) return;',
       '  var gradeKo=GW[ev.gi];',
       '  if(!shouldNotify(gradeKo, ev.etype, "webhook", NOTIFY)) return;',
       '  var to=NOTIFY.channels.webhook.to;',
-      '  var msg=eventMessage({alias:t.alias||t.tag, tag:t.tag, table:t.tbl, typeKo:TYPEKO[ev.etype]||ev.etype, gradeKo:gradeKo, val:v, lim:l, unit:t.unit||"", timeText:fmtTs(now)});',
+      '  var msg=eventMessage({alias:t.alias||t.tag, tag:t.tag, table:t.tbl, typeKo:TYPEKO[ev.etype]||ev.etype, gradeKo:gradeKo, etype:ev.etype, detail:d||"", val:v, lim:l, unit:t.unit||"", timeText:fmtTs(now)});',
       dry
         ? '  $.yield("notify", t.tbl+":"+t.tag, ev.etype, gradeKo);'
         : '  try{ $.request(to,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payloadFor(msg,to))}).do(function(r){}); }catch(e){}',
       '}',
-      /* 판정값 일괄 수집 — 테이블당 한 번의 NAME IN 조회로 전 태그의 구간 버킷을 받는다.
-         태그마다 따로 물으면 비용이 태그 수에 비례하는데(실측 32.6ms/태그), 배치는 12.97ms/태그다. */
+      /* 판정값 일괄 수집 — 테이블당 한 번의 NAME IN 조회로 전 태그의 구간 버킷을 받는다(태그별 개별 조회보다 훨씬 싸다). */
       'var WVAL={};',
       'function collect(){',
       '  var byTbl={};',
@@ -209,10 +207,8 @@
       '      LAST[tbl+":"+String(r[0])]=tms(r[1]); }); }catch(e){}',
       '  });',
       '}',
-      /* 직전 판정 상태를 한 번에 읽는다 — 태그마다 점조회를 하면 문장 수가 태그 수에 비례해
-         회차가 주기를 넘긴다(실측: 태그당 약 50ms, 200태그에서 한 회차 10초 초과).
-         HAD는 "그 키의 행이 이미 있었나"다 — 상태를 쓸 때 insert/update를 고르는 근거로,
-         존재 확인 조회를 태그마다 또 하지 않기 위해 여기서 같이 기억해 둔다. */
+      /* 직전 판정 상태를 한 번에 읽는다 — 태그마다 점조회를 하면 회차가 주기를 넘긴다.
+         HAD는 "그 키의 행이 이미 있었나" — putState의 insert/update 선택 근거(존재 확인 조회 생략). */
       'var PREV={}, HAD={};',
       'function loadPrev(){',
       // 예약키(__lock/__hb)도 같이 읽는다 — 이들도 putState로 쓰므로 존재 여부를 알아야 한다
@@ -220,9 +216,8 @@
       '  try{ db.query("select K, VAL from NEO_VIBE_MONSTATE where K in ("+ks+")").forEach(function(r){',
       '    var k=String(r[0]); HAD[k]=1; PREV[k]=dec(r[1]); }); }catch(e){}',
       '}',
-      /* 상태 쓰기 — 예전에는 delete 후 insert였는데, 회차가 겹치면 한쪽이 지운 자리에 다른 쪽이
-         먼저 넣어 unique index 충돌(ERR-1418)로 스크립트가 통째로 죽었다. update는 그 창이 없고
-         문장도 하나다. 한 태그의 쓰기 실패가 나머지 태그의 감시를 멈추게 두지 않는다. */
+      /* 상태 쓰기 — update 우선(delete+insert는 회차가 겹치면 unique index 충돌로 스크립트가 죽는다).
+         한 태그의 쓰기 실패가 나머지 태그의 감시를 멈추게 두지 않는다. */
       'function putState(k, o){',
       '  try{',
       '    var v=enc(o);',
@@ -235,10 +230,8 @@
          이번 회차를 통째로 건너뛰더라도 상대의 생사는 봐야 한다. */
       (!dry && spec.wd) ? WD.wdSrc(spec.wd).join('\n') : '',
       (!dry && spec.wd) ? 'var _wd=wdTick(db);' : '',
-      /* 중복 실행 방지 — 한 회차가 주기를 넘기면 다음 회차가 겹쳐 시작한다. 두 회차가 같은 태그의
-         상태를 동시에 쓰면 서로의 판정을 덮어쓰고, 예전 delete+insert 방식에서는 아예 스크립트가
-         죽었다. 앞 회차가 아직 살아 있으면 이번 회차는 아무것도 하지 않고 넘어간다.
-         잠금이 만료(TTL)로 풀리는 것은 앞 회차가 비정상 종료해 해제를 못 한 경우뿐이다. */
+      /* 중복 실행 방지 — 앞 회차가 아직 살아 있으면 이번 회차는 아무것도 하지 않고 넘어간다
+         (겹치면 같은 태그의 상태를 서로 덮어쓴다). 잠금이 TTL로 풀리는 것은 앞 회차가 비정상 종료한 경우뿐이다. */
       'var BUSY=false;',
       dry ? '' : 'var _lk=PREV["__lock"]; if(_lk&&_lk.t&&(now-_lk.t)<' + lockTtlMs + ') BUSY=true;',
       'if(!BUSY){',
@@ -263,7 +256,7 @@
       dry
       ? '      $.yield("evt", key, "signal_lost", GW[1], 0, 0, "");'
       : '      db.exec("insert into NEO_VIBE_EVENTS values(\'"+esc(key)+"\', to_date(\'"+dtms(now)+"\'), 0, \'signal_lost\', \'"+GW[1]+"\', 0, \'"+esc(durAgo(now-last))+" 무수신\', \'"+esc(key+":"+now+":signal_lost")+"\')");',
-      '      notifyEvent(t, lev, 0, 0);',
+      '      notifyEvent(t, lev, 0, 0, durAgo(now-last)+" 무수신");',
       dry ? '' : '      putState(key, st);',
       '    }',
       '    return;',
@@ -296,7 +289,8 @@
       '  var bad = gateFromBuckets(WVAL[key], wide) || graw || null;',
       '  var sens = sensorTick(prev, bad, now, CFG);',
       // 대역 판정 — 설비당 1건으로 합성. 미학습·추출 미사용이면 null이라 judgeTick이 조용히 지나간다.
-      '  var bj = sens.on ? null : bandJudge(bandNow(t), t.bb, !!(prev&&prev.bb));',
+      // t.soft = 마운팅 상한 초과 대역(앱이 계산해 구워 보낸다) — 그 대역만 이탈하면 '주의'가 상한
+      '  var bj = sens.on ? null : bandJudge(bandNow(t), t.bb, !!(prev&&prev.bb), t.soft);',
       /* 운전 판별 — 정지 수준이면 판정을 얼린다. 정지를 개선으로 읽으면 "복귀했습니다" 알림이
          나가고, 사람은 설비가 고쳐진 줄 안다. 기준은 학습 μ, 없으면 최근 버킷 P75(학습과 같은 방법). */
       '  var recent=(WVAL[key]||[]).map(function(x){return x.rms;});',
@@ -332,7 +326,7 @@
       dry
         ? '    $.yield("evt", key, ev.etype, GW[ev.gi], v2, l2, dt);'
         : '    var eid=key+":"+now+":"+ev.etype;\n    db.exec("insert into NEO_VIBE_EVENTS values(\'"+esc(key)+"\', to_date(\'"+dtms(now)+"\'), "+v2+", \'"+ev.etype+"\', \'"+GW[ev.gi]+"\', "+l2+", \'"+esc(dt)+"\', \'"+esc(eid)+"\')");',
-      '    notifyEvent(t, ev, v2, l2);', // 라우팅에 걸리면 발송(서버는 임계·베이스라인 모두 같은 sec버킷 RMS 사용)
+      '    notifyEvent(t, ev, v2, l2, dt);', // 라우팅에 걸리면 발송(서버는 임계·베이스라인 모두 같은 sec버킷 RMS 사용)
       '  });',
       dry
         ? '  $.yield("state", key, enc(res.next));'

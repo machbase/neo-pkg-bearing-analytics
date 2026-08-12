@@ -1,8 +1,7 @@
 // monitor/watchdog.js — 서버 타이머 감시.
 //
 // Neo 타이머는 스크립트가 한 번 던지면 STOP으로 두고 재시도하지 않는다. 앱이 열려 있으면
-// 앱이 되살리지만 닫아두면 아무도 모른다 — 실제로 순간적인 소켓 고갈 하나로 감시가 1.4시간
-// 꺼져 있었다. 그래서 서버 안에 감시자를 둔다.
+// 앱이 되살리지만 닫아두면 아무도 모른다 — 그래서 서버 안에 감시자를 둔다.
 //
 // 고리 구조 — 모두가 최소 한 명에게 감시받는다:
 //   NEO_VIBE_WD (5분)      → 감시·대역 추출을 본다
@@ -38,8 +37,11 @@
     return { act: true, w: { n: w.n + 1, at: now }, why: 'restart' };
   }
 
+  // 기본 포트 — 이 값이 여러 곳에 흩어지면 한 곳만 고쳐 놓고 나머지를 잊는다
+  var DEFAULT_PORT = '5654';
+
   /* TQL에 박을 감시 코드. 호출부는 `wdTick(db)` 한 줄이면 된다.
-       o: { base('http://127.0.0.1:5654'), authPath,
+       o: { port('5654' — 브라우저가 본 포트, 힌트), authPath, endpointPath,
             targets: [{ peer(타이머 이름), hb(상대 심박 키), key(이력 키),
                         stale, gap, max, calm }] } */
   function wdSrc(o) {
@@ -48,8 +50,11 @@
       return { peer: String(t.peer), hb: String(t.hb), key: String(t.key),
         cfg: { stale: Math.round(t.stale), gap: Math.round(t.gap), max: Math.round(t.max), calm: Math.round(t.calm) } };
     });
+    // base에서 포트를 되뽑지 않는다 — 두 표현이 갈라지면 어느 쪽이 진짜인지 알 수 없게 된다
+    var hint = String(o.port || (/:(\d+)$/.exec(String(o.base || '')) || [])[1] || DEFAULT_PORT);
     return [
-      'var WD_BASE=' + q(o.base) + ', WD_AUTH=' + q(o.authPath) + ';',
+      'var WD_HINT=' + q(hint) + ', WD_DEF=' + q(DEFAULT_PORT) + ';',
+      'var WD_AUTH=' + q(o.authPath) + ', WD_EP=' + q(o.endpointPath || '') + ';',
       'var WD_TARGETS=' + JSON.stringify(targets) + ';',
       // 고정 별칭 — 압축기가 이름을 바꿔도 부르는 쪽이 안 흔들린다(band.js와 같은 이유)
       'var __wdDecide=' + wdDecide.toString() + ';',
@@ -62,21 +67,42 @@
       '  else db.exec("insert into NEO_VIBE_MONSTATE values(\'"+k+"\',\'"+v+"\')"); }catch(e){} }',
       /* 자격 증명은 굽지 않고 런타임에 읽는다 — .tql은 파일 API로 읽히므로 비밀번호를
          박으면 노출 면이 하나 더 는다. 앱이 쓰는 파일이 없으면 앱과 같은 기본 계정으로 붙는다. */
-      'function wdLogin(){ var u="SYS", p="MANAGER";',
+      'function wdTok(port){ var u="SYS", p="MANAGER";',
       '  try{ var fs=require("@jsh/fs"); var a=JSON.parse(String(fs.readFile(WD_AUTH))); if(a&&a.user){ u=a.user; p=a.password||""; } }catch(e){}',
       '  var tok="";',
-      '  try{ $.request(WD_BASE+"/web/api/login",{method:"POST",headers:{"Content-Type":"application/json"},',
+      '  try{ $.request("http://127.0.0.1:"+port+"/web/api/login",{method:"POST",headers:{"Content-Type":"application/json"},',
       '    body:JSON.stringify({loginName:u,password:p})}).do(function(r){ if(r.status===200) r.text(function(t){',
       '      try{ tok=JSON.parse(String(t)).accessToken||""; }catch(e){} }); }); }catch(e){}',
       '  return tok; }',
+      /* 포트 확정 — 힌트로 붙어 보고, 안 되면 기본 포트로 붙어 본다. 브라우저는 프록시 뒤를
+         못 보지만 여기서는 127.0.0.1이 Neo 자신이라 "붙었다"가 곧 증명이다.
+         확정되면 파일로 남긴다: 언인스톨은 앱도 감시자도 없는 시점에 돌아서 이것 말고는 알 길이 없다.
+         힌트가 달라졌으면(포트를 옮겨 재기동) 옛 확정값을 버리고 다시 찾는다.
+         끝내 못 찾으면 아무것도 쓰지 않는다 — 틀린 값을 남기면 다음부터 찾아보지도 않는다. */
+      'var WD_PORT="";',
+      'function wdEpRead(){ try{ var fs=require("@jsh/fs"); return JSON.parse(String(fs.readFile(WD_EP))); }catch(e){ return null; } }',
+      'function wdResolve(){ if(WD_PORT) return WD_PORT;',
+      '  var ep=WD_EP?wdEpRead():null;',
+      '  if(ep&&ep.ok&&ep.port&&String(ep.hint||"")===WD_HINT){ WD_PORT=String(ep.port); return WD_PORT; }',
+      '  var cand=[], seen={}, i;',
+      '  [WD_HINT, WD_DEF].forEach(function(p){ p=String(p||""); if(p&&!seen[p]){ seen[p]=1; cand.push(p); } });',
+      '  for(i=0;i<cand.length;i++){ if(wdTok(cand[i])){ WD_PORT=cand[i];',
+      '    if(WD_EP) try{ require("@jsh/fs").writeFile(WD_EP, JSON.stringify({hint:WD_HINT, port:WD_PORT, ok:true}), "utf8"); }catch(e){}',
+      '    return WD_PORT; } }',
+      '  return WD_HINT||WD_DEF; }',
+      'function wdLogin(){ return wdTok(wdResolve()); }',
       'function wdStart(name){ var tok=wdLogin(); if(!tok) return false; var ok=false;',
-      '  try{ $.request(WD_BASE+"/web/api/timers/"+name+"/state",{method:"POST",',
+      '  try{ $.request("http://127.0.0.1:"+wdResolve()+"/web/api/timers/"+name+"/state",{method:"POST",',
       '    headers:{"Authorization":"Bearer "+tok,"Content-Type":"application/json"},',
       '    body:JSON.stringify({state:"start"})}).do(function(r){ ok=(r.status===200); }); }catch(e){}',
       '  return ok; }',
       /* 감시가 본체를 죽이면 본말전도다 — 여기서 나는 어떤 오류도 삼킨다.
          now를 인자로 받지 않는 이유는 대역 쪽 now가 생성 시각으로 구워져 있어서다. */
       'function wdTick(db){ var out=[];',
+      /* 되살릴 일이 없어도 포트는 한 번 확정해 둔다 — 여기서만 확인할 수 있는데, 되살릴 때만
+         하면 아무도 안 죽은 설치에서는 영영 안 남고 언인스톨이 추측으로 돌아간다.
+         확정 뒤에는 파일 한 번 읽고 끝이라 회차 비용이 늘지 않는다. */
+      '  try{ wdResolve(); }catch(e){}',
       '  for(var i=0;i<WD_TARGETS.length;i++){ var t=WD_TARGETS[i];',
       '    try{ var d=__wdDecide(wdGet(db,t.hb), wdGet(db,t.key), Date.now(), t.cfg);',
       '      if(!d.act){ out.push(t.peer+":"+d.why); continue; }',
@@ -102,5 +128,5 @@
       .join('\n');
   }
 
-  return { wdDecide: wdDecide, wdSrc: wdSrc, hbSrc: hbSrc, buildWatchdogTql: buildWatchdogTql };
+  return { wdDecide: wdDecide, wdSrc: wdSrc, hbSrc: hbSrc, buildWatchdogTql: buildWatchdogTql, DEFAULT_PORT: DEFAULT_PORT };
 });

@@ -1,4 +1,4 @@
-// db/index.js — Machbase Neo DB 연동 실행층. SQL 문자열은 전부 ./sql.js, 계산은 ../calc.
+// db/db.js — Machbase Neo DB 연동 실행층. SQL 문자열은 전부 ./sql.js, 계산은 ../calc.
 // fetch 기반 — 앱이 Neo(/public)에서 서빙되므로 same-origin. 시간값은 전부 ms(timeformat=ms).
 (function (root, factory) {
   if (typeof module === 'object' && module.exports) {
@@ -57,7 +57,7 @@
      rollup 미지원 테이블(ERR-2264)은 DATE_TRUNC 원본 집계로 자동 폴백하고 테이블별로 기억한다. */
   var _noRollup = {};
   function isRollupErr(e) { return /ROLLUP/i.test((e && e.message) || ''); }
-  // DATE_TRUNC 폴백은 원본 전체 스캔이라 대용량 테이블에서 매우 느리다(실측: 5,600만 행 시간집계 90초+).
+  // DATE_TRUNC 폴백은 원본 전체 스캔이라 대용량 테이블에서 매우 느리다.
   // 폴백일 때는 opts.truncCapMs(호출측이 샘플레이트 기반 행 예산으로 산정)로 구간을 캡한다. 기본 2시간.
   function isNoRollup(table) { return !!_noRollup[table]; }
 
@@ -101,11 +101,9 @@
     });
   }
 
-  // 원시 파형 구간 — maxPts=0이면 전체 해상도(스펙트럼 계산용), 지정 시 다운샘플(표시용)
-  /* 원시 파형 조회 — 유일하게 수십만 행이 오가는 경로라 전송 형식이 응답 시간을 지배한다.
-     JSON은 행마다 대괄호·쉼표가 붙고 파서가 객체를 만들어야 해서, 25.6 kHz 20초(약 54만 행)면
-     본문 전송+파싱만 0.7초가 든다. CSV는 같은 데이터가 절반 이하 크기이고 split+Number로 끝난다.
-     (다른 조회는 행 수가 작아 JSON 그대로 둔다 — 에러 본문의 reason을 살리는 이점이 크다.) */
+  /* 원시 파형 구간 조회 — maxPts=0이면 전체 해상도(스펙트럼 계산용), 지정 시 다운샘플(표시용).
+     수십만 행이 오가는 유일한 경로라 JSON 대신 CSV로 받는다(크기 절반 이하, split+Number 파싱).
+     다른 조회는 행 수가 작아 JSON 유지 — 에러 본문의 reason을 살리는 이점이 크다. */
   function rawWindow(table, tag, fromMs, toMs, maxPts) {
     var sql = SQL.rawWindow(table, tag, fromMs, toMs);
     var url = '/db/query?q=' + encodeURIComponent(sql) + '&format=csv&timeformat=ms&heading=false';
@@ -136,10 +134,8 @@
   }
 
   /* 샘플레이트 추정용 표본 시각 — 마이크로초 정수 배열.
-
-     rawWindow는 timeformat=ms라 25.6 kHz의 39 μs 간격이 전부 0으로 뭉개진다. ns는 자바스크립트
-     안전 정수(9e15)를 넘어 값이 망가진다. μs만 두 조건을 모두 만족한다(2026년 기준 1.76e15).
-     실패하면 빈 배열 — 호출측이 옛 추정으로 넘어간다. */
+     ms는 고주파 간격이 0으로 뭉개지고 ns는 JS 안전 정수를 넘는다 — μs만 두 조건을 만족한다.
+     실패하면 빈 배열 — 호출측이 다른 추정으로 넘어간다. */
   function sampleTimes(table, tag, fromMs, toMs, limit) {
     var sql = SQL.sampleTimes(table, tag, fromMs, toMs, limit);
     var url = '/db/query?q=' + encodeURIComponent(sql) + '&format=csv&timeformat=us&heading=false';
@@ -194,7 +190,7 @@
       var m = /^(\/public\/[^/]+)\//.exec(window.location.pathname);
       if (m) return m[1];
     }
-    return '/public/neo-pkg-replication'; // node 스모크/폴백
+    return '/public/neo-pkg-vibe-analytics'; // node 스모크/폴백 — 이 이름이 틀리면 설정·타이머 TQL이 없는 경로를 가리킨다
   }
 
   var _jwt = { token: '', exp: 0 };
@@ -213,7 +209,7 @@
   function loadConfig() {
     var names = Object.keys(CONFIG_FILES);
     return Promise.all(names.map(function (n) {
-      // cache: no-store — 저장(POST) 후 재접속 시 브라우저가 옛 GET 응답을 캐시로 주면 설정이 되돌아감(알람 자동 꺼짐 버그)
+      // cache: no-store — 브라우저가 옛 GET 응답을 캐시로 주면 저장한 설정이 되돌아간다
       return authedFetch(configDir() + '/' + n, { cache: 'no-store' })
         .then(function (r) { if (!r.ok) throw new Error('missing'); return r.json(); })
         .catch(function () { return null; });
@@ -225,7 +221,7 @@
   }
 
   // ── 파일 API 인증 ──
-  // cgi-bin/*은 정적 서빙에서 제외되므로(검증: 404) 설정 읽기/쓰기 모두 인증 파일 API를 쓴다.
+  // cgi-bin/*은 정적 서빙에서 제외되므로 설정 읽기/쓰기 모두 인증 파일 API를 쓴다.
   // 계정 우선순위: setAuth 지정(설정 저장 시 전달) > cgi-bin/config/neo-auth.json > 기본 SYS/MANAGER
   var _auth = null;
   function setAuth(a) { if (a && (a.user || a.password)) { _auth = a; _jwt = { token: '', exp: 0 }; } }
@@ -345,13 +341,8 @@
       // CREATE는 이미 있으면 실패하는 게 정상이라 전부 삼킨다(멱등하게 취급)
       .then(function () { return Promise.all(SQL.monCreateTables().map(function (s) { return q(s).catch(function () { }); })); });
   }
-  /* 이벤트 표 LOG → TAG 이관 (1회성, 멱등).
-
-     LOG는 가장 오래된 쪽부터 연속으로만 지워져서 "이 설비 이력만 삭제"가 불가능했다.
-     TAG로 바꾸면 NAME='<테이블>:<태그>' 단위로 지워진다. 롤업은 SUMMARIZED를 빼서 안 만든다.
-
-     순서가 중요하다 — 다 읽어서 손에 쥔 뒤에만 DROP한다. 읽기가 실패하면 아무것도 하지 않는다
-     (반쯤 지우고 실패하면 이력이 사라진다). 표가 없거나 이미 TAG면 조용히 지나간다. */
+  /* 이벤트 표 LOG → TAG 이관 (1회성, 멱등) — TAG는 NAME='<테이블>:<태그>' 단위 삭제가 가능하다.
+     다 읽어서 손에 쥔 뒤에만 DROP한다(읽기 실패 시 아무것도 하지 않음). 표가 없거나 이미 TAG면 조용히 지나간다. */
   var EV_TYPE_LOG = 0;
   function migrateEventsToTag() {
     return q(SQL.tableTypeOf('NEO_VIBE_EVENTS')).then(function (rows) {
@@ -386,10 +377,8 @@
   function loadEvents(limit) {
     return q(SQL.eventsSelect(limit)).then(function (rows) { return rows.map(evRow); });
   }
-  // 태그 단위 이벤트 삭제 — TAG 표가 되면서 가능해진 것(설비 철거 시 그 이력만 정리)
-  /* 행을 지운 뒤 이름까지 정리한다 — 데이터가 하나도 안 남은 태그는 목록에서도 사라져야 한다.
-     이름 정리가 실패해도 행 삭제는 성공으로 둔다: 남은 이름은 다음 삭제 때 다시 걸리고,
-     여기서 통째로 실패하면 사용자는 "지웠는데 그대로"만 보게 된다. */
+  /* 태그 단위 이벤트 삭제 — 행을 지운 뒤 데이터가 안 남은 이름(메타)까지 정리한다.
+     이름 정리 실패는 무시하고 행 삭제는 성공으로 둔다(남은 이름은 다음 삭제 때 다시 걸린다). */
   function purgeNames(table) { return q(SQL.metaPurgeOrphans(table)).catch(function () { return null; }); }
   function deleteEventsOfTag(tbl, tag) {
     return q(SQL.eventsDeleteTag(tbl, tag)).then(function (r) { return purgeNames('NEO_VIBE_EVENTS').then(function () { return r; }); });
@@ -400,14 +389,33 @@
   function deleteBandRange(fromMs, toMs) {
     return q(SQL.bandDeleteRange(fromMs, toMs)).then(function (r) { return purgeNames('NEO_VIBE_BAND').then(function () { return r; }); });
   }
-  /* 태그 하나의 대역 데이터 — 6키(대역 5 + fr)를 차례로 지운다.
-     한 키가 실패해도 나머지는 지운다: 일부만 남는 편이 "정리를 눌렀는데 아무것도 안 지워짐"보다 낫고,
-     남은 키는 다시 눌러 지울 수 있다. */
-  var BAND_KEYS = ['sub', 'one', 'fault', 'high', 'vh1', 'vh2', 'vh3', 'vh4', 'fr'];
+  /* 태그 하나의 대역 데이터 삭제 — 계열 키를 차례로 지우고, 한 키가 실패해도 나머지는 지운다.
+     계열 목록은 여기 따로 적지 않고 calc의 목록(판정 계열 + 저장 전용 + 옛 이름)을 그대로 쓴다. */
+  var BAND_KEYS = VC.BAND_ORDER.concat(VC.BAND_CTX, VC.BAND_LEGACY || []);
   function deleteBandOfTag(tbl, tag) {
     return BAND_KEYS.reduce(function (p, b) {
       return p.then(function () { return q(SQL.bandDeleteKey(tbl + ':' + tag + ':' + b)).catch(function () { }); });
     }, Promise.resolve()).then(function () { return purgeNames('NEO_VIBE_BAND'); });
+  }
+  /* 태그별 보유량 — { '테이블:태그': { band, events } }. 정리 화면이 "무엇을 지울지" 고르는 근거다.
+     BAND는 계열이 여러 개라 앞 두 마디로 묶는다. 한쪽 조회가 실패해도 다른 쪽은 보여준다 —
+     정리 화면이 통째로 안 열리는 것보다 반쪽이라도 열리는 편이 낫다. */
+  function tagUsage() {
+    var acc = {};
+    var add = function (kind) {
+      return function (rows) {
+        rows.forEach(function (r) {
+          var key = String(r[0]).split(':').slice(0, 2).join(':');
+          if (!key) return;
+          acc[key] = acc[key] || { band: 0, events: 0 };
+          acc[key][kind] += Number(r[1]) || 0;
+        });
+      };
+    };
+    return Promise.all([
+      q(SQL.bandNameCounts()).then(add('band')).catch(function () { return null; }),
+      q(SQL.eventNameCounts()).then(add('events')).catch(function () { return null; }),
+    ]).then(function () { return acc; });
   }
   // 판정 상태·학습값 — LOOKUP이라 키 단위. 되살릴 수 있는 것(상태)과 아닌 것(학습값)을 부르는 쪽이 구분한다
   function deleteMonState(key) { return q(SQL.kvDelete('NEO_VIBE_MONSTATE', key)); }
@@ -489,12 +497,8 @@
       return fetch('/web/api/timers' + (sub || ''), opts);
     });
   }
-  /* 타이머 상태 조회 — { 이름: { state, schedule, task } }.
-     state는 'RUNNING' 또는 'STOP, <에러문구>' 형태로 실패 이유까지 담겨 온다.
-     감시 타이머는 등록만 성공하고 첫 실행에서 죽을 수 있는데, 그러면 화면에는 아무 표시가
-     없어 "조용함 = 정상"과 구분되지 않는다. 그 구분을 만들려고 읽는다. */
-  /* 응답이 실패면 null이다 — 빈 목록으로 접으면 "하나도 없다"가 되어, 부르는 쪽이 남아서 도는
-     타이머를 없는 것으로 기억한다(삭제도 건너뛰고 재조회도 안 한다). 모르는 것은 모른다고 준다. */
+  /* 타이머 상태 조회 — { 이름: { state, schedule, task } }. state는 'RUNNING' 또는 'STOP, <에러문구>'.
+     조회 실패는 null(상태 모름) — 빈 목록으로 접으면 부르는 쪽이 남아 도는 타이머를 없는 것으로 기억한다. */
   function timerStates() {
     return authedTimer('', { cache: 'no-store' })
       .then(function (r) { return r.ok ? r.json() : null; })
@@ -508,22 +512,24 @@
       })
       .catch(function () { return null; });   // 조회 실패는 "상태 모름" — 없다고 단정하지 않는다
   }
-  // 없는 타이머 삭제는 조용히 통과 (idempotent — 그 기능을 한 번도 안 켰으면 없다)
+  /* 타이머는 반드시 멈춘 뒤에 지운다 — 삭제만으로는 실행 중인 회차가 멎는다는 보장이 없어
+     옛 스펙 인스턴스가 남아 돌 수 있다. 없는·이미 멈춘 타이머에 보내도 무해하므로 결과를 보지 않는다. */
+  function stopTimer(name) {
+    return authedTimer('/' + name + '/state', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ state: 'stop' }),
+    }).then(function () { return true; }).catch(function () { return true; });
+  }
   function deleteTimer(name) {
-    return authedTimer('/' + name, { method: 'DELETE' }).then(function () { return true; }).catch(function () { return true; });
+    return stopTimer(name)
+      .then(function () { return authedTimer('/' + name, { method: 'DELETE' }); })
+      .then(function () { return true; }).catch(function () { return true; });
   }
   /* 타이머 등록 — TQL 파일을 쓰고, 있으면 지운 뒤 만든다(autoStart라 등록이 곧 실행).
-
-     실행 중인 타이머는 PUT 수정이 500이라 delete→create가 유일한 교체 수단이다. 그런데 없는
-     타이머 DELETE도 500이고, 첫 등록은 늘 그 경우다 — 새 설치가 감시를 처음 켜면 세 타이머가
-     전부 빨간 요청을 하나씩 남긴다(삼켜지므로 동작은 멀쩡하고, 그래서 고장으로 읽힌다).
-     known은 부르는 쪽이 이미 확인해 둔 사실이다. 조회를 한 번 더 하는 대신 그것을 쓴다:
-       'absent'  없음을 확인했다      → 삭제를 건너뛴다 (켜는 순간이 여기다)
-       'present' 우리가 만든 것이 있다 → 확인 없이 지운다 (설정을 바꿔 다시 굽는 경우)
-       그 외      모른다              → 목록을 한 번 읽는다
-     읽지 못했으면 지워 본다 — 남아서 도는 것보다 낫다.
-     아는 것이 틀렸으면(다른 세션이 만들어 둔 경우) 생성이 실패하고, 호출측이 서명을 비워
-     다음 회차에 '모름' 경로로 되돌아온다. */
+     실행 중인 타이머는 PUT 수정이 500이라 delete→create가 유일한 교체 수단.
+     known: 부르는 쪽이 이미 확인해 둔 존재 여부 —
+       'absent'  없음 확인됨 → 삭제 건너뜀 · 'present' 있음 확인됨 → 바로 삭제 · 그 외 → 목록을 한 번 읽는다.
+     읽지 못했으면 지워 본다. known이 틀렸으면 생성이 실패하고 호출측이 다음 회차에 '모름' 경로로 돌아온다. */
   function putTimer(name, path, tqlSource, schedule, known) {
     return saveFile(path, tqlSource, 'text/plain')
       .then(function () {
@@ -541,11 +547,8 @@
       .then(function (j) { if (j.success === false) throw new Error(name + ' 타이머 생성 실패: ' + (j.reason || '')); return true; });
   }
   function deleteMonitorTimer() { return deleteTimer(MON_TIMER); }
-  /* 대역 추출 타이머 — 판정 타이머와 이름·파일·주기를 분리한다.
-     판정은 10초가 좋고 대역 추출은 FFT라 태그당 0.5~1초가 든다. 한 타이머에 묶으면
-     둘 다 나빠지고, 한쪽 실패가 다른 쪽을 멈춘다. */
-  /* 감시자 — 하는 일은 남의 심박을 보는 것뿐이다. 감시·대역 추출과 별개 타이머로 두는 이유는
-     감시가 살아있는지가 대역 추출 같은 선택 기능의 on/off에 걸리면 안 되기 때문이다. */
+  /* 대역 추출 타이머 — 판정 타이머와 이름·파일·주기 분리(주기 특성이 다르고, 한쪽 실패가 다른 쪽을 멈추지 않게).
+     감시자(WD) 타이머도 별개 — 감시 생존 확인이 선택 기능의 on/off에 걸리지 않게 한다. */
   var WD_TIMER = 'NEO_VIBE_WD';
   function wdTqlPath() { return pkgBase() + '/cgi-bin/watchdog.tql'; }
   function deleteWdTimer() { return deleteTimer(WD_TIMER); }
@@ -576,6 +579,15 @@
       return m;
     });
   }
+  /* 계열 여러 개의 최신값 — { 계열이름: 값 }. 판정이 태그마다 부른다. */
+  function bandLatest(keys, fromMs, toMs) {
+    if (!keys || !keys.length) return Promise.resolve({});
+    return q(SQL.bandLatest(keys, fromMs, toMs)).then(function (rows) {
+      var m = {};
+      rows.forEach(function (r) { m[String(r[0])] = r[1]; });   // 시각 오름차순 → 마지막이 최신
+      return m;
+    });
+  }
   // 대역 추세/원본 조회 — NAME은 "<테이블>:<태그>:<대역>"
   function bandTrend(key, unit, fromMs, toMs) {
     return q(SQL.bandTrend(key, unit, fromMs, toMs)).then(function (rows) {
@@ -596,7 +608,7 @@
     createMonitorTimer: createMonitorTimer, deleteMonitorTimer: deleteMonitorTimer,
     timerStates: timerStates, MON_TIMER: MON_TIMER, BAND_TIMER: BAND_TIMER,
     WD_TIMER: WD_TIMER, createWdTimer: createWdTimer, deleteWdTimer: deleteWdTimer,
-    createBandTimer: createBandTimer, deleteBandTimer: deleteBandTimer, bandTrend: bandTrend, bandRaw: bandRaw, bandBackfill: bandBackfill, bandTimes: bandTimes,
+    createBandTimer: createBandTimer, deleteBandTimer: deleteBandTimer, bandTrend: bandTrend, bandRaw: bandRaw, bandBackfill: bandBackfill, bandTimes: bandTimes, bandLatest: bandLatest,
     ensureDir: ensureDir, saveFile: saveFile, listDir: listDir, deleteFile: deleteFile, readFileBlob: readFileBlob,
     listTagTables: listTagTables, listTags: listTags, tagStats: tagStats, isNoRollup: isNoRollup,
     rollupTrend: rollupTrend, rollupBatch: rollupBatch, rawWindow: rawWindow, sampleTimes: sampleTimes, fftSpectrum: fftSpectrum,
@@ -604,7 +616,7 @@
     ensureMonTables: ensureMonTables, loadEvents: loadEvents, loadEventsRange: loadEventsRange, countEvents: countEvents,
     loadBaselines: loadBaselines, saveBaseline: saveBaseline, deleteBaseline: deleteBaseline,
     insertEvent: insertEvent, loadMonState: loadMonState, saveMonState: saveMonState,
-    usageStats: usageStats, countRange: countRange,
+    usageStats: usageStats, countRange: countRange, tagUsage: tagUsage,
     deleteEventsOfTag: deleteEventsOfTag, deleteEventsRange: deleteEventsRange, migrateEventsToTag: migrateEventsToTag,
     deleteBandRange: deleteBandRange, deleteBandOfTag: deleteBandOfTag, deleteMonState: deleteMonState
   };

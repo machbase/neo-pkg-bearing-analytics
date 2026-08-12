@@ -44,6 +44,11 @@ const cases = [
   ['monitor 기본', {}],
   ['monitor 필터+알람중지+토스트', { gradeFilter: 1, monitorOn: false, toast: { msg: 't', kind: 'warn' } }],
   ['monitor 빈 소스', { srcSel: [] }],
+  // 테이블 필터 — 드롭다운(체크·수·푸터)과 걸린 칩이 실제로 렌더되는지
+  ["monitor 테이블 필터 열림", { tblOpen: true }, ["테이블 검색", "전체 선택", "전체 해제", "닫기", "GEARBOX_VIB"]],
+  ['monitor 테이블 필터 적용', { tblHide: ['SENSOR_DATA'] }, ['MOTOR_CURRENT', 'codicon-close', '!전체 테이블 표시 중']],
+  ['monitor 테이블 전체 표시', {}, ['전체 테이블 표시 중']],
+  ['monitor 테이블 전부 해제', { tblHide: ['VIBRATION_RAW', 'SENSOR_DATA', 'MOTOR_CURRENT', 'GEARBOX_VIB', 'BEARING_TEMP'] }, ['표시할 테이블을 하나도 고르지 않았습니다', '전체 표시']],
   ['detail 기본', { tab: 'detail' }],
   ['detail 빈 소스', { tab: 'detail', srcSel: [] }],
   ['detail 종합분석+AI소견', { tab: 'detail', dxOpen: true, dxAiText: '소견 텍스트' }],
@@ -213,7 +218,10 @@ const cases = [
     band: { rows: 39120, keys: 396, span: { from: d.now - 30 * 86400000, to: d.now } },
     monstate: { rows: 269 }, baseline: { rows: 26 },
   } }, ['이벤트 이력', 'NEO_VIBE_EVENTS', '>TAG<', '>LOOKUP<', '대역 에너지 추이', '판정 상태', '7,730건',
-    '기간 삭제…', '태그 단위 삭제도 가능', '학습 구간 포함 주의',
+    '기간 삭제…', '기간 안 모든 태그', '학습 구간 포함 주의',
+    /* 태그별 정리는 감시 목록 밖 태그가 있을 때만 나온다 — 이 케이스는 tagUsage가 없어(현황만 읽음)
+       고아를 모르는 상태다. 없는 기능을 있다고 적던 문구가 되살아나지 않게 함께 막는다. */
+    '!태그별 정리…', '!태그 단위 삭제도 가능',
     // 이벤트가 TAG가 되면서 설비 단위 삭제가 가능해졌다 — 옛 LOG 제약 문구가 남아 있으면 안 된다
     '!LOG 테이블이라 중간을 지울 수 없어', '태그의 이력만 따로',
     // 학습값은 행이 아니라 각주다 — 늘지 않는 데이터라 정리 대상이 아니다
@@ -386,8 +394,10 @@ const cases = [
   ['settings criteria 측정 불가 대역', { tab: 'settings', setSection: 'criteria', bandOn: true,
     baselines: Object.fromEntries(['sub', 'one', 'fault', 'high'].map((b) => [eq0.table + ':' + eq0.name + ':' + b,
       { mu: 1, sigma: 0.01, k: 3, n: 130, band: b, at: Date.now() }])) },
-    // 목 설비는 fs=25600(Nyquist 12.8k)이라 8개 대역 모두 측정 가능 — 빠진 것은 학습 실패로 표시된다
-    ['4/8 대역 학습됨', '학습 안 됨', '2~4 kHz', '표본 부족 또는 학습 실패']],
+    /* 목 설비는 fs=25600(Nyquist 12.8k)이라 8개 대역 모두 측정 가능이고, 마운팅 미상이어도
+       복조 대역이 성립해 주기성 1계열이 붙는다(품번 없으면 결함주파수 3계열은 안 붙음) → 분모 9.
+       분모가 대역 8개만 세면 분자(포락선 포함)가 분모를 넘는다 — 12/8 방지. */
+    ['4/9 계열 학습됨', '학습 안 됨', '2~4 kHz', '표본 부족 또는 학습 실패']],
   /* 표본 칩 — 비율이 아니라 개수로 쓴다. 알아야 할 것은 "최소 표본(30)을 넘었나"인데
      28% 같은 값으로는 판단이 안 된다(144칸의 28%는 40개로 충분, 60칸이면 17개로 부족). */
   ['settings criteria 표본 현황', { tab: 'settings', setSection: 'criteria', bandOn: true,

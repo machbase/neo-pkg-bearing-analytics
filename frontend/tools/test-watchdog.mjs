@@ -173,5 +173,80 @@ const NOW = 1_700_000_000_000;
   chk(tg.NEO_VIBE_BAND === 1800000, '대역 기준 = 3배와 30분 중 큰 쪽', String(tg.NEO_VIBE_BAND));
 }
 
+// ── 5. Neo 포트 확정 ───────────────────────────────────────────────────────
+/* 브라우저가 본 포트는 힌트일 뿐이다 — 리버스 프록시가 끼면 :8080으로 보여도 Neo는 5654다.
+   서버 안에서는 127.0.0.1이 Neo 자신이라 "붙었다"가 곧 증명이 된다. 임베드 소스를 실제로
+   평가해 붙어 보는 순서·기록·재탐지를 확인한다(문자열 검사로는 동작을 못 본다). */
+{
+  // 임베드본을 격리 평가한다 — $.request·@jsh/fs를 흉내 내고 어느 포트가 열려 있는지만 정한다
+  const run = (hint, openPort, epFile) => {
+    const src = WD.wdSrc({ port: hint, authPath: '/work/a.json', endpointPath: '/work/ep.json', targets: [] }).join('\n');
+    const tried = [];
+    const files = { '/work/ep.json': epFile ? JSON.stringify(epFile) : null };
+    const $ = {
+      request(url) {
+        const p = (/:(\d+)\//.exec(url) || [])[1];
+        if (/\/login$/.test(url)) tried.push(p);
+        return { do(cb) {
+          const ok = p === String(openPort);
+          cb({ status: ok ? 200 : 502, text(f) { f(JSON.stringify({ accessToken: 't' })); } });
+        } };
+      },
+    };
+    const require2 = (m) => {
+      if (m !== '@jsh/fs') throw new Error('no module');
+      return {
+        readFile(p) { if (files[p] == null) throw new Error('ENOENT'); return files[p]; },
+        writeFile(p, s) { files[p] = s; },
+      };
+    };
+    const fn = new Function('$', 'require', src + '\nreturn { port: wdResolve(), ep: (function(){ try { return JSON.parse(require("@jsh/fs").readFile("/work/ep.json")); } catch (e) { return null; } })() };');
+    return Object.assign(fn($, require2), { tried });
+  };
+
+  // 직접 접속 — 힌트가 맞으니 한 번에 끝난다
+  let r = run('5655', '5655', null);
+  chk(r.port === '5655', 'Neo 직접 5655: 힌트 그대로 확정', r.port);
+  chk(r.tried.length === 1, '맞으면 기본 포트를 찔러보지 않는다', r.tried.join(','));
+  chk(r.ep && r.ep.ok && r.ep.port === '5655', '확정 포트를 파일로 남긴다', JSON.stringify(r.ep));
+
+  // 프록시 :8080 뒤, Neo는 5654 — 힌트가 틀렸어도 찾아낸다
+  r = run('8080', '5654', null);
+  chk(r.port === '5654', '프록시 8080 뒤: 기본 포트로 확정', r.port);
+  chk(r.tried.join(',') === '8080,5654', '힌트 먼저, 그 다음 기본 포트', r.tried.join(','));
+  chk(r.ep && r.ep.port === '5654' && r.ep.hint === '8080', '확정값과 함께 어느 힌트로 찾았는지도 남긴다', JSON.stringify(r.ep));
+
+  // 프록시 뒤인데 Neo가 9000 — 못 찾는다. 틀린 값을 남기면 다음부터 찾아보지도 않는다.
+  r = run('8080', '9000', null);
+  chk(r.ep === null, '못 찾으면 아무것도 쓰지 않는다', JSON.stringify(r.ep));
+  chk(r.tried.join(',') === '8080,5654', '후보를 다 시도하고 포기', r.tried.join(','));
+
+  // 확정본이 있으면 다시 안 찔러본다 — 회차마다 로그인하면 낭비다
+  r = run('5655', '5655', { hint: '5655', port: '5655', ok: true });
+  chk(r.tried.length === 0, '확정된 뒤에는 붙어 보지 않는다', String(r.tried.length));
+  chk(r.port === '5655', '파일의 확정 포트를 그대로 쓴다', r.port);
+
+  // 포트를 옮겨 재기동 — 힌트가 달라지면 옛 확정값을 버린다
+  r = run('7000', '7000', { hint: '5655', port: '5655', ok: true });
+  chk(r.port === '7000', '힌트가 바뀌면 다시 찾는다', r.port);
+  chk(r.ep.port === '7000' && r.ep.hint === '7000', '새 확정값으로 덮어쓴다', JSON.stringify(r.ep));
+
+  // ok가 없는 파일(반쯤 쓰인 것)은 확정으로 치지 않는다
+  r = run('5654', '5654', { hint: '5654', port: '9999' });
+  chk(r.port === '5654', 'ok 없는 기록은 무시하고 다시 확정', r.port);
+
+  // 힌트와 기본이 같으면 한 번만 시도한다
+  r = run('5654', '5654', null);
+  chk(r.tried.join(',') === '5654', '힌트=기본이면 중복 시도 없음', r.tried.join(','));
+
+  // 감시자 스펙이 포트·엔드포인트 경로를 실어 보내는지
+  const a = Object.create(App.prototype);
+  a.state = { monMode: 'server', monitorOn: true, bandOn: false, monitorInterval: '3s', bandInterval: '10m' };
+  const b = a._wdBase();
+  chk(b.port === '5654', '브라우저 밖(location 없음)에서는 기본 포트를 힌트로', b.port);
+  chk(/\/cgi-bin\/config\/neo-endpoint\.json$/.test(b.endpointPath), '엔드포인트 파일 경로', b.endpointPath);
+  chk(b.base === 'http://127.0.0.1:' + b.port, 'base와 port가 같은 값에서 나온다', b.base);
+}
+
 console.log(fail ? `\n=== FAIL ${fail}건 ===` : '\n=== 전부 통과 ===');
 process.exit(fail ? 1 : 0);

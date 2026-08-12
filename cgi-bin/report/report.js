@@ -610,6 +610,21 @@
     // 음성 소견·미설명 성분·미입력 메타데이터 — LLM이 빠뜨려도 리포트에는 남도록 결정론적으로 인쇄
     // 제목 + 들여쓴 줄 — 항목마다 한 줄씩 세워야 "몇 건인지"가 눈에 들어온다
     var negBlk = [];
+    /* 대역 베이스라인 이탈 — 감시가 본 것을 문서에도 남긴다. 위 대역 분배는 ISO 방법(10–1000 Hz)이라
+       마운팅 상한 위 대역이 표에 없고, 그 대역은 결함 대역 탐색에서도 빠진다. 여기에 안 적으면
+       "상승은 있었는데 아무 데도 안 적힌" 구간이 생겨, 센서 부착 불량도 베어링 초기 결함도 놓친다. */
+    if (d.bandDev && d.bandDev.rows && d.bandDev.rows.length) {
+      var _bdOver = d.bandDev.rows.filter(function (r) { return r.over; });
+      var _bdRows = _bdOver.length
+        ? _bdOver.map(function (r) { return r.ko + '  ×' + r.r + '  (' + r.v + ' → 한계 ' + r.lim + ')' + (r.soft ? '  ⚠마운팅 상한 초과 — 잠정' : ''); })
+        : ['전 ' + d.bandDev.rows.length + '개 대역 정상 — 평소 대비 한계 미만'];
+      if (_bdOver.some(function (r) { return r.soft; })) {
+        _bdRows.push('잠정 대역은 마운팅' + (d.bandDev.mount ? '(' + d.bandDev.mount + ')' : '') + ' 유효 상한'
+          + (d.bandDev.fmaxKHz ? ' ' + d.bandDev.fmaxKHz + ' kHz' : '') + '를 넘어 결함 대역 탐색에서 제외된 구간입니다. '
+          + '상승은 사실이나 설비 진동인지 센서 부착부 공진인지 구분할 수 없습니다 — 정비 전 센서 부착 상태를 먼저 확인하세요.');
+      }
+      negBlk.push({ t: '대역 베이스라인 이탈', sub: '학습된 한계(μ+kσ) 대비 비율 · ×1이 판정선', rows: _bdRows });
+    }
     if (d.negatives && d.negatives.length) negBlk.push({ t: '음성 소견', sub: '찾았으나 없음 · 반대 증거', rows: d.negatives });
     if (d.unexplained && d.unexplained.length) negBlk.push({ t: '미설명 성분', sub: '사전으로 설명되지 않음', rows: [d.unexplained.join(' · '), '구동 계통도(풀리비·기어비)·인접 기계 확인 시 대부분 해소'] });
     if (d.missing && d.missing.length) negBlk.push({ t: '미입력 메타데이터와 그 영향', sub: '', rows: d.missing });

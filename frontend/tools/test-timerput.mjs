@@ -46,6 +46,7 @@ const run = async (setup, known, opt) => {
   await DB.createMonitorTimer('SQL()', '@every 10s', known).catch((e) => { seen.push('THROW ' + e.message); });
   return {
     del: seen.filter((s) => s.startsWith('DELETE')).length,
+    stop: seen.filter((s) => /^POST .*\/state$/.test(s)).length,
     get: seen.filter((s) => s === 'GET /web/api/timers').length,
     post: seen.filter((s) => s === 'POST /web/api/timers').length,
     file: seen.filter((s) => s.includes('/cgi-bin/monitor.tql')).length,
@@ -70,6 +71,14 @@ await run({}, 'absent');   // 로그인 왕복을 미리 끝내 둔다 — 이�
   chk(r.del === 1 && r.post === 1, '있는 것을 지우고 다시 만든다', `DELETE ${r.del} · POST ${r.post}`);
   chk(r.get === 0, '아는 상태면 조회하지 않는다', `GET ${r.get}건`);
   chk(r.noise === 0, '5xx 응답 없음', `${r.noise}건`);
+
+  /* 멈추고 지운다 — 삭제만으로 실행 중인 회차가 멎는다는 보장이 없다. 안 멎으면 목록에서
+     사라진 채 계속 도는데, 중복 실행 잠금이 그걸 가려 조용히 skip만 뱉는다.
+     설정을 바꿀 때마다 교체하므로 한 번만 새도 옛 스펙 인스턴스가 계속 쌓인다. */
+  chk(r.stop === 1, '지우기 전에 멈춘다', `stop ${r.stop}건`);
+  const iStop = r.seen.findIndex((s) => /\/state$/.test(s));
+  const iDel = r.seen.findIndex((s) => s.startsWith('DELETE'));
+  chk(iStop >= 0 && iDel >= 0 && iStop < iDel, '정지가 삭제보다 먼저 간다', r.seen.filter((s) => /state|DELETE/.test(s)).join(' → '));
 }
 
 // ── 3. 모르는 상태(앱을 새로 열었다) — 한 번 읽고 판단한다 ─────────────────

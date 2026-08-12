@@ -1,4 +1,4 @@
-// calc/index.js — 진동 계산 코어 (순수 JS · fetch/DOM 없음)
+// calc/calc.js — 진동 계산 코어 (순수 JS · fetch/DOM 없음)
 // 프론트(Vite import)와 jsh(require) 겸용 UMD. 계산 로직의 단일 소스 — 여기만 수정한다.
 // (frontend/src/engine/vibe-engine.js 안의 ISO/BEARINGS 사본은 mock 데모 전용)
 //
@@ -12,9 +12,7 @@
   'use strict';
 
   /* ---------------- 판정 파라미터 지문 ----------------
-   * 리포트끼리 "왜 숫자가 다른가"를 가리는 값. 버전 문자열은 사람이 올리는 걸 잊으면 거짓말이 되지만,
-   * 지문은 실제 임계에서 계산되므로 동작이 바뀌면 반드시 달라진다.
-   * 지문이 같은데 결과가 다르면 = 데이터가 달라진 것 / 지문이 다르면 = 엔진이 달라진 것.
+   * 판정에 영향을 주는 상수들에서 계산한 해시 — 지문이 다르면 엔진이, 같은데 결과가 다르면 데이터가 달라진 것.
    * ⚠판정에 영향을 주는 상수를 바꾸면 이 목록에도 반영할 것.
    */
   var RULESET = '2026.07';
@@ -24,7 +22,7 @@
       'crest:15', 'kurt:25', 'crestBands:5/8/15', 'kurtBands:4/10/25',
       'matchTol:0.01', 'bpfTol:0.02', 'harm:2', 'ordTolRel:0.01',
       'satMinSpanMin:' + SAT_MIN_SPAN_MIN,
-      'mountFmax:10000/5000/2000/1000',
+      'mountFmax:10000/5000/2000/1000', 'bandSoft:edgeHi>fmax/capWarn',
       'bl:mad1.4826/idle0.2/ramp0.3/margin0.2/bimodal0.1x10',
       'bearingFsRatio:20', 'aliasFmax:0.8nyq/half', 'winMs:exact', 'bandGrade:1.5/3.0/hyst0.9',
       'bandLimGate:>0', 'evalWin:rms/partialCnt0.9',
@@ -65,6 +63,18 @@
     };
   }
 
+  /* 결함 주파수의 회전주파수 배수 계수 — 호출측이 그때그때 실측 fr을 곱해 쓴다(명판 기준 고정 방지). 형상이 없으면 null. */
+  function faultCoeffs(b) {
+    if (!b || !(b.n > 0) || !(b.Pd > 0)) return null;
+    var ratio = (b.Bd / b.Pd) * Math.cos((b.phi || 0) * Math.PI / 180);
+    return {
+      O: (b.n / 2) * (1 - ratio),
+      I: (b.n / 2) * (1 + ratio),
+      B: b.Bd > 0 ? (b.Pd / (2 * b.Bd)) * (1 - ratio * ratio) : 0,
+      F: 0.5 * (1 - ratio),
+    };
+  }
+
   // 결함 주파수 요약(설정탭 칩 표시용): rpm + bearing → { fr, sleeve, list:[[label,Hz],…] }
   function faultFreqSummary(rpm, b) {
     var fr = rpm / 60;
@@ -74,10 +84,8 @@
   }
 
   /* ---------------- 롤업 버킷 / 통계 ---------------- */
-  // /db/query 롤업 행 [ms, SUMSQ, COUNT, MIN, MAX] → {ms, rms, p2p, crest, cnt}
-  /* r = [ms, SUMSQ, COUNT, MIN, MAX, SUM?] — SUM은 뒤에 붙은 선택 컬럼이다.
-     sum이 있으면 windowRms가 평균(DC)을 빼고 실효값을 낸다. ISO는 AC 성분 기준이고,
-     오프셋이 있는 센서에서는 DC가 그대로 판정값을 부풀린다. */
+  // /db/query 롤업 행 r=[ms, SUMSQ, COUNT, MIN, MAX, SUM?] → {ms, rms, p2p, crest, cnt(, sum)}
+  // SUM이 있으면 windowRms가 평균(DC)을 뺀 AC 실효값을 낸다.
   function toBucket(r) {
     var cnt = r[2];
     if (!cnt) return null;
@@ -89,25 +97,15 @@
   }
 
   /* 기간 지표 4종 — 상세분석 화면과 리포트가 같은 값·같은 등급을 쓰도록 한 곳에서 낸다.
-     화면과 리포트가 각자 계산하면 같은 설비가 두 등급으로 보인다.
-
-     규칙:
-      · 대표값은 최댓값이 아니라 백분위(P95) — N개 버킷의 최댓값은 단일 극단치에 좌우된다.
-        최댓값은 값과 초과 횟수만 싣고 등급을 매기지 않는다(n.wMax·n.overBC).
-      · Crest 기준은 상수가 아니라 샘플 수의 함수 — N샘플 백색잡음의 기대 최대 = √(2·ln N).
-        3.0 같은 상수를 쓰면 정상 기계(3~5)가 전부 경보가 된다. 15 초과는 결함이 아니라
-        계측 아티팩트(단발 스파이크)라 등급 대신 그 사실을 badge로 낸다.
-      · 변화율은 관측 창이 짧으면 등급을 매기지 않는다 — ISO Criterion II는 정상상태·동일
-        계측조건 전제이고, 짧은 창에서는 운전 변동이 그대로 악화로 읽힌다.
-      · 계측 게이트가 켜져 있으면 RMS 계열 등급은 '잠정' — 파형을 믿을 수 없는 상태다.
-
+      · 대표값은 P95 — 최댓값은 값·초과 횟수만 싣고 등급을 매기지 않는다(n.wMax·n.overBC)
+      · Crest 기준은 샘플 수의 함수 √(2·ln N) — 15 초과는 계측 아티팩트로 badge 처리
+      · 변화율은 관측 창 60분 미만이면 등급 없음(참고)
+      · 계측 게이트가 켜져 있으면 RMS 계열 등급은 '잠정'
      반환의 badge가 비어 있지 않으면 등급어 대신 그 문구를 쓴다. 라벨·서식은 부르는 쪽 몫이다. */
   function sevMetrics(roll, o) {
     o = o || {}; roll = roll || [];
     var zones = o.zones || [0, 0, 0], gate = !!o.gate, i;
-    /* 버킷 rms는 √(Σx²/N)이라 DC를 포함한다. 진동은 정의상 평균 주위의 흔들림이므로
-       평균을 빼야 한다 — 오프셋 9.0에 진동 0.72인 센서가 9.03으로 보이면 12배 과대다.
-       Crest도 같다: peak을 평균 기준으로 재야 오프셋이 분자·분모를 동시에 부풀리지 않는다. */
+    // 버킷 rms(√(Σx²/N))는 DC 포함 → 평균을 빼 AC 실효값으로. Crest의 peak도 평균 기준으로 잰다.
     var rms = [], crestA = [], cnt = 0;
     for (i = 0; i < roll.length; i++) {
       var b0 = roll[i];
@@ -266,10 +264,7 @@
       return { ok: false, issues: issues, severe: true, gate: true }; // 나머지 검사 무의미
     }
     // clip: 최고치 밴드가 바로 아래 밴드보다 과밀 = 평평한 꼭대기(잘림). 매끈한 사인은 밀도비 ≈2.4라 안 걸림.
-    /* 밴드폭은 range와 σ 중 좁은 쪽으로 잡는다. range만 쓰면 단발 스파이크 하나가 range를
-       수십 배로 늘려, 나머지 신호 전체가 "평평한 바닥"으로 뭉쳐 클리핑으로 오분류된다
-       (실측: 진폭 0.05 정현파 + 스파이크 20 → 밴드폭 0.10이 신호를 통째로 삼켰다).
-       진짜 포화는 σ가 큰 상태에서 꼭대기만 평평하므로 좁은 밴드로도 그대로 잡힌다. */
+    // 밴드폭은 range와 σ 중 좁은 쪽 — range만 쓰면 단발 스파이크가 range를 키워 나머지 신호가 클리핑으로 오분류된다.
     var b = Math.min(range * 0.005, std * 0.05) || range * 0.005;
     function inBand(lo, hi) { var c = 0; for (var j = 0; j < n; j++) if (values[j] >= lo && values[j] < hi) c++; return c; }
     var topMax = inBand(mx - b, mx + 1e-9), nextMax = inBand(mx - 2 * b, mx - b);
@@ -285,12 +280,8 @@
     var crest = std > 1e-12 ? peakAC / std : 0, kurt = kurtosis(values), gate = false;
     if (crest > 15) { issues.push({ key: 'spike', label: '단발 스파이크 의심', detail: 'Crest ' + crest.toFixed(1) + ' — 결함 신호(통상 <10)보다 스파이크성 잡음(ESD·케이블·접촉) 시그니처에 가깝습니다' }); }
     if (kurt > 25) { issues.push({ key: 'kurtx', label: '극단 첨도', detail: 'Kurtosis ' + kurt.toFixed(1) + ' — 소수 샘플이 지배하는 신호, 계측 아티팩트 가능성 — 센서·마운팅 확인 필요' }); }
-    /* 판정을 막는 사유 — 감시(gateFromBuckets·gateFromRaw)와 같은 목록이어야 한다.
-       한쪽만 세면 같은 태그가 모니터링에서는 판정 보류, 상세분석에서는 확정 등급으로 갈린다.
-       클리핑은 진폭이 과소로 나오고(Crest까지 낮아진다) DC 드리프트는 RMS가 부풀려지므로,
-       둘 다 "값이 틀린 방향을 아는" 상태다 — 경고로 두고 등급을 확정하면 그 등급이 거짓말이 된다.
-       ⚠배열은 함수 안에 둔다 — 이 함수는 소스가 서버 TQL에 문자열로 박혀 바깥 이름을 쓸 수 없다
-       (모듈 상수 GATE_BLOCK과 갈라지지 않는지는 test-gate.mjs가 확인한다). */
+    /* 판정을 막는 사유 — 감시(gateFromBuckets·gateFromRaw)와 같은 목록이어야 한다(다르면 감시·상세분석 판정이 갈린다).
+       ⚠배열은 함수 안에 둔다 — 이 함수는 서버 TQL에 문자열로 임베드되어 바깥 이름(GATE_BLOCK)을 쓸 수 없다. */
     var BLOCK = ['flatline', 'sparse', 'spike', 'kurtx', 'clip', 'dc'];
     for (i = 0; i < issues.length; i++) if (BLOCK.indexOf(issues[i].key) >= 0) gate = true;
     return { ok: issues.length === 0, issues: issues, severe: false, gate: gate };
@@ -389,10 +380,8 @@
     return bp.length ? Math.sqrt(s / bp.length) : 0;
   }
 
-  /* 여러 대역의 RMS를 FFT 한 번으로 구한다.
-     bandRms를 대역마다 부르면 같은 신호를 매번 FFT+역FFT 하므로, 대역 4~5개에 53만 샘플이면
-     그것만으로 0.25초가 든다. Parseval 정리로 주파수영역에서 바로 제곱합을 내면 역FFT가 필요 없다.
-     bands: [[lo,hi], …] → 같은 순서의 RMS 배열. bandRms와 동일한 값을 준다(검증: test-dsp). */
+  /* 여러 대역의 RMS를 FFT 한 번으로 — Parseval 정리로 주파수영역에서 제곱합을 내 대역별 역FFT를 생략한다.
+     bands: [[lo,hi], …] → 같은 순서의 RMS 배열(bandRms와 동일 값). */
   function bandRmsMulti(values, fs, bands) {
     var n = values.length, m = 1; while (m * 2 <= n) m *= 2;
     if (m < 16 || !(fs > 0) || !bands || !bands.length) return (bands || []).map(function () { return 0; });
@@ -510,62 +499,69 @@
   // 가점 조건 = "매칭 + 하모닉 2개 이상" — 단일 피크는 우연 일치와 구분되지 않는다.
   // 미매칭은 무증거가 아니라 반대 증거이므로 negatives로 돌려 보고(음성 소견)한다.
   // 측대역은 반송파가 그 결함주파수일 때만 근거: 내륜=BPFI±1×, 전동체=BSF±FTF, 외륜=측대역 없음.
-  /* 포락선 복조로 베어링 결함을 볼 수 있는 최소 샘플레이트.
-     복조가 성립하려면 충격 링잉(고주파 반송파)과 결함 반복(저주파 변조)이 충분히 분리돼야 한다.
-     반송파를 볼 수 없는 샘플레이트에서는 "미검출"이 아니라 "측정 불가"다(R7) — 낮은 샘플레이트로
-     잡히지 않은 것을 반대 증거로 쓰면 있는 결함을 없다고 말하게 된다.
-     기준은 최고 결함주파수의 20배 — 반복 성분의 하모닉 몇 개와 반송파 대역이 Nyquist 안에 들어올 최소선. */
+  /* 포락선 복조로 베어링 결함을 볼 수 있는 최소 샘플레이트 = 최고 결함주파수의 20배.
+     그 미만은 "미검출"이 아니라 "측정 불가"로 다룬다(반대 증거로 쓰지 않는다). */
   /* ---------------- 대역 이탈 판정 ----------------
-     대역은 ISO 존과 무관하므로 "평소 대비 배수"로 등급을 매긴다. 그리고 상관된 대역
-     (fault+high+vhigh는 한 결함의 세 표현)을 따로 알리면 알람이 배로 늘어 피로해지므로,
-     설비 단위로 하나로 합성한다 — 어느 대역이 함께 올랐는지가 오히려 진단 정보다.
-     복귀는 ×0.9로 히스테리시스를 둔다(한계 근처 진동으로 이벤트가 반복되는 것을 막음). */
-  var BAND_KO = { sub: '서브동기', one: '1× 대역', fault: '결함 대역', high: '고주파', vh1: '1~2 kHz', vh2: '2~4 kHz', vh3: '4~8 kHz', vh4: '8 kHz+' };
-  var BAND_ORDER = ['sub', 'one', 'fault', 'high', 'vh1', 'vh2', 'vh3', 'vh4'];
+     학습된 한계(μ+kσ) 대비 비율로 등급을 매기고, 상관된 대역들은 설비 단위 이벤트 하나로 합성한다.
+     복귀는 ×0.9 히스테리시스. */
+  var BAND_KO = { sub: '서브동기', one: '1× 대역', fault: '결함 대역', high: '고주파', vh1: '1~2 kHz', vh2: '2~4 kHz', vh3: '4~8 kHz', vh4: '8 kHz+',
+    envPkRel: '주기성', envBPFO: 'BPFO(외륜)', envBPFI: 'BPFI(내륜)', envBSF: 'BSF(볼)', envFTF: 'FTF(케이지)', envF0: '반복주파수', envHarm: '하모닉 수', fr: '회전주파수' };
+  /* 주파수 대역 8칸 — bandEnergy의 출력 순서이자 bandEdges의 인덱스와 1:1이다.
+     대역 경계·측정 가능성을 인덱스로 따지는 곳은 반드시 이 목록을 써야 한다(BAND_ORDER는 더 길다). */
+  var BAND_FREQ = ['sub', 'one', 'fault', 'high', 'vh1', 'vh2', 'vh3', 'vh4'];
+  /* 판정 계열 — 대역 8칸 + 포락선 4. 학습·판정·삭제가 이 목록을 돈다.
+     포락선 쪽은 주파수 대역이 아니라 복조 스펙트럼에서 읽은 값이라 경계가 없다.
+     envF0(반복주파수)·envHarm(개수)·envFTF·fr은 여기 없다 — 저장은 하되 판정하지 않는다(BAND_CTX).
+     FTF를 뺀 이유는 0.4×fr이라 오일훨(0.38~0.48×)과 겹쳐 오탐이 되기 때문이고, F0·harm은
+     "몇 Hz인가·몇 개인가"라 커지는 게 나쁜 값이 아니라서다. */
+  var BAND_ORDER = BAND_FREQ.concat(['envPkRel', 'envBPFO', 'envBPFI', 'envBSF']);
+  var BAND_CTX = ['fr', 'envF0', 'envHarm', 'envFTF'];
   /* 이름이 바뀌기 전 학습값 — 삭제 경로에서만 쓴다. 목록에서 빠진 뒤에도 표에 남으면
      아무도 안 보는 행이 영영 쌓인다. */
   var BAND_LEGACY = ['vhigh'];
   var BAND_GRADE = [1.5, 3.0];   // ×1.0~1.5 주의 · 1.5~3.0 위험 · 3.0~ 심각
   var BAND_HYST = 0.9;           // 복귀 판정 배수
   /* now: {대역:값} · bls: {대역:{mu,sigma,k}} · wasOn: 직전 이탈 여부(히스테리시스용)
-     반환 { on, gi, over:[{k,ko,v,lim,r}], maxR, detail } — detail은 이벤트 DETAIL 컬럼에 그대로 들어간다
-
-     이 함수는 소스가 통째로 서버 TQL에 박히므로(monitor.js) 바깥 이름을 하나도 쓰지 않는다.
-     상수도 한계식도 안에서 다시 선언한다 — 모듈 상수를 참조하면 번들 압축 때 이름이 바뀌어
-     TQL 쪽에서 ReferenceError로 죽는다. 중복이 생긴 만큼 test-embedsrc.mjs가 모듈 상수·
-     baselineLimit과 값이 어긋나지 않는지 확인한다. */
-  function bandJudge(now, bls, wasOn) {
+     반환 { on, gi, over:[{k,ko,v,lim,r,soft}], maxR, soft, detail } — detail은 이벤트 DETAIL 컬럼에 그대로 들어간다.
+     ⚠소스가 통째로 서버 TQL에 임베드되므로(monitor.js) 바깥 이름을 쓰지 않는다 — 상수·한계식을 안에서 재선언.
+     softKeys: 마운팅 유효 상한을 넘어 확정 근거로 못 쓰는 대역 키들(softBands 산출) —
+     그 대역만 이탈이면 등급 상한 '주의'(잠정), 확정 대역이 함께 이탈이면 등급은 그쪽 배수로만 정한다. */
+  function bandJudge(now, bls, wasOn, softKeys) {
     if (!now || !bls) return null;
-    var ORDER = ['sub', 'one', 'fault', 'high', 'vh1', 'vh2', 'vh3', 'vh4'];
-    var KO = { sub: '서브동기', one: '1× 대역', fault: '결함 대역', high: '고주파', vh1: '1~2 kHz', vh2: '2~4 kHz', vh3: '4~8 kHz', vh4: '8 kHz+' };
+    // TQL 임베드라 바깥 BAND_ORDER·BAND_KO를 못 쓴다 — 아래 사본은 모듈 목록과 항상 같아야 한다.
+    var ORDER = ['sub', 'one', 'fault', 'high', 'vh1', 'vh2', 'vh3', 'vh4', 'envPkRel', 'envBPFO', 'envBPFI', 'envBSF'];
+    var KO = { sub: '서브동기', one: '1× 대역', fault: '결함 대역', high: '고주파', vh1: '1~2 kHz', vh2: '2~4 kHz', vh3: '4~8 kHz', vh4: '8 kHz+',
+      envPkRel: '주기성', envBPFO: 'BPFO(외륜)', envBPFI: 'BPFI(내륜)', envBSF: 'BSF(볼)' };
     var GRADE = [1.5, 3.0], HYST = 0.9;
     var thr = wasOn ? HYST : 1.0;
-    var over = [], maxR = 0, any = false;
+    var SOFT = {}, si;
+    if (softKeys) for (si = 0; si < softKeys.length; si++) SOFT[softKeys[si]] = 1;
+    var over = [], maxR = 0, hardMaxR = 0, any = false;
     ORDER.forEach(function (k) {
       var v = now[k], b = bls[k];
       if (!(v > 0) || !b) return;
       var lim = b ? Math.max(b.mu + (b.k || 3) * b.sigma, b.mu * 1.2) : null;   // baselineLimit과 같은 식
-      /* 한계가 0이면 그 대역은 판정에 쓸 수 없다 — 대역 하한이 Nyquist보다 높아 값이 항상 0이면
-         μ=0·σ=0으로 학습되어 이렇게 된다. any를 이 검사 뒤에 세워야 "쓸 수 있는 대역이 하나도
-         없음"과 "있는데 이탈 아님"이 구분된다. 앞에 세우면 판정 불가를 정상으로 단정하게 된다. */
+      // 한계 0(빈 대역이 μ=0·σ=0으로 학습된 것)은 판정 제외. any는 이 검사 뒤에 세워야 "판정 가능 대역 없음"과 "이탈 아님"이 구분된다.
       if (!(lim > 0)) return;
       any = true;
-      var r = v / lim;
+      var r = v / lim, sf = !!SOFT[k];
       if (r > maxR) maxR = r;
-      if (r > thr) over.push({ k: k, ko: KO[k], v: v, lim: lim, r: r });
+      if (!sf && r > hardMaxR) hardMaxR = r;
+      if (r > thr) over.push({ k: k, ko: KO[k], v: v, lim: lim, r: r, soft: sf });
     });
     if (!any) return null;                       // 학습된 대역이 하나도 없음 — 판정 불가
     var on = over.length > 0;
-    var gi = !on ? 0 : (maxR > GRADE[1] ? 3 : maxR > GRADE[0] ? 2 : 1);
+    var nHard = 0;
+    for (si = 0; si < over.length; si++) if (!over[si].soft) nHard++;
+    var giHard = !nHard ? 0 : (hardMaxR > GRADE[1] ? 3 : hardMaxR > GRADE[0] ? 2 : 1);
+    var gi = !on ? 0 : (giHard || 1);            // 잠정 대역만 이탈 → '주의'가 상한
     var detail = over.map(function (o) {
-      return o.k + '=' + o.v.toFixed(3) + '/' + o.lim.toFixed(3);
+      return o.k + '=' + o.v.toFixed(3) + '/' + o.lim.toFixed(3) + (o.soft ? '(잠정)' : '');
     }).join(' · ');
-    return { on: on, gi: gi, over: over, maxR: maxR, detail: detail };
+    return { on: on, gi: gi, over: over, maxR: maxR, soft: on && !nHard, detail: detail };
   }
-  /* 대역 경계(Hz) — band.js의 bandsFor와 같은 정의. 화면이 "왜 이 대역은 학습이 안 되나"를
-     설명하려면 여기서도 필요하다(두 벌이면 어긋나므로 정의는 하나로 두고 band.js가 이걸 쓴다).
-     초고주파는 회전주파수와 무관하게 1000 Hz 고정 하한이라, 샘플레이트가 2 kHz 미만이면
-     하한이 Nyquist를 넘어 빈 대역이 된다 — 그 태그는 4/5가 정상이고 5/5가 나올 수 없다. */
+  /* 대역 경계(Hz) — 정의는 여기 하나뿐이고 band.js(bandsFor)가 이걸 쓴다.
+     초고주파는 1000 Hz 고정 하한이라 샘플레이트가 낮으면 하한이 Nyquist를 넘는 빈 대역이 생긴다. */
   function bandEdges(fr, nyq) {
     return [
       [2, Math.max(3, 0.5 * fr)],
@@ -578,19 +574,36 @@
       [8000, nyq],
     ];
   }
-  // 그 대역이 이 샘플레이트로 측정 가능한지 — 하한이 Nyquist 이상이면 빈 대역이다
+  /* 그 대역이 이 샘플레이트로 측정 가능한지 — 하한이 Nyquist 이상이면 빈 대역.
+     포락선 계열은 경계가 없어 통과시킨다(그래서 BAND_ORDER가 아니라 BAND_FREQ로 찾는다). */
   function bandMeasurable(bn, fr, fs) {
-    var i = BAND_ORDER.indexOf(bn);
-    if (i < 0 || !(fs > 0) || !(fr > 0)) return true;   // 판단 불가면 막지 않는다
+    var i = BAND_FREQ.indexOf(bn);
+    if (i < 0 || !(fs > 0) || !(fr > 0)) return true;   // 판단 불가·대역 아님이면 막지 않는다
     var e = bandEdges(fr, fs / 2)[i];
     return e[0] < Math.min(e[1], fs / 2);
   }
-  /* 밀도 균일화 — 시각이 있는 표본을 격자 버킷당 한 점으로 솎아 "시간당 표본 수"를 고르게 만든다.
-     추출 주기를 바꾸거나 타이머가 몇 시간 멈추면 학습 창 안에서 구간별 밀도가 달라지는데,
-     그대로 중앙값·MAD를 내면 촘촘한 구간이 표본을 지배해 그 구간이 곧 기준이 된다
-     (앞 12h 1분·뒤 12h 10분이면 앞이 표본의 91%). 설비가 그 사이 달라졌으면 조용히 오염된다.
-     버킷 안에서 평균·중앙값으로 뭉치지 않고 대표 한 점을 그대로 쓰는 이유는 산포 보존이다 —
-     뭉치면 σ가 줄어 한계가 좁아지고 오경보가 는다.
+  /* softBands: 마운팅 유효 상한(mountFmax)을 넘거나 걸치는 대역 키들 — 판정에서 '잠정'으로 낮출 대상.
+     마운팅 미상(fmax=0)이면 빈 배열(제한 없음). */
+  /* demodBand: 포락선 복조 대역 — 마운팅 유효 상한 아래 최상위 옥타브 [cap/2, cap] 고정.
+     추세 비교를 위해 앵커마다 대역을 바꾸지 않는다(커토그램은 그 순간의 진단용).
+     대역이 바뀌면(마운팅 변경 등) 그 계열은 과거와 이어지지 않아 재학습이 필요하다. */
+  function demodBand(fs, mount) {
+    var nyq = fs / 2;
+    if (!(nyq > 0)) return null;
+    var fmax = mountFmax(mount), cap = fmax > 0 ? Math.min(fmax, nyq) : nyq;
+    if (!(cap >= 400)) return null;   // 상단이 400 Hz도 안 되면 베어링 공진을 담는 대역이 아니다
+    return [cap / 2, cap];
+  }
+  function softBands(fr, fs, mount) {
+    var fmax = mountFmax(mount);
+    if (!(fmax > 0) || !(fs > 0) || !(fr > 0)) return [];
+    // 주파수 대역만 대상이다 — 포락선 계열은 상한을 이미 복조 대역(demodBand)에서 잘라 두었다
+    var e = bandEdges(fr, fs / 2), out = [];
+    for (var i = 0; i < BAND_FREQ.length; i++) if (e[i] && e[i][1] > fmax) out.push(BAND_FREQ[i]);
+    return out;
+  }
+  /* 밀도 균일화 — 격자 버킷당 표본 한 점만 남겨 "시간당 표본 수"를 고르게 만든다(밀도 편중이 중앙값·MAD를 지배하는 것 방지).
+     버킷 안에서 평균으로 뭉치지 않고 한 점을 그대로 쓴다 — 뭉치면 σ가 줄어 한계가 좁아지고 오경보가 는다.
      rows는 시각 오름차순이어야 한다(bandRaw가 order by TIME으로 준다). */
   function evenSample(rows, gridMs, tKey, vKey) {
     tKey = tKey || 'ms'; vKey = vKey || 'v';
@@ -605,11 +618,8 @@
     }
     return out;
   }
-  /* 판정값 진동 감지 — 같은 태그가 악화·개선을 짧은 간격으로 반복하면 그건 설비 상태가 아니라
-     설정이 그 현장에 안 맞는다는 신호다(부하 변동·간헐 운전인데 RMS 구간이 그보다 짧은 경우).
-     주기는 추정하지 않고 관측한다 — threshold 이벤트 간격의 중앙값이 곧 진동 주기다.
-     3회 미만은 진동이라 부르지 않는다(우연한 왕복과 구분이 안 된다).
-     ts는 오름차순 threshold 시각 배열. */
+  /* 판정값 진동(플래핑) 감지 — 악화·개선을 짧은 간격으로 반복하는 태그를 찾는다(설정이 현장에 안 맞는다는 신호).
+     주기 = threshold 이벤트 간격의 중앙값, 3회 미만은 진동으로 치지 않는다. ts는 오름차순 threshold 시각 배열. */
   var FLAP_MIN_ROUND = 3;
   function detectFlap(ts, winMs, now) {
     if (!ts || ts.length < FLAP_MIN_ROUND) return null;
@@ -623,24 +633,15 @@
     if (!(period > 0)) return null;
     return { round: hit.length, periodMs: period };
   }
-  /* 운전 판별 — 값이 정지 수준으로 떨어졌는지. 진동 결함은 스스로 낫지 않으므로,
-     설명되지 않는 하락은 대개 설비 정지·센서 이상이다. 그걸 "복귀"로 알리면 틀린 안심을 준다.
-     기준(ref)은 학습 μ가 있으면 그것, 없으면 최근 P75 — 학습이 쓰는 참조와 같은 방법이라
-     실측에서 두 값이 0.1% 차이였다(정지 판별은 자릿수 판단이라 그 차이가 영향 없다).
-     BL_IDLE_FRAC(0.2)을 그대로 쓴다 — 학습에서 정지 구간을 거를 때 쓰는 그 기준이다. */
+  /* 운전 판별 — 값이 정지 수준으로 떨어졌는지(설명되지 않는 하락을 "복귀"로 알리지 않기 위한 판별).
+     기준(ref)은 학습 μ 우선, 없으면 최근 P75. 비율은 BL_IDLE_FRAC(0.2)과 같은 값. */
   function isRunning(val, ref) {
     if (!(ref > 0)) return true;          // 기준이 없으면 막지 않는다(판별 불가 ≠ 정지)
-    /* 0.2는 BL_IDLE_FRAC과 같은 값이다 — 학습에서 정지 구간을 거를 때 쓰는 그 기준.
-       이 함수는 소스가 서버 TQL에 문자열로 박히므로 바깥 이름을 참조할 수 없다(참조하면
-       번들 압축 때 이름이 바뀌어 타이머가 ReferenceError로 죽는다). test-embedsrc.mjs가
-       이 값이 BL_IDLE_FRAC과 어긋나지 않는지 확인한다. */
+    // 0.2 = BL_IDLE_FRAC과 같은 값 — TQL 임베드라 바깥 이름을 참조할 수 없어 값으로 쓴다.
     return val >= ref * 0.2;
   }
-  /* 버킷의 AC 실효값 배열 — 정지 판별의 참조값을 판정값과 같은 양으로 맞춘다.
-
-     버킷 rms는 √(Σx²/N)이라 DC를 포함하고, 판정값(windowRms)은 평균을 뺀 AC다. 둘을 섞어
-     비교하면 오프셋이 있는 센서에서 "판정값 0.72 vs 참조 9.03"이 되어 항상 정지로 읽힌다
-     (실측: DC 9.0인 태그가 운전 중인데 정지 배지가 떴다). */
+  /* 버킷의 AC 실효값 배열 — 정지 판별의 참조값을 판정값(AC)과 같은 양으로 맞춘다.
+     DC 포함 rms를 섞어 비교하면 오프셋이 있는 센서가 항상 정지로 읽힌다. */
   function acVals(buckets) {
     var out = [];
     for (var i = 0; i < (buckets || []).length; i++) {
@@ -661,14 +662,9 @@
     var x = recent.filter(function (v) { return isFinite(v) && v >= 0; }).sort(function (a, b) { return a - b; });
     return x.length ? x[Math.floor(0.75 * (x.length - 1))] : 0;
   }
-  /* 구간 RMS — 롤업 버킷들을 합쳐 그 구간 전체의 RMS를 낸다.
-     SUMSQ가 이미 Σx²이므로 제곱으로 합치면 원본에서 직접 √(Σx²/N)을 낸 것과 같은 값이다
-     (실측 오차 2.2e-16, 부동소수 한계). 버킷 크기가 달라도(실측 418~1582개) cnt 가중으로 정확하다.
-     산술평균으로 합치면 다른 양이 되어, 정지·기동이 섞인 구간에서 참 RMS를 20~40% 과소평가한다.
-
-     minCnt: 미완성 버킷 제외 기준. 최신 버킷은 아직 적재 중이라 샘플이 적게 온다
-     (실측 875~901개 / 정상 1000개). 그대로 쓰면 판정값이 매번 흔들린다.
-     buckets는 {rms, cnt} 배열(bandRaw/rollupTrend의 toBucket 결과 형태). */
+  /* 구간 RMS — 롤업 버킷들을 cnt 가중 이차평균으로 합친다(SUMSQ 기반이라 원본에서 직접 낸 √(Σx²/N)과 같은 값).
+     산술평균으로 합치면 정지·기동이 섞인 구간에서 참 RMS를 과소평가한다.
+     minCntRatio: 미완성(아직 적재 중인) 버킷 제외 기준. buckets는 {rms, cnt(, sum)} 배열(toBucket 결과 형태). */
   function windowRms(buckets, minCntRatio) {
     if (!buckets || !buckets.length) return null;
     var cnts = [], i;
@@ -693,16 +689,9 @@
     return { rms: rms, used: used, dropped: cnts.length - used, n: n, ac: haveSum };
   }
   /* ── ISO 10816 대역제한(10~1000 Hz) 실효값 ───────────────────────────────
-
-     ISO의 존 경계(1.12/2.80/7.10)는 10~1000 Hz 속도 RMS를 재서 만든 숫자다. 전대역 값을
-     그 경계에 대면 다른 양을 재는 것이 된다 — 실측(BEARING:C1, 25.6 kHz)에서 에너지의 82%가
-     1 kHz 위에 있어 전대역 RMS가 49% 부풀고 등급이 주의→위험으로 뒤집혔다.
-
-     FFT 대신 시간영역 밴드패스를 쓴다. FFT는 쓰지도 않을 12.8 kHz까지 전부 계산하느라
-     goja에서 478 ms가 드는데, 4차 버터워스 밴드패스는 같은 창에서 110 ms이고 FFT 기준값과
-     0.16% 안에서 일치한다(1초·25,600 샘플 실측).
-
-     이 함수들은 소스가 서버 TQL에 문자열로 박히므로 바깥 이름을 하나도 쓰지 않는다. */
+     ISO 존 경계는 10~1000 Hz 속도 RMS 기준이라 전대역 값을 그 경계에 대면 다른 양을 재는 것이 된다.
+     필터는 FFT가 아니라 4차 버터워스 시간영역 밴드패스(더 싸고 FFT 기준값과 사실상 일치).
+     이 함수들은 소스가 서버 TQL에 문자열로 임베드되므로 바깥 이름을 하나도 쓰지 않는다. */
 
   // 2차 IIR 섹션 — 계수는 bandpass가 만들어 넘긴다
   function biquad(b0, b1, b2, a1, a2, sig) {
@@ -744,31 +733,21 @@
     return Math.sqrt(ss / y.length);
   }
   /* ── 계측 게이트 ─────────────────────────────────────────────────────────
-
-     들어온 파형이 기계 신호인지 계측 문제인지 판별한다. 이게 판정 앞에 없으면 커넥터 접촉이
-     "심각"으로, 클리핑(포화)이 "양호"로 나간다 — 틀리는 방향이 일정하지도 않다.
-
-     둘로 나눈 이유는 비용이다. 플랫라인·DC는 롤업 집계만으로 나오므로 매 판정마다 공짜로
-     본다. 클리핑·스파이크·첨도는 파형 모양이라 원본이 필요해서, 알람이 날 조건이 섰을 때만
-     본다(그때는 ISO 계산 때문에 원본이 이미 와 있다).
-
-     반환 null(이상 없음) 또는 { key, label, detail, gi }. gi는 이벤트 등급 —
-     플랫라인은 감시가 통째로 죽은 상태라 위험(2), 나머지는 주의(1)로 둔다. */
+     들어온 파형이 기계 신호인지 계측 문제인지 판별한다(판정 앞단의 garbage-in 방어).
+     플랫라인·DC는 롤업 집계만으로 매 판정마다 보고, 클리핑·스파이크·첨도는 원본 파형이 있을 때만 본다.
+     반환 null(이상 없음) 또는 { key, label, detail, gi } — 플랫라인은 위험(2), 나머지는 주의(1). */
 
   var GATE_FLAT_RATIO = 0.002;   // σ가 peak의 0.2% 미만이면 상수나 다름없다
   var GATE_DC_RATIO = 3;         // 평균이 σ의 3배를 넘으면 기준선이 어긋난 것
-  /* 판정을 막는 계측 사유 — 감시·상세분석·리포트가 모두 이 목록을 본다. 심각한 것부터.
-     signalQuality·gateFromRaw는 서버 TQL에 박히느라 같은 배열을 함수 안에 다시 갖는다.
-     그 사본이 이 상수와 갈라지지 않는지는 test-gate.mjs가 확인한다. */
+  /* 판정을 막는 계측 사유(심각한 것부터) — 감시·상세분석·리포트 공용.
+     signalQuality·gateFromRaw는 TQL 임베드라 같은 배열 사본을 함수 안에 갖는다(항상 이 목록과 동일해야 함). */
   var GATE_BLOCK = ['flatline', 'sparse', 'spike', 'kurtx', 'clip', 'dc'];
 
   /* 롤업 버킷만으로 보는 게이트 — 추가 조회 0회.
      σ는 windowRms가 이미 내는 AC 실효값이고, peak은 버킷의 MIN/MAX에서 나온다. */
   function gateFromBuckets(buckets, ac) {
     if (!buckets || !buckets.length || !(ac >= 0)) return null;
-    /* 상수를 안에서 다시 선언한다 — 이 함수는 소스가 서버 TQL에 문자열로 박히므로 바깥 이름을
-       쓸 수 없다(압축되면 이름이 어긋나 ReferenceError). 모듈 상수와 갈라지지 않는지는
-       test-gate.mjs가 확인한다. */
+    // TQL 임베드라 상수를 안에서 재선언 — GATE_FLAT_RATIO·GATE_DC_RATIO와 항상 같은 값이어야 한다.
     var FLAT = 0.002, DCR = 3;
     var peak = 0, sum = 0, n = 0, i, b, haveSum = true;
     for (i = 0; i < buckets.length; i++) {
@@ -802,18 +781,9 @@
     var q = signalQuality(values, fs);
     if (!q) return null;
     var issues = q.issues || [], i, j;
-    /* 판정을 막아야 하는 사유만, 심각한 것부터 고른다 — signalQuality는 참고용 지적도 같은 배열에
-       담으므로 첫 항목을 그대로 쓰면 엉뚱한 사유가 보고된다.
-       목록은 GATE_BLOCK에서 dc만 뺀 것이다 — DC 드리프트는 롤업 게이트(gateFromBuckets)가
-       먼저 보므로 여기서 또 내면 같은 사유로 이벤트가 두 번 난다.
+    /* 판정을 막는 사유만, 심각한 것부터 — 목록은 GATE_BLOCK에서 dc 제외(DC는 롤업 게이트가 먼저 봐 중복 이벤트 방지),
+       Crest·첨도 제외(결함일 수도 계측 문제일 수도 있어 impactEvidence로 근거만 붙인다).
        ⚠배열을 함수 안에 두는 이유는 signalQuality와 같다(서버 TQL 임베드). */
-    /* 판정을 막는 것은 "기계가 만들 수 없는 파형"뿐이다 — 상수(플랫라인)·잘린 꼭대기(클리핑)·
-       표본 부족. 그 값으로 등급을 매기면 반드시 틀린다.
-
-       Crest·첨도는 뺐다. 그건 "충격성이 강하다"는 사실이고 기계 결함(베어링 스폴)일 수도
-       계측 문제(커넥터 접촉)일 수도 있다. 정도의 문제라 경계가 임의적인데 판정까지 막으면
-       저속 기계의 초기 결함을 계측 문제로 오해하고 그동안 감시가 빈다.
-       대신 impactEvidence로 이벤트에 근거로 붙인다 — 결론을 막지 않고 재료를 준다. */
     var order = ['flatline', 'sparse', 'clip'];
     for (i = 0; i < order.length; i++) {
       for (j = 0; j < issues.length; j++) {
@@ -826,15 +796,9 @@
     return null;
   }
 
-  /* 충격성 근거 — 진동 이벤트에 붙이는 설명이지 판정이 아니다.
-
-     대역 에너지가 올랐을 때 그게 임펄스 때문인지(베어링·기어 결함) 넓게 퍼진 잡음인지
-     (캐비테이션·유동·마운팅 이완) RMS 계열로는 구분이 안 된다. Crest와 첨도가 그걸 가른다.
-
-     경계 8은 물리에서 온다: 정상 랜덤 신호의 기대 최대 Crest가 창 크기에 따라 3.9~4.5이고,
-     베어링 결함은 충격이 회전마다 반복되며 RMS도 같이 올려 대개 5~10에서 포화한다.
-     15를 넘으면 수천 샘플 중 하나가 지배하는 모양이라 기계 충격으로는 잘 안 나온다 —
-     그때는 계측 확인을 권한다(막지는 않는다). */
+  /* 충격성 근거 — 이벤트에 붙이는 설명이지 판정이 아니다.
+     Crest·첨도로 대역 에너지 상승이 임펄스성(베어링·기어)인지 광대역(캐비테이션·유동 등)인지 가른다.
+     경계 8 = 정상 랜덤 신호 기대 최대(3.9~4.5)와 베어링 결함 통상 범위(5~10) 사이. >15는 계측 확인 권고(막지는 않음). */
   function impactEvidence(values, fs) {
     var n = (values || []).length;
     if (n < 64) return null;
@@ -880,19 +844,10 @@
     return { on: on, next: next, events: events };
   }
 
-  /* 이 샘플레이트에서 대역제한이 의미가 있는가. Nyquist가 1000 Hz 이하면 1 kHz 위가
-     애초에 측정되지 않으므로 전대역이 곧 ISO 대역이다(현장 1 kHz 센서가 여기 해당).
-     그런 태그는 필터를 돌릴 이유가 없다. */
+  // 대역제한이 의미 있는 샘플레이트인가 — Nyquist ≤ 1000 Hz면 전대역이 곧 ISO 대역이라 필터 불필요.
   function isoNeeded(fs) { return fs > 0 && fs / 2 > 1000; }
-  /* ISO 계산을 건너뛰어도 되는가 — 상한 성질을 쓰되 비교하는 창을 맞춘다.
-
-     ISO는 최근 1초 원본에서 재고 판정값(wide)은 평가창 전체(기본 10초)의 실효값이다.
-     wide를 존 경계에 대고 "양호 확정"으로 끝내면 서로 다른 양을 비교하게 된다 —
-     조용한 9초 뒤 마지막 1초만 튀면 wide는 경계 아래인데 그 1초의 ISO는 위험까지 간다.
-
-     그래서 구간 안 가장 큰 초 버킷을 상한으로 쓴다. 어떤 1초 창의 RMS도 그보다 클 수 없고
-     (RMS는 부분들의 cnt 가중 이차평균이라 최대 부분을 넘지 못한다), 대역제한은 에너지를
-     빼기만 하므로 ISO는 그보다도 작다. 버킷이 없으면 상한을 못 세우므로 건너뛰지 않는다. */
+  /* ISO 계산 생략 판단 — 구간 내 최대 초 버킷 RMS를 상한으로 쓴다(어떤 1초 창의 RMS도 이를 못 넘고,
+     대역제한은 에너지를 빼기만 하므로 ISO는 그보다 작다). 버킷이 없으면 건너뛰지 않는다. */
   function isoSkippable(buckets, zone0) {
     if (!(zone0 > 0) || !buckets || !buckets.length) return false;
     var mx = 0;
@@ -903,20 +858,9 @@
     return mx > 0 && mx < zone0;
   }
 
-  /* 샘플레이트 = 표본 간격의 역수. 이웃 표본의 시각 차이(Δt) 중앙값으로 낸다.
-
-     "초당 행 수"로 세면 두 방향으로 틀린다. 센서가 쉬면(1분에 1초만 캡처하는 주기 기록)
-     쉰 시간이 평균에 섞여 과소 추정되고, 같은 구간을 두 번 적재하면 과대 추정된다.
-     둘 다 기록 밀도가 바뀐 것이지 센서가 빨라지거나 느려진 게 아니다.
-
-     간격을 보면 둘 다 사라진다. 쉬는 구간은 큰 간격 하나로 잡히는데 정렬하면 끝으로 밀려
-     중앙값에 닿지 못하고(갭 개수는 캡처 수만큼뿐이다), 중복은 간격 0이라 아예 제외된다.
-     이 방법이 깨지는 건 캡처당 표본이 갭 개수와 비슷할 만큼 짧을 때인데, 그런 태그는
-     애초에 스펙트럼 분석 대상이 아니다.
-
-     tsUs: 시각 오름차순 정수 마이크로초. ms로는 25.6 kHz의 39 μs 간격이 전부 0으로 뭉개지고,
-     ns는 자바스크립트 안전 정수(9e15)를 넘는다 — μs가 유일하게 맞는 단위다.
-     근거가 얇으면(간격 30개 미만) 0을 돌려 호출측이 다른 방법으로 넘어가게 한다. */
+  /* 샘플레이트 추정 — 이웃 표본 시각 차이(Δt)의 중앙값의 역수("초당 행 수"는 주기 기록·중복 적재에서 틀린다).
+     tsUs: 시각 오름차순 정수 마이크로초(ms는 고주파 간격이 0으로 뭉개지고, ns는 JS 안전 정수를 넘는다).
+     간격 30개 미만이면 0을 돌려 호출측이 다른 방법으로 넘어가게 한다. */
   function fsFromTimes(tsUs) {
     if (!tsUs || tsUs.length < 2) return 0;
     var d = [], i, v;
@@ -930,15 +874,9 @@
     return m > 0 ? Math.round(1e6 / m) : 0;
   }
 
-  /* 서로를 부르는 함수들을 TQL에 임베드할 소스로 묶는다.
-
-     'var 이름 = ' + fn.toString() 식으로 하나씩 붙이면 압축본에서 죽는다: fn.toString()이
-     'function Wt(...)'가 되는데 named function expression의 이름은 자기 안에서만 보이므로,
-     이 함수를 부르는 다른 함수의 몸통에 남은 Wt가 바깥에서 안 보인다. 조립 코드가 쓴
-     리터럴('var bandpass =')은 미니파이어가 건드리지 않으니 이름이 어긋난 채로 남는다.
-
-     그래서 함수 "선언"들을 한 IIFE에 같이 넣어 서로를 찾게 하고, 밖으로는 압축된 실제
-     이름(.name)으로 꺼내 고정된 이름에 붙인다. exports = { 바깥이름: 함수 }. */
+  /* 서로를 부르는 함수들을 TQL 임베드용 소스로 묶는다 — 함수 선언들을 한 IIFE에 같이 넣어
+     압축 후에도 서로를 찾게 하고, 밖으로는 압축된 실제 이름(.name)으로 꺼내 고정 이름에 붙인다.
+     exports = { 바깥이름: 함수 }. (fn.toString()을 하나씩 붙이면 압축본에서 이름이 어긋나 죽는다) */
   function embedSrc(fns, exports) {
     var keys = Object.keys(exports), parts = ['var __E=(function(){'];
     fns.forEach(function (fn) { parts.push(fn.toString()); });
@@ -976,9 +914,7 @@
     return null;
   }
 
-  /* 표시 등급 — 세 판정 중 가장 나쁜 것. ISO 존만 쓰면 고주파가 지배하는 센서에서
-     베어링이 나빠져도 화면이 계속 양호로 보인다(C1이 그렇다: ISO는 위험이 나올 수 없다).
-     무엇이 등급을 올렸는지 함께 돌려준다 — 등급만 보여주면 원인을 화면에서 알 수 없다. */
+  /* 표시 등급 — 세 판정(ISO·베이스라인·대역) 중 가장 나쁜 것. 무엇이 등급을 올렸는지(src)를 함께 돌려준다. */
   function worstGrade(zoneGi, blGi, bandGi) {
     var g = zoneGi || 0, src = 'iso';
     if ((blGi || 0) > g) { g = blGi; src = 'baseline'; }
@@ -986,10 +922,8 @@
     return { gi: g, src: g > 0 ? src : 'iso' };
   }
 
-  /* 버킷들을 판정 구간 단위로 묶어 구간 RMS 계열을 만든다 — 베이스라인 학습용.
-     학습과 판정이 같은 단위여야 μ·σ가 판정값의 분포를 설명한다. 1초 버킷으로 배운 σ로
-     10초 구간 값을 재면 기준 구간이 어긋난다(실측 영향은 0.1% 미만이지만 정합성 문제다).
-     groupSec개씩 잘라 각 묶음을 windowRms로 합친다. 남는 꼬리는 버린다(불완전 구간). */
+  /* 버킷들을 판정 구간 단위로 묶어 구간 RMS 계열을 만든다(베이스라인 학습용) — 학습과 판정의 단위를 맞춘다.
+     groupSec개씩 잘라 각 묶음을 windowRms로 합치고, 남는 꼬리(불완전 구간)는 버린다. */
   function windowSeries(buckets, groupSec) {
     if (!buckets || !buckets.length) return [];
     var g = Math.max(1, Math.round(groupSec || 1));
@@ -1022,7 +956,7 @@
   function bandJudgeSrc() {
     return bandJudge.toString();   // 함수가 자체 완결이라 감쌀 것이 없다
   }
-  // DETAIL 문자열 → [{k,ko,v,lim,r}] (이벤트 목록·알림 문구 렌더용)
+  // DETAIL 문자열 → [{k,ko,v,lim,r,soft}] (이벤트 목록·알림 문구 렌더용)
   function bandParse(detail) {
     if (!detail) return [];
     return String(detail).split('·').map(function (s) {
@@ -1030,7 +964,8 @@
       var m = /^\s*([a-z][a-z0-9]*)\s*=\s*([\d.]+)\s*\/\s*([\d.]+)/.exec(s);
       if (!m) return null;
       var v = parseFloat(m[2]), lim = parseFloat(m[3]);
-      return { k: m[1], ko: BAND_KO[m[1]] || m[1], v: v, lim: lim, r: lim > 0 ? v / lim : 0 };
+      // 잠정 표식은 저장된 이벤트에서도 읽혀야 한다 — 며칠 뒤에 목록을 보는 사람도 근거의 등급을 알아야 한다
+      return { k: m[1], ko: BAND_KO[m[1]] || m[1], v: v, lim: lim, r: lim > 0 ? v / lim : 0, soft: /\(잠정\)/.test(s) };
     }).filter(Boolean);
   }
   var BEARING_FS_RATIO = 20;
@@ -1060,9 +995,7 @@
     return { known: true, hit: hit, weak: weak, negatives: negatives };
   }
 
-  /* 가속도계 마운팅별 유효 주파수 상한(Hz) — 이 위의 진동은 기계가 아니라 마운팅 자체가 울린 것이다.
-     커토그램은 "가장 충격성이 강한 대역"을 고르는데, 마운팅 공진은 정확히 그렇게 보인다 →
-     상한을 안 걸면 자석 마운트에서 공진 대역을 골라 포락선 복조까지 그 위에서 하게 된다.
+  /* 가속도계 마운팅별 유효 주파수 상한(Hz) — 이 위의 성분은 기계가 아니라 마운팅 공진일 수 있다.
      미상(0)이면 제한하지 않되, 리포트에 "고주파 대역 유효성 미상"으로 남는다. */
   var MOUNT_FMAX = { stud: 10000, adhesive: 5000, magnet: 2000, probe: 1000 };
   function mountFmax(mount) { return MOUNT_FMAX[mount] || 0; }
@@ -1281,11 +1214,8 @@
   }
 
   /* ---------------- 베이스라인(정상 상태) 학습 — 로버스트 ----------------
-     한계 = μ + k·σ 구조는 유지하되 μ·σ를 median / 1.4826·MAD로 추정한다.
-     평균·표준편차는 학습 구간에 스파이크 몇 개만 섞여도 σ가 배수로 부풀어
-     "이탈을 잡으라고 만든 기준이 이탈을 덮는" 역설이 생긴다(스파이크 3/60개로 한계 3배).
-     중앙값 계열은 표본 절반이 오염돼도 유지되고, 1.4826은 정규 등가 스케일 보정이라
-     k=3의 "3σ" 의미·저장 포맷 {mu,sigma,k}·UI 표기가 전부 그대로다. */
+     한계 = μ + k·σ, μ·σ는 median / 1.4826·MAD로 추정(평균·표준편차는 스파이크 몇 개로 σ가 부풀어 이탈을 덮는다).
+     1.4826은 정규 등가 스케일 보정이라 "3σ" 의미·저장 포맷 {mu,sigma,k}·UI 표기가 그대로다. */
   var BASELINE_MIN_N = 30; // 최소 표본 — 이보다 적으면 산포 추정 자체가 신뢰 불가
   function median(a) {
     if (!a.length) return NaN;
@@ -1305,18 +1235,14 @@
      vals는 시간순이어야 한다(램프 감지가 인접 차분 기반). */
   var BL_IDLE_FRAC = 0.2;  // 참조의 20% 미만 = 정지·아이들
   var BL_RAMP_FRAC = 0.3;  // 인접 버킷 변화가 참조의 30% 초과 = 기동/정지 과도
-  /* 이중 수준(정지↔운전) 판정 — 개수 비율만으로는 충격성 신호와 구분되지 않는다.
-     실측: 임펄스가 잦은 정상 신호도 중앙값의 3배 위에 16%가 몰리지만 상위군은 중앙값의 5~6배에 그친다.
-     정지가 대부분인 창은 상위군(=실제 운전 수준)이 중앙값(=정지 수준)의 수십 배다.
-     그래서 "얼마나 많이"와 "얼마나 위에"를 함께 본다. */
+  /* 이중 수준(정지↔운전) 판정 — "얼마나 많이"(비율)와 "얼마나 위에"(상위군/중앙값 배율)를 함께 본다.
+     비율만으로는 충격성 정상 신호와 구분되지 않는다. */
   var BL_BIMODAL_FRAC = 0.1;   // 중앙값의 3배 위 표본 비율
   var BL_BIMODAL_RATIO = 10;   // 상위군 중앙값 / 전체 중앙값
   function steadyStateFilter(vals) {
     var n = vals.length;
     if (!n) return { vals: [], idle: 0, ramp: 0, ref: 0, bimodalFrac: 0 };
-    /* 이중 수준 감지는 "필터 전" 원본에서 한다 — 창의 대부분이 정지면 P75 참조가 정지 수준에
-       붙어 아래 필터가 통째로 무력화되고(운전 버킷이 전부 "과도"로 걸러짐), 필터 후 표본만 보면
-       멀쩡해 보인다. 비율과 높이를 함께 봐야 충격성 정상 신호를 오인하지 않는다(BL_BIMODAL_* 주석 참조). */
+    // 이중 수준 감지는 "필터 전" 원본에서 — 정지가 대부분이면 P75 참조가 정지 수준에 붙어 아래 필터가 무력화된다.
     var med0 = median(vals), hiVals = [], j;
     for (j = 0; j < n; j++) if (vals[j] > 3 * med0) hiVals.push(vals[j]);
     var bimodalFrac = hiVals.length / n;
@@ -1358,8 +1284,8 @@
     isoRms: isoRms, bandpass: bandpass, biquad: biquad, isoNeeded: isoNeeded, isoSkippable: isoSkippable, fsFromTimes: fsFromTimes, isoSrc: isoSrc, embedSrc: embedSrc, worstGrade: worstGrade,
     acVals: acVals, gateFromBuckets: gateFromBuckets, gateFromRaw: gateFromRaw, sensorTick: sensorTick, impactEvidence: impactEvidence, gateSrc: gateSrc,
     GATE_BLOCK: GATE_BLOCK, gateReason: gateReason,
-    bandJudge: bandJudge, bandJudgeSrc: bandJudgeSrc, bandParse: bandParse, evenSample: evenSample, bandAnchors: bandAnchors, bandEdges: bandEdges, bandMeasurable: bandMeasurable, windowRms: windowRms, windowSeries: windowSeries, isRunning: isRunning, runRef: runRef, detectFlap: detectFlap,
-    BAND_KO: BAND_KO, BAND_ORDER: BAND_ORDER, BAND_LEGACY: BAND_LEGACY, BAND_GRADE: BAND_GRADE, BAND_HYST: BAND_HYST, BL_IDLE_FRAC: BL_IDLE_FRAC,
+    bandJudge: bandJudge, bandJudgeSrc: bandJudgeSrc, bandParse: bandParse, evenSample: evenSample, bandAnchors: bandAnchors, bandEdges: bandEdges, bandMeasurable: bandMeasurable, softBands: softBands, demodBand: demodBand, faultCoeffs: faultCoeffs, windowRms: windowRms, windowSeries: windowSeries, isRunning: isRunning, runRef: runRef, detectFlap: detectFlap,
+    BAND_KO: BAND_KO, BAND_ORDER: BAND_ORDER, BAND_FREQ: BAND_FREQ, BAND_CTX: BAND_CTX, BAND_LEGACY: BAND_LEGACY, BAND_GRADE: BAND_GRADE, BAND_HYST: BAND_HYST, BL_IDLE_FRAC: BL_IDLE_FRAC,
     bandRmsAveraged: bandRmsAveraged, welchSpectrum: welchSpectrum, decimate: decimate,
     convertDomain: convertDomain, convertSpectrumMags: convertSpectrumMags,
     signalQuality: signalQuality, kurtosisSaturation: kurtosisSaturation,

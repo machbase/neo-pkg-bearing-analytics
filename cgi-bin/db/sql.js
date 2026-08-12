@@ -1,5 +1,5 @@
 // sql.js — 이 패키지가 사용하는 SQL/TQL 문자열의 단일 소스 (순수 문자열 빌더 · fetch 없음)
-// 실행은 db/index.js가 담당. 쿼리를 바꿀 땐 여기만 수정한다.
+// 실행은 db/db.js가 담당. 쿼리를 바꿀 땐 여기만 수정한다.
 //
 // ── SQL 인벤토리 ──────────────────────────────────────────────
 // 1. catalogTables : TAG 테이블 목록 — llm-chat sql.js와 동일(M$SYS_TABLES ⋈ M$SYS_USERS,
@@ -28,11 +28,9 @@
   // 식별자(테이블명)는 따옴표 없이 쓰므로 영숫자·_ 만 통과
   function ident(s) { return String(s).replace(/[^A-Za-z0-9_$]/g, ''); }
 
-  // 서버 로컬 TZ 기준 to_date 문자열 (브라우저와 서버가 같은 호스트 전제, 초 단위)
-  /* 밀리초까지 넣는다 — 초 단위로 자르면 1초 미만 구간 요청이 통째로 어긋난다.
-     예: 표시 FFT는 0.64초(16,384샘플)를 요청하는데 초 단위로 자르면 1초(25,600샘플)가 와서
-     "16,384 샘플 관례"가 실제로는 지켜지지 않았다. 25.6 kHz에서 1초 오차 = 25,600 샘플이다.
-     Machbase to_date는 'YYYY-MM-DD HH:MI:SS mmm' 형식으로 밀리초를 받는다(실측 확인). */
+  /* 서버 로컬 TZ 기준 to_date 문자열 (브라우저와 서버가 같은 호스트 전제).
+     밀리초까지 넣는다 — 초 단위로 자르면 1초 미만 구간 요청이 어긋난다.
+     Machbase to_date는 'YYYY-MM-DD HH:MI:SS mmm' 형식으로 밀리초를 받는다. */
   function sqlDate(ms) {
     var d = new Date(ms);
     function z(n) { return n < 10 ? '0' + n : '' + n; }
@@ -107,9 +105,7 @@
   /* ---- 상시감시(P6) ---- */
   function monCreateTables() {
     return [
-      /* EVENTS는 TAG 테이블 — NAME='<테이블>:<태그>', TIME=이벤트 시각.
-         LOG였을 때는 설비 하나만 지울 수가 없었다(가장 오래된 쪽부터 연속 삭제만 지원).
-         설비를 철거해도 그 이력만 지우려면 전체를 날리거나 오래된 것부터 잘라야 했다.
+      /* EVENTS는 TAG 테이블 — NAME='<테이블>:<태그>', TIME=이벤트 시각(태그·기간 단위 삭제 가능).
          SUMMARIZED를 붙이지 않아 롤업·통계는 만들지 않는다 — 이벤트는 집계 대상이 아니다. */
       'CREATE TAG TABLE NEO_VIBE_EVENTS (NAME VARCHAR(200) PRIMARY KEY, TIME DATETIME BASETIME, VALUE DOUBLE, ETYPE VARCHAR(16), GRADE VARCHAR(8), LIM DOUBLE, DETAIL VARCHAR(400), EID VARCHAR(120))',
       'CREATE LOOKUP TABLE NEO_VIBE_MONSTATE (K VARCHAR(200) PRIMARY KEY, VAL VARCHAR(1000))',
@@ -135,6 +131,14 @@
   function bandTimes(keys, fromMs, toMs) {
     var ks = (keys || []).map(function (k) { return "'" + esc(k) + "'"; }).join(',');
     return 'select NAME, TIME from NEO_VIBE_BAND where NAME in (' + ks + ') and TIME between '
+      + sqlDate(fromMs) + ' and ' + sqlDate(toMs) + ' order by TIME';
+  }
+  /* 여러 계열의 최신값을 한 번에 — 판정은 태그마다 계열 전부의 "지금 값"이 필요하다.
+     계열마다 따로 물으면 문장 수가 태그수 × 계열수가 되어, 계열이 늘 때마다 그만큼 늘어난다.
+     시각 오름차순으로 받아 부르는 쪽이 NAME별 마지막 행을 취한다(창이 좁아 행 수가 적다). */
+  function bandLatest(keys, fromMs, toMs) {
+    var ks = (keys || []).map(function (k) { return "'" + esc(k) + "'"; }).join(',');
+    return 'select NAME, VALUE from NEO_VIBE_BAND where NAME in (' + ks + ') and TIME between '
       + sqlDate(fromMs) + ' and ' + sqlDate(toMs) + ' order by TIME';
   }
   // 대역 원본 조회(베이스라인 학습용 — 롤업 없이 저장된 그대로)
@@ -168,8 +172,7 @@
       "'" + esc(e.tbl + ':' + e.tag) + "', " + sqlDate(e.ts) + ', ' + Number(e.val) + ", '" + esc(e.etype) + "', '" +
       esc(e.grade) + "', " + Number(e.lim) + ", '" + esc(e.detail || '') + "', '" + esc(e.eid) + "')";
   }
-  /* 삭제 — TAG 테이블이라 태그별·기간별로 지울 수 있다(LOG였을 때는 둘 다 불가능했다).
-     '설비 하나 철거' 같은 정리가 이 두 문장으로 끝난다. */
+  // 삭제 — TAG 테이블이라 태그별·기간별로 지울 수 있다.
   function eventsDeleteTag(tbl, tag) {
     return "delete from NEO_VIBE_EVENTS where NAME='" + esc(tbl + ':' + tag) + "'";
   }
@@ -182,12 +185,8 @@
     return 'delete from NEO_VIBE_BAND where TIME between ' + sqlDate(fromMs) + ' and ' + sqlDate(toMs);
   }
   function bandDeleteKey(key) { return "delete from NEO_VIBE_BAND where NAME='" + esc(key) + "'"; }
-  /* 데이터가 하나도 안 남은 태그의 이름을 표에서 지운다.
-
-     TAG 표는 데이터와 이름 등록이 따로다 — 행을 다 지워도 이름은 메타에 남아, 철거한 설비가
-     태그 목록에 영영 보인다. 반대로 이름을 지워도 손해가 없다: INSERT가 없는 이름을 자동으로
-     다시 등록하므로(라이브 확인), 살아 있는 태그는 다음 수집에서 저절로 돌아온다.
-     그래서 "지금 데이터가 없으면 이름도 없앤다"가 안전한 규칙이 된다. */
+  /* 데이터가 하나도 안 남은 태그의 이름을 메타에서 지운다 — 행을 다 지워도 이름은 메타에 남는다.
+     이름을 지워도 무해하다: INSERT가 없는 이름을 자동 재등록하므로 살아 있는 태그는 저절로 돌아온다. */
   function metaPurgeOrphans(table) {
     var t = ident(table);
     return 'delete from ' + t + ' metadata where NAME not in (select NAME from ' + t + ' group by NAME)';
@@ -211,9 +210,13 @@
   // 대역 데이터 보관 범위 — TAG 테이블이라 시각 컬럼(TIME) 기준
   function bandSpan() { return 'select min(TIME), max(TIME) from NEO_VIBE_BAND'; }
   function bandKeyCount() { return 'select count(*) from (select NAME from NEO_VIBE_BAND group by NAME)'; }
-  // 특정 시각 이전 건수 — 삭제 전에 "몇 건이 지워지는지" 세어 보여주기 위한 조회
-  /* 구간 건수·삭제 — 전체 태그의 시간 범위 지정이 된다(8.0.50+ 확장 구문, 라이브 검증 완료).
-     문서의 제약 절("특정 시간 범위 삭제 미지원")은 레거시 BEFORE 구문 기준이라 지금은 해당 없다. */
+  /* 태그별 보유량 — "어느 태그가 얼마나 차지하나". 총계(usageCount)로는 정리할 대상을 못 고른다.
+     NEO_VIBE_BAND의 NAME은 '테이블:태그:계열'이라 태그 하나가 계열 십여 개를 갖는다 —
+     묶는 것은 부르는 쪽 몫이다(여기서 쪼개면 SQL이 문자열 함수에 의존하게 된다). */
+  function bandNameCounts() { return 'select NAME, count(*) from NEO_VIBE_BAND group by NAME'; }
+  function eventNameCounts() { return 'select NAME, count(*) from NEO_VIBE_EVENTS group by NAME'; }
+  /* 구간 건수 — 삭제 전에 "몇 건이 지워지는지" 세어 보여주기 위한 조회.
+     시간 범위 지정 삭제는 8.0.50+ 확장 구문(문서의 "시간 범위 삭제 미지원"은 레거시 BEFORE 구문 기준). */
   function eventsCountRange(fromMs, toMs) {
     return 'select count(*) from NEO_VIBE_EVENTS where TIME between ' + sqlDate(fromMs) + ' and ' + sqlDate(toMs);
   }
@@ -232,14 +235,14 @@
     catalogTables: catalogTables, catalogCount: catalogCount,
     tagList: tagList, tagStats: tagStats,
     rollupTrend: rollupTrend, rollupBatch: rollupBatch, rawWindow: rawWindow, sampleTimes: sampleTimes, fftTql: fftTql,
-    monCreateTables: monCreateTables, bandTrend: bandTrend, bandRaw: bandRaw, bandTimes: bandTimes, eventsSelect: eventsSelect, eventsRange: eventsRange,
+    monCreateTables: monCreateTables, bandTrend: bandTrend, bandRaw: bandRaw, bandTimes: bandTimes, bandLatest: bandLatest, eventsSelect: eventsSelect, eventsRange: eventsRange,
     eventsCount: eventsCount, eventInsert: eventInsert,
     eventsDeleteTag: eventsDeleteTag, eventsDeleteRange: eventsDeleteRange,
     bandDeleteRange: bandDeleteRange, bandDeleteKey: bandDeleteKey,
     metaPurgeOrphans: metaPurgeOrphans,
     eventsLegacySelect: eventsLegacySelect, tableTypeOf: tableTypeOf, dropTable: dropTable,
     kvSelect: kvSelect, kvExists: kvExists, kvInsert: kvInsert, kvUpdate: kvUpdate, kvDelete: kvDelete,
-    usageCount: usageCount, eventsSpan: eventsSpan, bandSpan: bandSpan, bandKeyCount: bandKeyCount,
+    usageCount: usageCount, eventsSpan: eventsSpan, bandSpan: bandSpan, bandKeyCount: bandKeyCount, bandNameCounts: bandNameCounts, eventNameCounts: eventNameCounts,
     eventsCountRange: eventsCountRange, bandCountRange: bandCountRange
   };
 });

@@ -97,11 +97,15 @@ If you temporarily removed and restored the same machine, choose **Same equipmen
 
 Until you confirm, baseline and band evaluation are suspended for that tag. Applying the old reference would mean missing anomalies when the new machine is quieter, and constant alarms when it is louder — while the screen just says "trained". ISO zone evaluation keeps working throughout.
 
-## Band learning only reaches 4/5 or 3/5
+## Band learning doesn't fill the denominator (e.g. 4/9)
 
-That is normal. Band edges are defined relative to rotational frequency, and the upper bands cover 1 kHz and above. If the sensor's sample rate is low, those bands are **not measurable in the first place** and cannot be trained.
+That is normal. The denominator is the number of series **measurable on that tag**, and it differs per tag.
 
-Untrained bands are excluded from evaluation, and the remaining bands work normally.
+- The upper bands cover 1 kHz and above — with a low sample rate those bands are **not measurable in the first place**.
+- The envelope fault-frequency series (BPFO·BPFI·BSF) accumulate **only when a bearing part number is set** — add one under equipment info and they start from then on.
+- The tooltip next to the training status explains, per series, why it is missing.
+
+Untrained series are excluded from evaluation, and the remaining series work normally.
 
 ## Not enough band samples to train
 
@@ -121,9 +125,9 @@ Server monitoring **runs with the settings as of your last save.** After changin
 
 1. In **Settings → Alarms → Notifications**, confirm the channel is on and a target (webhook URL) is entered.
 2. Press **Test** to verify the send path in isolation. A failure here is a URL or network problem.
-3. In **per-severity routing**, confirm that severity is checked for that channel. The default has only Danger and Critical on, with Warning off.
-4. If delivery is set to **Ignore**, the event is recorded but no notification is sent.
-5. Email and SMS are still **in preparation**. Webhook is the channel that actually sends today.
+3. In **per-severity delivery**, confirm that severity is set to **Immediate**. The default sends Danger and Critical immediately, with Warning set to No notification.
+4. If delivery is **No notification**, the event is recorded but nothing is sent.
+5. Webhook is the only delivery channel. For email or SMS, relay through an automation tool such as n8n — see [Alarms and events](./alarms.en.md).
 
 ## Older events are missing from the event list
 
