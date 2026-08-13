@@ -33,6 +33,14 @@
   }
 
   /* ---------------- 카탈로그 ---------------- */
+  // { 테이블: [태그컬럼, 시간컬럼, 값컬럼] } — 컬럼 구성이 표준인지 판정하는 용도
+  function tagSchemas(owner) {
+    return q(SQL.tagSchemas(owner)).then(function (rows) {
+      var out = {};
+      rows.forEach(function (r) { var t = r[0]; (out[t] = out[t] || []).push(r[1]); });
+      return out;
+    });
+  }
   function listTagTables(owner) {
     return q(SQL.catalogTables(owner)).then(function (rows) {
       return rows.map(function (r) { return r[0]; })
@@ -180,7 +188,7 @@
     'equipment.json': ['equipCls', 'equipRpm', 'equipBearing', 'equipGeo', 'equipUnit', 'equipMeta', 'lineHz', 'aliases', 'cardOrder', 'knownTags', 'revived'],
     'criteria.json': ['machineClass', 'classThresh', 'unitThresh'],
     'monitor.json': ['monitorOn', 'evalWindow', 'notifCh', 'notifTo', 'routes', 'monitorInterval', 'monMode', 'escHold', 'recHold', 'renotify', 'bandOn', 'bandInterval', 'bandWin'],
-    'llm.json': ['llmProvider', 'llmKeys', 'llmModels', 'ollamaUrl'],
+    'llm.json': ['llmProvider', 'llmKeys', 'llmModels', 'ollamaUrl', 'genLLM'],
   };
   function configDir() { return pkgBase() + '/cgi-bin/config'; }
 
@@ -610,7 +618,7 @@
     WD_TIMER: WD_TIMER, createWdTimer: createWdTimer, deleteWdTimer: deleteWdTimer,
     createBandTimer: createBandTimer, deleteBandTimer: deleteBandTimer, bandTrend: bandTrend, bandRaw: bandRaw, bandBackfill: bandBackfill, bandTimes: bandTimes, bandLatest: bandLatest,
     ensureDir: ensureDir, saveFile: saveFile, listDir: listDir, deleteFile: deleteFile, readFileBlob: readFileBlob,
-    listTagTables: listTagTables, listTags: listTags, tagStats: tagStats, isNoRollup: isNoRollup,
+    listTagTables: listTagTables, tagSchemas: tagSchemas, listTags: listTags, tagStats: tagStats, isNoRollup: isNoRollup,
     rollupTrend: rollupTrend, rollupBatch: rollupBatch, rawWindow: rawWindow, sampleTimes: sampleTimes, fftSpectrum: fftSpectrum,
     loadConfig: loadConfig, saveConfig: saveConfig, saveConfigPartial: saveConfigPartial,
     ensureMonTables: ensureMonTables, loadEvents: loadEvents, loadEventsRange: loadEventsRange, countEvents: countEvents,

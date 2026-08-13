@@ -102,10 +102,6 @@
       'function enc(o){return encodeURIComponent(JSON.stringify(o)).replace(/\'/g,"%27");}',
       'function dec(s){try{return JSON.parse(decodeURIComponent(s));}catch(e){return null;}}',
       'function esc(s){return String(s).replace(/\'/g,"\'\'");}',
-      /* 이벤트 표가 TAG가 되면서 TIME이 DATETIME이다 — 앱의 sqlDate와 같은 규약으로 찍는다
-         (밀리초까지: 같은 초에 여러 이벤트가 나면 초 단위로는 구분이 안 된다). */
-      'function pad(n,w){var s=""+n;while(s.length<w)s="0"+s;return s;}',
-      'function dtms(ms){var d=new Date(ms);return pad(d.getFullYear(),4)+"-"+pad(d.getMonth()+1,2)+"-"+pad(d.getDate(),2)+" "+pad(d.getHours(),2)+":"+pad(d.getMinutes(),2)+":"+pad(d.getSeconds(),2)+" "+pad(d.getMilliseconds(),3);}',
       'var GW=["\\uC591\\uD638","\\uC8FC\\uC758","\\uC704\\uD5D8","\\uC2EC\\uAC01"];', // 양호/주의/위험/심각
       'var db=$.db(), now=Date.now(), nDone=0, roll={};',
       'function rollupOk(tbl){ if(roll[tbl]===undefined){ var n=0; db.query("select count(*) from M$SYS_TABLES where NAME like \'_"+tbl+"_ROLLUP_%\'").forEach(function(r){n=r[0];}); roll[tbl]=n>0; } return roll[tbl]; }',
@@ -136,7 +132,8 @@
       '  return out;',
       '}',
       'function bandFrom(){ return "to_date(\'" + fmtTs(now-' + bandWinMs + ') + "\')"; }',
-      // 밀리초까지 찍는 시각 문자열 — 1초 창을 정확히 자르려면 초 단위로는 부족하다
+      /* 밀리초까지 찍는 시각 문자열(앱 sqlDate와 같은 규약) — 1초 창 절단과 이벤트 TIME 기록이 같이 쓴다
+         (같은 초에 여러 이벤트가 나면 초 단위로는 구분이 안 된다). */
       'function dtms(ms){ var d=new Date(ms); function p(n,w){var s2=""+n;while(s2.length<w)s2="0"+s2;return s2;}',
       '  return p(d.getFullYear(),4)+"-"+p(d.getMonth()+1,2)+"-"+p(d.getDate(),2)+" "+p(d.getHours(),2)+":"+p(d.getMinutes(),2)+":"+p(d.getSeconds(),2)+" "+p(d.getMilliseconds(),3); }',
       /* 존 판정값 — 전대역이 양호 경계 미만이면 ISO도 반드시 양호라 계산을 건너뛰고,

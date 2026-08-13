@@ -4,3 +4,7 @@
 .vhov2:hover { border-color: var(--primary-light); }
 .vhov3:hover { background: rgba(255,255,255,.06); }
 .vhov4:hover { background: rgba(255,255,255,.03); }
+/* 라이트 테마 — 흰 오버레이는 흰 배경에서 안 보여 잉크 오버레이로 뒤집는다 (vhov2는 토큰이라 공용) */
+.theme-light .vhov1:hover { background: rgba(35,38,46,.05); }
+.theme-light .vhov3:hover { background: rgba(35,38,46,.07); }
+.theme-light .vhov4:hover { background: rgba(35,38,46,.04); }

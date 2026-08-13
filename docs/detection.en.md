@@ -96,7 +96,7 @@ On very stable machines the normal variation is tiny, which would place the limi
 
 This catches changes that overall RMS cannot show. A growing bearing fault barely moves total vibration, but the band where that fault appears jumps several-fold.
 
-Bands are defined relative to rotational frequency (1×).
+Bands are defined relative to rotational frequency (1×). The very-high range is further subdivided into four octave bands (vh1–vh4 in event details), so eight bands are stored and judged in total.
 
 | Band | Range | What typically appears |
 | :--- | :--- | :--- |
@@ -235,7 +235,7 @@ Data alone cannot tell whether it is the same machine, so the app asks. The Crit
 Per-band values require frequency analysis of raw data, so a **separate timer** computes and accumulates them.
 
 - Computation happens on the server, so the trend continues while the app is closed.
-- A shorter extraction interval (1 minute – 1 hour) accumulates samples faster, letting you start learning sooner.
+- A shorter extraction interval (10 minutes – 1 hour) accumulates samples faster. When first adopting the feature, use backfill to extract past intervals retroactively and start learning right away.
 - Calculation always anchors to that tag's latest data timestamp, so stale intervals from stopped equipment are never scraped.
 
 ### Backfilling past data

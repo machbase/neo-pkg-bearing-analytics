@@ -7,15 +7,16 @@ weight: 20
 
 [한국어](./first-setup.kr.md) | **English**
 
-When you first open the app, the **Settings** screen is where you define what to analyze. Settings is split into five sections down the left side.
+When you first open the app, the **Settings** screen is where you define what to analyze. Settings is split into six sections down the left side.
 
 | Section | Contents | Required |
 | :--- | :--- | :---: |
-| Data Source | Select TAG table(s) & tags, column mapping, aliases | Yes |
+| Data Source | Select TAG table(s) & tags, aliases | Yes |
 | Equipment | Unit · Class · RPM · bearing model · measurement & drive | Recommended |
 | Criteria | Machine class, severity thresholds, baseline learning | Optional |
 | Alarms | Monitoring mode, evaluation interval/window, alarm behavior, notifications | Optional |
 | LLM | Provider for report and event opinions | Optional |
+| Data management | Storage usage, ranged & per-tag data deletion | Optional |
 
 Changing a setting shows a save prompt at the bottom of the screen; pressing **Save** reloads live data. Navigating away with unsaved changes prompts for confirmation. If setup items are still missing, the ⚙ button in the header shows an amber dot.
 
@@ -29,9 +30,9 @@ First choose which data to analyze.
 
 Nothing is selected initially. Select only the tables you actually want to analyze.
 
-### Column mapping
+### Column layout
 
-Machbase TAG table standard column names (`NAME` · `TIME` · `VALUE`) are the defaults. If your schema differs, specify the actual column names here.
+Queries use the Machbase TAG table standard column names (`NAME` · `TIME` · `VALUE`). TAG tables with different column names are not supported yet.
 
 ### Aliases
 
@@ -39,7 +40,7 @@ Tags are shown as `alias (tag name)`. If the original tag name is long or code-l
 
 ### Load limits
 
-To avoid query storms, the app loads at most **20 tags per table** and **40 pieces of equipment overall**. With more tags than that, some will not appear on screen — narrow the scope by selecting only the tables you need.
+To avoid query storms, the app loads at most **60 tags per table** and **100 pieces of equipment overall**. With more tags than that, some will not appear on screen — narrow the scope by selecting only the tables you need.
 
 ### Data source change detection
 
@@ -71,9 +72,9 @@ Hovering the <kbd>?</kbd> next to each field name shows what the value is, where
 
 ### Bearings and fault frequencies
 
-Selecting a bearing model from the catalog fills in geometry (ball count, ball diameter, pitch diameter, contact angle) and computes BPFO / BPFI / BSF / FTF together with RPM. Press the geometry button to inspect the computed values.
+Selecting a bearing model from the catalog fills in geometry (ball count, ball diameter, pitch diameter, contact angle) and computes BPFO / BPFI / BSF / FTF together with RPM. Press the **Settings** button on the right of the table to inspect the computed values.
 
-- **Bearing not in the catalog** — enter ball count `n`, ball diameter `Bd`, pitch diameter `Pd`, and contact angle `φ` directly in the expanded view.
+- **Bearing not in the catalog** — enter ball count `n`, ball diameter `Bd`, pitch diameter `Pd`, and contact angle `φ` directly in the settings panel.
 - **Sleeve (journal) bearings** — with no rolling elements, BPFO/BPFI/BSF/FTF are undefined. Diagnosis uses only 1× and 2× rotational frequency.
 
 Once a bearing is registered, fault-frequency markers appear on the detail-analysis FFT so you can match peaks to specific faults.
@@ -161,11 +162,11 @@ On top of this, for signals that barely vary the limit is kept at **at least 1.2
 
 A third criterion, for changes where overall RMS barely moves but one frequency band jumps — early bearing faults being the classic case. It sits at the bottom of the Criteria screen.
 
-Bands are split into five ranges relative to rotational frequency (sub-synchronous · 1× band · fault band · high · very high), and each is judged by how many times above its own normal it sits.
+Bands are split into five ranges relative to rotational frequency (sub-synchronous · 1× band · fault band · high · very high); the very-high range is further subdivided into four octave bands, so eight bands are stored and judged in total. Each is judged by how many times above its own normal it sits.
 
 Setup is three steps.
 
-1. **Band extraction** — turn it on and set the extraction interval (1 minute – 1 hour). These values require frequency analysis of raw data, so they are computed on the server on their own schedule, separate from evaluation. A shorter interval accumulates samples faster.
+1. **Band extraction** — turn it on and set the extraction interval (10 minutes – 1 hour). These values require frequency analysis of raw data, so they are computed on the server on their own schedule, separate from evaluation. A shorter interval accumulates samples faster.
 2. **Backfill past data** — rather than waiting for samples to accumulate, compute past intervals retroactively from raw data already in the DB. Progress and estimated time are shown, and stopping partway keeps whatever was filled.
 3. **Learn the normal reference** — once there are enough samples, train per band. This works like overall RMS learning and applies the same automatic filters.
 

@@ -18,3 +18,7 @@ a:hover { color: var(--primary-light); }
 @keyframes vskl { 0% { opacity: .45; } 50% { opacity: .9; } 100% { opacity: .45; } }
 @keyframes vtoast { from { opacity: 0; transform: translate(-50%, 12px); } to { opacity: 1; transform: translate(-50%, 0); } }
 @keyframes vpulse { 0%, 100% { opacity: 1; } 50% { opacity: .3; } }
+/* 네이티브 날짜·시각 피커의 아이콘·달력 팔레트를 테마에 맞춘다 — 인라인으로 고정하면 라이트에서 다크 피커가 뜬다.
+   type을 빠뜨리면 그 입력만 브라우저 기본(밝은색)으로 떨어져 두 테마 모두 흰 피커가 된다. */
+input[type="date"], input[type="datetime-local"], input[type="time"] { color-scheme: dark; }
+.theme-light input[type="date"], .theme-light input[type="datetime-local"], .theme-light input[type="time"] { color-scheme: light; }

@@ -54,6 +54,17 @@
       + catalogWhere(owner);
   }
 
+  /* TAG table의 앞 세 컬럼. TAG table은 컬럼 '이름'이 아니라 역할 키워드(PRIMARY KEY·BASETIME·SUMMARIZED)로
+     정해지므로 이름은 만드는 쪽 마음이다. 이 앱의 조회는 전부 NAME·TIME·VALUE를 그대로 쓰기 때문에,
+     다른 이름을 쓰는 table은 태그 목록(_<t>_meta)부터 실패한다 — 선택 목록에서 미리 걸러내려고 읽는다.
+     ⚠명시적 JOIN 3단은 이 빌드에서 'TK_ID is not resolved'로 깨진다 — 콤마 조인으로 쓴다. */
+  function tagSchemas(owner) {
+    return 'SELECT st.NAME TBL, c.NAME COL FROM M$SYS_TABLES st, M$SYS_USERS su, M$SYS_COLUMNS c'
+      + ' WHERE st.USER_ID = su.USER_ID AND st.ID = c.TABLE_ID'
+      + " AND su.NAME = '" + esc(String(owner || 'SYS').toUpperCase()) + "'"
+      + ' AND st.FLAG = 0 AND st.TYPE = 6 AND c.ID < 3 ORDER BY st.NAME, c.ID';
+  }
+
   function tagList(table) {
     return 'SELECT NAME FROM _' + ident(table).toLowerCase() + '_meta ORDER BY NAME';
   }
@@ -232,7 +243,7 @@
 
   return {
     esc: esc, ident: ident, sqlDate: sqlDate,
-    catalogTables: catalogTables, catalogCount: catalogCount,
+    catalogTables: catalogTables, catalogCount: catalogCount, tagSchemas: tagSchemas,
     tagList: tagList, tagStats: tagStats,
     rollupTrend: rollupTrend, rollupBatch: rollupBatch, rawWindow: rawWindow, sampleTimes: sampleTimes, fftTql: fftTql,
     monCreateTables: monCreateTables, bandTrend: bandTrend, bandRaw: bandRaw, bandTimes: bandTimes, bandLatest: bandLatest, eventsSelect: eventsSelect, eventsRange: eventsRange,

@@ -59,6 +59,25 @@
   --warning-event: #f2cd6b;       /* event-match / etc    (src #ffdc72) */
   --info: #2b7cd3;                /* info blue (tuned to accent family, src #005fb8) */
 
+  /* ---- Toast fills (theme-invariant: mid-tones set for white text) ---- */
+  --toast-ok: #2e7d5b;
+  --toast-warn: #c77d0a;
+  --toast-err: #c14545;
+
+  /* ---- Canvas ----
+     The colour actually painted behind the app. Not the same as --bg-primary: the DS shell rule
+     (.theme-light in theme-light.css) repaints the app root with !important, so on light the page
+     is grey while --bg-primary stays white for cards. Anything that must blend into the page —
+     a sticky bar floating over scrolled content — has to use this, not --bg-primary. */
+  --bg-canvas: #1e1e1e;
+
+  /* ---- Switch (on/off toggles) ----
+     The knob is white in both themes, so the OFF track must never be a near-white
+     surface — on light that leaves a white knob on a white track (invisible state). */
+  --switch-off: #626263;
+  --switch-knob: #ffffff;
+  --switch-knob-shadow: rgba(0, 0, 0, 0.4);
+
   /* ---- Status circle (mirror semantic light variants) ---- */
   --status-true: var(--success-light);   /* src #9df486 */
   --status-false: var(--danger-light);    /* src #fa6464 */
@@ -156,6 +175,14 @@
   --overlay-hover-solid: rgba(35, 38, 46, 0.10);
   --overlay-scrim: rgba(35, 38, 46, 0.32);
   --overlay-shadow: rgba(35, 38, 46, 0.12);
+
+  /* ---- Canvas (LIGHT) — must equal the shell rule in theme-light.css ---- */
+  --bg-canvas: #e7e9ee;
+
+  /* ---- Switch (LIGHT) — mid gray so the white knob stays readable ---- */
+  --switch-off: rgba(35, 38, 46, 0.26);
+  --switch-knob: #ffffff;
+  --switch-knob-shadow: rgba(35, 38, 46, 0.3);
 
   /* ---- Scrollbar (light) ---- */
   --scrollbar-thumb: rgba(35, 38, 46, 0.22);

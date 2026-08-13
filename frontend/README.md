@@ -34,3 +34,4 @@ npm run build:root  # vite build + dist/ → 패키지 루트 복사 (index.html
 - 계산·DB·리포트·알림 로직은 `frontend/`가 아니라 `cgi-bin/`에 둔다. 프론트(Vite import)와 jsh(require) 겸용 UMD이므로 앱과 서버 타이머가 같은 소스를 공유한다 — 규칙을 두 곳에 복사하면 드리프트가 생긴다
 - UI 수정 후에는 반드시 `node tools/smoke.mjs` 통과 확인
 - 폰트·코디콘·로고는 `public/`에 두어 외부 파일로 유지 (base64 인라인 금지 — 파일 크기 폭증)
+- 화면 변경 리뷰 기준은 `persona/ui-expert.md`(UI 프론트 전문가 페르소나 U1~U12) — 무동작 컨트롤, 빈/에러 상태 누락, 폴백의 실측 위장이 결함 판정 대상이다

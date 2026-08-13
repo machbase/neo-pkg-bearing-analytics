@@ -2,7 +2,7 @@
 // (최초 골격만 프로토타입 dc.html에서 자동 변환했고, 그 변환기는 지금 없다.)
 import { Component } from 'preact/compat';
 import { view } from './view.js';
-import { listTagTables, listTags, tagStats, rollupTrend, loadConfig, saveConfig, saveConfigPartial, buildLiveData, liveDetail, emptyDet, rollupBatch, loadTrendChunks , timerStates, MON_TIMER, BAND_TIMER, WD_TIMER, createWdTimer, deleteWdTimer, rawWindow, CAPS, pkgBase} from './data/live.js';
+import { listTagTables, tagSchemas, listTags, tagStats, rollupTrend, loadConfig, saveConfig, saveConfigPartial, buildLiveData, liveDetail, emptyDet, rollupBatch, loadTrendChunks , timerStates, MON_TIMER, BAND_TIMER, WD_TIMER, createWdTimer, deleteWdTimer, rawWindow, CAPS, pkgBase} from './data/live.js';
 import { ensureMonTables, loadEventsRange, countEvents, loadBaselines, saveBaseline, deleteBaseline, insertEvent, loadMonState, saveMonState, createMonitorTimer, deleteMonitorTimer, createBandTimer, deleteBandTimer, bandRaw, bandLatest, bandTrend, bandBackfill, bandTimes } from './data/live.js';
 import { usageStats, countRange, tagUsage, deleteEventsRange, deleteEventsOfTag, deleteBandRange, deleteBandOfTag, deleteMonState } from './data/live.js';
 import { runTql } from './data/live.js';
@@ -55,11 +55,22 @@ var CFG_KEYS = ['srcSel', 'machineClass', 'classThresh', 'unitThresh',
   'knownTags', 'revived',
   'evalWindow', 'monitorOn', 'notifCh', 'notifTo', 'routes', 'aliases',
   'monitorInterval', 'monMode', 'escHold', 'recHold', 'renotify', 'bandOn', 'bandInterval', 'bandWin',
-  'llmProvider', 'llmKeys', 'llmModels', 'ollamaUrl'];
+  'llmProvider', 'llmKeys', 'llmModels', 'ollamaUrl', 'genLLM'];
 /* 일괄 적용 항목 ↔ 설정 입력칸 — 칩 하나가 입력칸 하나다(뷰모델과 적용이 같은 표를 쓴다).
    형상·벨트는 값마다 칸이 따로라 여기서도 따로 다룬다. */
 var GEO_F = { geoN: 'n', geoBd: 'Bd', geoPd: 'Pd', geoPhi: 'phi' };
 var BELT_F = { beltD1: 'd1', beltD2: 'd2', beltLen: 'len' };
+/* on/off 스위치의 트랙·손잡이 — 네 곳(알람·대역·알림채널·리포트 LLM)이 같은 물건이므로 한 곳에서 만든다.
+   손잡이는 두 테마 모두 흰색이라 꺼진 트랙에 흰 계열 표면색(--bg-elevated 등)을 쓰면 안 된다:
+   라이트에서 그 값이 순백이라 손잡이가 트랙에 묻혀 켜짐/꺼짐이 구분되지 않는다. */
+function SWITCH_TRACK(on) {
+  return 'width: 40px; height: 23px; border-radius: 12px; position: relative; cursor: pointer; transition: background .15s;'
+    + ' flex-shrink: 0; background: ' + (on ? 'var(--primary-base)' : 'var(--switch-off)') + ';';
+}
+function SWITCH_KNOB(on) {
+  return 'position: absolute; top: 3px; left: ' + (on ? '20px' : '3px') + '; width: 17px; height: 17px; border-radius: 50%;'
+    + ' background: var(--switch-knob); box-shadow: 0 1px 2px var(--switch-knob-shadow); transition: left .15s;';
+}
 /* 대역 추출 주기 — 10분 아래를 두지 않는다. 추출 창이 2^15 샘플 고정이라 샘플레이트가 낮으면
    실제 길이가 분 단위가 되고(128 Hz면 4.3분), 그보다 짧은 주기는 같은 구간을 겹쳐 잰다.
    짧은 간격 표본은 서로 상관이 강해 개수만 늘고 σ 추정이 나아지지도 않는다.
@@ -264,6 +275,10 @@ export class App extends Component {
       ready: false, tab: (props && props.defaultTab) || 'monitor', theme: theme,
       configured: true, monitorOn: true,
       selTag: null, period: '1h', from: '', to: '', // 기본 1시간 — 진동은 짧은 창이라야 초 단위 해상도가 잡힌다
+      /* 직접 입력 기간의 초안(D 접미사). 네이티브 피커에는 확인 단추가 없어 날짜·시·분을 고르는 동안
+         값이 여러 번 바뀌는데, 그때마다 커밋하면 중간값으로 조회가 나가고 무엇이 반영됐는지도 알 수 없다.
+         고르는 동안은 여기에만 담고 '적용'에서 from/to로 옮긴다. null = 미편집(커밋값을 그대로 보여준다). */
+      fromD: null, toD: null,
       diagTag: null, evtTag: 'all', evtType: 'all', evtScope: 'today', // 이벤트 목록 기간: today | 7d | all
       detailAnchor: null, // 스펙트럼 분석 기준 시각 — 이벤트 클릭 시 그 시각, 아니면 선택 기간 끝
       fftFull: false, // FFT·스펙트로그램 주파수 범위: false=기본(dispHz) · true=전대역(Nyquist)
@@ -289,7 +304,7 @@ export class App extends Component {
       llmKeys: {}, llmModels: {}, ollamaUrl: 'http://127.0.0.1:11434',
       genRunning: false, genStep: 0, genTags: [], genLLM: false,
       // 리포트 탭 조회 기간 — 상세분석(period/from/to)과 분리. 대상 태그가 없으면 기간도 없다('')
-      genPeriod: '', genFrom: '', genTo: '',
+      genPeriod: '', genFrom: '', genTo: '', genFromD: null, genToD: null,
       dirty: false, toast: null, pendingNav: null, monitorInterval: '3s', cardSize: 232,
       notifCh: { webhook: false }, // 알람 채널은 웹훅 하나 — 이메일·SMS는 발송 수단이 없다(저장본 잔존 키는 무시됨)
       notifTo: { webhook: '' }, // 발송 대상 URL
@@ -420,6 +435,7 @@ export class App extends Component {
         if (!tables || !tables.length) { self._initEmpty('DB에서 TAG 테이블을 찾지 못했습니다 — 연결 상태를 확인하세요'); return; }
         self.live = true;
         self.liveTables = tables;
+        self._loadSchemas(); // 컬럼 구성 — 선택 목록에서 미지원 table을 막는다(부팅을 막지는 않는다)
         ensureMonTables().catch(function () {}); // 상시감시 저장소(LOOKUP) 존재 보장 — 신규 설치 대비
         // 저장된 선택이 없으면 아무것도 선택하지 않은 상태로 시작 (설정 → 데이터 소스에서 선택)
         var sel = (cfg.srcSel || []).filter(function (t) { return tables.indexOf(t) >= 0; });
@@ -440,8 +456,8 @@ export class App extends Component {
     var initR = worst ? this._periodRange(worst, initP) : { from: this._dtVal(anchor - 3600000), to: this._dtVal(anchor) };
     var patch = {
       ready: true, srcSel: sel, srcCap: d.cap || null, selTag: worst ? worst.id : null, diagTag: worst ? worst.id : null, events: [], reports: [],
-      genTags: [], genPeriod: '', genFrom: '', genTo: '', // 리포트 대상 태그는 기본 미선택 → 기간도 아직 없음
-      period: initP, from: initR.from, to: initR.to,
+      genTags: [], genPeriod: '', genFrom: '', genTo: '', genFromD: null, genToD: null, // 리포트 대상 태그는 기본 미선택 → 기간도 아직 없음
+      period: initP, from: initR.from, to: initR.to, fromD: null, toD: null,
     };
     // 저장된 설정 복원 (state 키와 1:1)
     CFG_KEYS.forEach(function (k) {
@@ -554,8 +570,12 @@ export class App extends Component {
       self._judgeLive().then(function (n) { if (n) self._loadEventsLive(); }); // 새 이벤트가 났을 때만 목록 갱신
       /* 설정 화면은 이 틱으로 다시 그리지 않는다 — 입력칸이 전부 제어 입력(value=상태)이라
          타이핑 도중 다시 그리면 preact가 옛 상태값을 DOM에 도로 써넣어 입력이 지워진다.
+         날짜·시간 입력이 포커스를 쥔 동안도 같다 — 네이티브 피커는 날짜·시·분을 고르는 데 몇 초가
+         걸려서, 그 사이 틱 리렌더가 값을 되돌리며 피커를 닫아버린다.
          판정·알림은 그대로 돈다(막는 것은 화면 갱신뿐). */
-      if (self.state.tab !== 'settings') self.forceUpdate();
+      var _ae = typeof document !== 'undefined' ? document.activeElement : null;
+      var _dtEditing = !!(_ae && _ae.tagName === 'INPUT' && (_ae.type === 'date' || _ae.type === 'datetime-local'));
+      if (self.state.tab !== 'settings' && !_dtEditing) self.forceUpdate();
     }).catch(function () { self._ticking = false; });
   }
   /* 설비별 운전 상태 — 정지 / 신호 두절 / 운전 중.
@@ -1824,8 +1844,8 @@ export class App extends Component {
     this.data = { now: now, equipment: [], events: [], reports: [] };
     this.setState({
       ready: true, srcSel: [], selTag: null, diagTag: null, events: [], reports: [], genTags: [],
-      genPeriod: '', genFrom: '', genTo: '',
-      from: this._dtVal(now - PERIOD_H['1h'] * 3600000), to: this._dtVal(now),
+      genPeriod: '', genFrom: '', genTo: '', genFromD: null, genToD: null,
+      from: this._dtVal(now - PERIOD_H['1h'] * 3600000), to: this._dtVal(now), fromD: null, toD: null,
     });
     if (msg) this._toast(msg, 'warn');
   }
@@ -1854,8 +1874,10 @@ export class App extends Component {
         // 순수 스냅샷: 캡처 시점의 등급·RMS·기준시각을 함께 고정 → 재캡처 전까지 상세분석 전체가 불변
         c = this._detailCache[eq.id] = { state: 'loading', det: emptyDet(eq), eqSnap: Object.assign({}, eq), snapNow: (this.data && this.data.now) || Date.now(), anchor: anchor, viewUnit: vu };
         liveDetail(this.E, eq, anchor, vu).then(function (det) {
-          c.det = det; c.state = 'ready'; self.forceUpdate();
-        }).catch(function (e) { c.state = 'error'; console.warn('[vibe] detail load failed', e); });
+          c.det = det; c.state = 'ready';
+          if (det.raw && !det.raw.values.length) self._toast('선택 구간에 원시 파형이 없습니다 · 마지막 수집 ' + (eq.lastSeen ? self.E.fmtDT(eq.lastSeen) : '-'), 'warn');
+          self.forceUpdate();
+        }).catch(function (e) { c.state = 'error'; self._toast('상세분석 조회 실패 — 네트워크·DB 상태 확인 후 새로고침하세요', 'err'); self.forceUpdate(); console.warn('[vibe] detail load failed', e); });
       }
       return c.det;
     }
@@ -1888,7 +1910,11 @@ export class App extends Component {
       fromMs = (st && st.minMs) ? st.minMs : now - PERIOD_H['7d'] * 3600000; // 데이터 전 구간
     } else if (p === 'custom') {
       // 직접 입력은 날짜+시각(datetime) — 짧은 창을 정확히 지정해 초 단위 해상도까지 볼 수 있다
-      var cf = Date.parse(rep ? S.genFrom : S.from), ct = Date.parse(rep ? S.genTo : S.to);
+      /* 리포트는 적용 전 초안도 인정한다 — 날짜를 고르고 '적용'을 누르지 않은 채 생성하면
+         화면에 보이는 것과 다른 구간으로 리포트가 나가기 때문이다. 상세분석은 커밋값만 쓴다
+         (조회 캐시 키가 커밋값이라, 초안을 섞으면 키와 내용이 어긋난다). */
+      var cf = Date.parse(rep ? (S.genFromD != null ? S.genFromD : S.genFrom) : S.from);
+      var ct = Date.parse(rep ? (S.genToD != null ? S.genToD : S.genTo) : S.to);
       fromMs = !isNaN(cf) ? cf : now - PERIOD_H['7d'] * 3600000;
       if (!isNaN(ct)) toMs = ct;
     } else fromMs = now - (PERIOD_H[p] || 1) * 3600000;
@@ -2300,7 +2326,10 @@ export class App extends Component {
       // 한쪽만 면제하면 같은 관측에서 두 후보가 1·2위를 차지해 근거 없는 우선순위가 생긴다.
       // 벨트 "결함"의 근거는 벨트 통과주파수뿐이다. 종동축 1× 일치는 벨트가 상했다는 뜻이 아니라
       // 비동기 성분의 정체가 밝혀졌다는 뜻이므로, 아래 독립 회전원 항목의 귀속으로만 쓴다(R3와 같은 원칙).
-      mk('벨트·풀리(Belt)', [[!!beltHit && harmOf(beltHit.f) >= 2, 35, hasBeltLen ? '벨트 통과주파수 ' + beltF.belt.toFixed(1) + 'Hz 일치 · 하모닉 ' + harmOf(beltHit.f) + '개' : ''],
+      /* ⚠mk의 세 요소(조건·점수·근거문구)는 전부 먼저 계산된다 — 조건이 거짓이어도 문구는 만들어진다.
+         그래서 문구도 조건과 같은 것을 확인해야 한다: 벨트길이만 보고 beltHit을 참조하면
+         "제원은 있는데 벨트 주파수에 피크가 없는" 설비에서 리포트 생성이 통째로 죽는다. */
+      mk('벨트·풀리(Belt)', [[!!beltHit && harmOf(beltHit.f) >= 2, 35, (beltHit && hasBeltLen) ? '벨트 통과주파수 ' + beltF.belt.toFixed(1) + 'Hz 일치 · 하모닉 ' + harmOf(beltHit.f) + '개' : ''],
         [!!beltHit && harmOf(beltHit.f) < 2, 12, '벨트 통과주파수 근처 성분(하모닉 부족)']],
         !hasBeltSpec ? '벨트 제원(풀리경) 미입력 — 벨트주파수 대조 불가'
           : (!hasBeltLen ? '벨트길이 미입력 — 벨트 통과주파수 대조 불가(풀리비로 종동축만 대조됨)' : '')),
@@ -2729,17 +2758,17 @@ export class App extends Component {
       E.zoomDraw(band, kxl.length, db, zk);
     }
   }
-  _toast(msg, kind) { var self = this; this.setState({ toast: { msg: msg, kind: kind || 'ok' } }); clearTimeout(this._tt); this._tt = setTimeout(function () { self.setState({ toast: null }); }, 2600); }
-  toggleTheme() { var n = this.state.theme === 'light' ? 'dark' : 'light'; try { localStorage.setItem('vibeTheme', n); } catch (e) {} this.setState({ theme: n }); }
-  _explain(e) {
-    var self = this; this.setState({ explainEvent: e, explainText: '__loading__' });
-    var llm = LLM.createLLM(this._llmCfg());
-    if (!llm) { setTimeout(function () { self.setState({ explainText: '__fallback__' }); }, 300); return; }
-    var eq = this._eq(e.tagId) || {};
-    var p = '당신은 진동 분석 전문가입니다. 다음 이벤트를 ISO 10816 기준으로 한국어 3~4문장으로 해설하세요. 원인 가설과 권장 조치를 간결히 포함하세요.\n설비: ' + eq.alias + ' (' + eq.name + '), Class ' + eq.cls + ', ' + eq.rpm + ' RPM\n유형: ' + e.typeKo + '\n지표값: ' + this.E.fmt(e.value) + ' ' + e.unit + ' (기준 ' + this.E.fmt(e.base) + ')\n등급: ' + this.E.STATUS[e.grade].ko + (eq.fault ? '\n추정 결함모드: ' + eq.fault : '');
-    llm.complete(p).then(function (txt) { if (self.state.explainEvent && self.state.explainEvent.id === e.id) self.setState({ explainText: txt || '__fallback__' }); })
-      .catch(function () { self.setState({ explainText: '__fallback__' }); });
+  /* 오류는 읽고 조치해야 하는 정보라 더 오래 둔다 — 사유·발생 위치가 실리면 2.6초로는 다 읽지 못한다.
+     (성공 알림은 짧게 두어야 화면을 가리지 않는다) */
+  _toast(msg, kind) {
+    var self = this;
+    this.setState({ toast: { msg: msg, kind: kind || 'ok' } });
+    clearTimeout(this._tt);
+    this._tt = setTimeout(function () { self.setState({ toast: null }); }, kind === 'err' ? 9000 : 2600);
   }
+  // 네이티브 날짜·시각 피커는 바깥을 눌러야 닫힌다 — 포커스를 떼는 것이 유일한 프로그램적 닫기 수단
+  _closePicker() { try { var a = document.activeElement; if (a && a.blur) a.blur(); } catch (e) {} }
+  toggleTheme() { var n = this.state.theme === 'light' ? 'dark' : 'light'; try { localStorage.setItem('vibeTheme', n); } catch (e) {} this.setState({ theme: n }); }
   _setEquipBearing(id, v) { var m = Object.assign({}, this.state.equipBearing); m[id] = v; this.setState({ equipBearing: m }); }
   _setEquipRpm(id, v) { var m = Object.assign({}, this.state.equipRpm); m[id] = v; this.setState({ equipRpm: m }); }
   _toggleEquipAdv(id) { var m = Object.assign({}, this.state.equipAdv); m[id] = !m[id]; this.setState({ equipAdv: m }); }
@@ -2814,9 +2843,37 @@ export class App extends Component {
   }
   _toggleNotifCh(k) { var m = Object.assign({}, this.state.notifCh); m[k] = !m[k]; this.setState({ notifCh: m, dirty: true }); }
   _toggleSrcTable(name) {
+    var blocked = this._srcBlock(name);
+    if (blocked) { this._toast(name + ' — ' + blocked, 'warn'); return; }
     var s = this.state.srcSel.slice(), i = s.indexOf(name);
     if (i >= 0) s.splice(i, 1); else { s.push(name); this._ensureTags([name]); }
     this.setState({ srcSel: s, dirty: true });
+  }
+  /* 고를 수 없는 table의 사유 — 없으면 빈 문자열.
+     카탈로그는 TYPE=6(TAG)만 보고 전부 올리는데, 이 앱의 조회는 NAME·TIME·VALUE를 그대로 쓴다.
+     다른 이름을 쓰는 table은 태그 목록부터 실패하므로, 고르고 저장한 뒤에 실패를 만나는 대신 여기서 막는다.
+     스키마를 못 읽었으면(권한·구버전) 막지 않는다 — 모른다고 못 쓰게 하면 되던 것이 안 되는 쪽이 더 나쁘다. */
+  _srcBlock(name) {
+    var cols = (this.liveSchemas || {})[name];
+    if (!cols || cols.length < 3) return '';
+    var need = ['NAME', 'TIME', 'VALUE'];
+    var ok = need.every(function (k, i) { return String(cols[i] || '').toUpperCase() === k; });
+    return ok ? '' : '컬럼 구성 미지원 (' + cols.slice(0, 3).join(' · ') + ') — 이 앱은 NAME · TIME · VALUE만 조회합니다';
+  }
+  /* 컬럼 구성을 한 번에 읽어 둔다(테이블당 왕복 없음). 실패하면 조용히 넘어가 전부 선택 가능 상태를 유지한다.
+     이미 선택돼 있던 미지원 table은 여기서 뺀다 — 남겨두면 매 틱 조회가 실패한다. */
+  _loadSchemas() {
+    var self = this;
+    return tagSchemas().then(function (m) {
+      self.liveSchemas = m || {};
+      var sel = self.state.srcSel || [];
+      var drop = sel.filter(function (t) { return !!self._srcBlock(t); });
+      if (drop.length) {
+        self.setState({ srcSel: sel.filter(function (t) { return drop.indexOf(t) < 0; }) });
+        self._toast('컬럼 구성이 다른 table을 감시에서 제외했습니다 — ' + drop.join(', '), 'warn');
+      }
+      self.forceUpdate();
+    }).catch(function () { self.liveSchemas = null; });
   }
   // 선택 테이블의 태그 목록 프리페치 — 저장 전에도 별칭 편집에 바로 표시. force=캐시 무시 재조회(설정탭 진입 시)
   _ensureTags(tables, force) {
@@ -3011,8 +3068,10 @@ export class App extends Component {
   _presetChips(eqs, who, scope) {
     var self = this, S = this.state, sp = this._presetSpan(eqs), rep = scope === 'report';
     var cur = rep ? S.genPeriod : S.period;
+    // 프리셋을 고르면 직접 입력 초안은 버린다 — 남겨두면 '직접 입력'으로 돌아왔을 때 옛 편집이 되살아난다
     var put = function (p, fromV, toV) {
-      self.setState(rep ? { genPeriod: p, genFrom: fromV, genTo: toV } : { period: p, from: fromV, to: toV });
+      self.setState(rep ? { genPeriod: p, genFrom: fromV, genTo: toV, genFromD: null, genToD: null }
+        : { period: p, from: fromV, to: toV, fromD: null, toD: null });
     };
     var spanTxt = sp.spanH === Infinity ? '알 수 없음'
       : sp.spanH < 1 ? Math.max(1, Math.round(sp.spanH * 60)) + '분'
@@ -3045,7 +3104,7 @@ export class App extends Component {
   _setGenTags(ids) {
     var self = this, S = this.state;
     var eqs = (ids || []).map(function (id) { return self._eq(id); }).filter(Boolean);
-    if (!eqs.length) { this.setState({ genTags: ids || [], genPeriod: '', genFrom: '', genTo: '' }); return; }
+    if (!eqs.length) { this.setState({ genTags: ids || [], genPeriod: '', genFrom: '', genTo: '', genFromD: null, genToD: null }); return; }
     if (S.genPeriod === 'custom') { this.setState({ genTags: ids }); return; } // 직접 입력 값은 사용자 것
     var sp = this._presetSpan(eqs);
     var want = S.genPeriod || '1h';
@@ -3053,7 +3112,7 @@ export class App extends Component {
     if (need != null && sp.spanH < need) want = 'all'; // 데이터보다 긴 프리셋이 선택돼 있던 모순 상태 방지
     var toMs = sp.toMs || this.data.now;
     var fromMs = (PERIOD_H[want] == null) ? (sp.minMs || toMs - PERIOD_H['24h'] * 3600000) : toMs - PERIOD_H[want] * 3600000;
-    this.setState({ genTags: ids, genPeriod: want, genFrom: this._dtVal(fromMs), genTo: this._dtVal(toMs) });
+    this.setState({ genTags: ids, genPeriod: want, genFrom: this._dtVal(fromMs), genTo: this._dtVal(toMs), genFromD: null, genToD: null });
   }
   _toggleGenTag(id) { var g = this.state.genTags.slice(), i = g.indexOf(id); if (i >= 0) g.splice(i, 1); else g.push(id); this._setGenTags(g); }
   // 리포트 생성 — 선택 태그별로: 데이터 조회(0) → 지표 계산(1) → 소견 생성(2, 옵션) → 저장(3)
@@ -3074,6 +3133,8 @@ export class App extends Component {
     if (S.genRunning) return;
     var run = this._genRun = (this._genRun || 0) + 1;
     this._genSaved = 0;
+    this._genLlmErr = null;
+    this._genFails = [];
     this._genAC = (typeof AbortController !== 'undefined') ? new AbortController() : null;
     this.setState({ genRunning: true, genStep: 0 });
     var ids = S.genTags.slice();
@@ -3085,7 +3146,21 @@ export class App extends Component {
             var eq = self._eq(id);
             if (!eq) return null;
             return self._genOne(eq, run).then(function () { self._genSaved++; })
-              .catch(function (e) { if (e && e.__abort) return null; throw e; });
+              /* 한 태그가 실패해도 나머지는 만든다 — 여러 태그를 고른 실행에서 하나 때문에 전부 잃으면
+                 처음부터 다시 돌려야 한다. 대신 어느 태그가 왜 실패했는지를 남긴다: 원문 메시지만으로는
+                 (예: "Cannot read properties of undefined") 어느 설비의 어떤 데이터가 원인인지 알 수 없다. */
+              .catch(function (e) {
+                if (e && e.__abort) throw e; // 중단은 실패가 아니다 — 바깥에서 처리한다
+                console.error('[vibe] report failed · tag=' + eq.name + ' table=' + eq.table, e);
+                /* 발생 위치를 화면에도 싣는다 — 콘솔을 열 수 없는 환경(현장 PC·태블릿)에서는
+                   "Cannot read properties of undefined" 같은 메시지만으로는 어디인지 알 수 없다.
+                   번들이 한 파일이라 줄:열만 있으면 함수를 특정할 수 있다. */
+                var at = String((e && e.stack) || '').split('\n').slice(1, 3)
+                  .map(function (s) { return s.trim().replace(/^at\s+/, '').replace(/^.*\/([^/]+:\d+:\d+)\)?$/, '$1'); })
+                  .filter(Boolean).join(' ← ');
+                self._genFails.push({ tag: eq.alias || eq.name, msg: String((e && e.message) || e), at: at });
+                return null;
+              });
           });
         }, Promise.resolve());
       })
@@ -3093,7 +3168,12 @@ export class App extends Component {
         if (self._genRun !== run) return; // 중단 처리는 _cancelGen이 이미 끝냈다
         self._genAC = null;
         self.setState({ genRunning: false, genStep: 0 });
-        self._toast('리포트 ' + self._genSaved + '건 저장 · vibration-reports/');
+        var _f = self._genFails;
+        if (_f.length) {
+          self._toast('리포트 ' + self._genSaved + '건 저장 · ' + _f.length + '건 실패 — ' + _f[0].tag + ': ' + _f[0].msg
+            + (_f[0].at ? '  [' + _f[0].at + ']' : '') + (_f.length > 1 ? ' 외 ' + (_f.length - 1) + '건' : ''), 'err');
+        } else if (self._genLlmErr) self._toast('리포트 ' + self._genSaved + '건 저장 — LLM 소견 실패로 지표만 저장됨 · ' + self._genLlmErr, 'err');
+        else self._toast('리포트 ' + self._genSaved + '건 저장 · vibration-reports/');
         self._loadReports();
       })
       .catch(function (e) {
@@ -3455,13 +3535,9 @@ export class App extends Component {
       ];
 
       self.setState({ genStep: 2 });
-      var llm = S.genLLM ? LLM.createLLM(self._llmCfg()) : null;
       var _rptSat = self._kurtSat(eq); // 첨도 포화 판정을 소견·리포트에 함께
       var _ev = self._evidence(eq, det); // 근거표·음성 소견·미설명 성분을 리포트에도 결정론적으로 인쇄
-      var opP = llm
-        ? llm.complete(self._opinionPrompt(eq, det, dx, _rptSat) + '\n[조회 기간] ' + winFrom + ' ~ ' + winTo, { signal: self._genAC && self._genAC.signal })
-          .catch(function (e2) { console.warn('[vibe] report opinion failed', e2); return null; })
-        : Promise.resolve(null);
+      var opP = self._reportOpinion(eq, det, dx, _rptSat, winFrom, winTo);
 
       return opP.then(function (opinion) {
         live(); // 소견까지 받았어도 중단됐으면 버린다
@@ -3503,8 +3579,9 @@ export class App extends Component {
           opinion: opinion, opinionModel: opinion ? ((S.llmModels || {})[S.llmProvider] || S.llmProvider) : null,
           actions: dx.actions,
           data: data, chartLibSrc: chartSrc,
+          // 재현성 도장의 모델명은 실제로 소견을 낸 경우에만 — 실패했는데 모델을 적으면 없는 근거를 주장하게 된다
           build: self._reportBuild(eq, det, docNo,
-            S.genLLM ? String((S.llmModels || {})[S.llmProvider] || S.llmProvider).replace(':', ' ').replace(/(\d+)\s*b$/i, '$1B') : ''),
+            opinion ? String((S.llmModels || {})[S.llmProvider] || S.llmProvider).replace(':', ' ').replace(/(\d+)\s*b$/i, '$1B') : ''),
           fftHint: det.fft.freqs.length ? '해상도 ' + det.fft.res.toFixed(2) + ' Hz' : '',
           waveDesc: det.raw.values.length ? (det.raw.fs / 1000).toFixed(2) + ' kHz 캡처 · 분석 창 ' + (det.anaSec ? det.anaSec.toFixed(1) : '?') + '초(최신 시점 앵커) — 이 창의 지표는 3분 추세 평균과 다른 값' : '',
           envDesc: det.envelope.hint, cepDesc: det.cepstrum.note,
@@ -3520,6 +3597,32 @@ export class App extends Component {
       });
     });
     });
+  }
+  /* 리포트용 LLM 소견 한 건. 결말이 넷(끔·미설정·호출 실패·빈 응답)인데 전부 소견 없음으로 수렴하므로,
+     실패한 셋은 반드시 _genLlmErr에 사유를 남긴다 — 조용히 null이 되면 리포트에는 결정론 소견(종합 소견·
+     근거표·권고)이 그대로 실려 LLM이 쓴 것처럼 보이고, 사용자는 "켰는데 지표만"의 이유를 알 수 없다.
+     소견이 없어도 리포트 자체는 낸다(지표·근거·권고는 LLM과 무관하게 완결된다). */
+  _reportOpinion(eq, det, dx, sat, winFrom, winTo) {
+    var self = this, S = this.state;
+    if (!S.genLLM) return Promise.resolve(null);
+    // 프로바이더 미선택·API 키 없음 — 호출 자체가 없어 아래 catch에 걸리지 않는다.
+    // 설정에서 프로바이더만 바꿔 새 프로바이더의 키가 비어 있을 때가 대표적인 경로다.
+    var llm = LLM.createLLM(this._llmCfg());
+    if (!llm) { this._genLlmErr = 'LLM 미설정 — 설정 → LLM 연동에서 프로바이더와 API 키를 확인하세요'; return Promise.resolve(null); }
+    return llm.complete(this._opinionPrompt(eq, det, dx, sat) + '\n[조회 기간] ' + winFrom + ' ~ ' + winTo,
+      { signal: this._genAC && this._genAC.signal })
+      // 빈 응답은 어느 프로바이더도 예외로 던지지 않는다(전부 ''를 돌려준다) — 여기서 실패로 바꾼다
+      .then(function (txt) {
+        var s = String(txt == null ? '' : txt).trim();
+        if (s) return s;
+        self._genLlmErr = '모델이 빈 응답을 반환했습니다 — 모델명이 올바른지 확인하세요';
+        return null;
+      })
+      .catch(function (e) {
+        if (!(e && e.__abort)) self._genLlmErr = String((e && e.message) || e);
+        console.warn('[vibe] report opinion failed', e);
+        return null;
+      });
   }
   /* 리포트 data 중 eq·det·근거만으로 정해지는 부분(요약 8블록·ISO·재현성 바 등)을 한 곳에 모은다.
      _genOne과 검증 하네스(tools/verify-summary.mjs)가 같은 것을 쓰게 하기 위한 추출 — 두 벌로 두면
@@ -3756,7 +3859,7 @@ export class App extends Component {
     // 설정탭 진입 시 테이블·태그 목록 최신화 (부팅 후 추가/삭제된 것 반영)
     if (id === 'settings' && this.live) {
       var self = this;
-      listTagTables().then(function (t) { self.liveTables = t; self.forceUpdate(); }).catch(function () {});
+      listTagTables().then(function (t) { self.liveTables = t; self._loadSchemas(); self.forceUpdate(); }).catch(function () {});
       this._ensureTags(this.state.srcSel, true);
       // 별칭 편집은 스크롤한 만큼 줄을 누적해 두므로, 들어올 때마다 처음 분량으로 되돌린다
       // (검색어는 남긴다 — 입력칸에 그대로 보이는 값이라 사라지면 오히려 놀란다)
@@ -3851,7 +3954,8 @@ export class App extends Component {
       isDiag: S.ready && S.tab === 'diag', isReport: S.ready && S.tab === 'report', isSettings: S.ready && S.tab === 'settings',
       toast: S.toast, toastMsg: S.toast ? S.toast.msg : '',
       toastIcon: S.toast && S.toast.kind === 'err' ? 'error' : (S.toast && S.toast.kind === 'warn' ? 'warning' : 'check'),
-      toastStyle: 'position: fixed; bottom: 26px; left: 50%; transform: translateX(-50%); z-index: 100; display: flex; align-items: center; gap: 9px; padding: 11px 18px; border-radius: 8px; font-size: 13px; font-weight: 500; color: #fff; box-shadow: 0 8px 24px rgba(0,0,0,.35); animation: vtoast .25s cubic-bezier(.21,1.02,.73,1); background: ' + (S.toast && S.toast.kind === 'err' ? '#c14545' : (S.toast && S.toast.kind === 'warn' ? '#c77d0a' : '#2e7d5b')) + ';'
+      // 오류 토스트에는 발생 위치까지 실리므로 길어질 수 있다 — 화면 밖으로 나가지 않게 폭을 묶는다
+      toastStyle: 'position: fixed; bottom: 26px; left: 50%; transform: translateX(-50%); z-index: 100; display: flex; align-items: flex-start; gap: 9px; padding: 11px 18px; border-radius: 8px; font-size: 13px; font-weight: 500; color: #fff; box-shadow: 0 8px 24px rgba(0,0,0,.35); animation: vtoast .25s cubic-bezier(.21,1.02,.73,1); max-width: min(880px, calc(100vw - 40px)); line-height: 1.5; word-break: break-word; background: ' + (S.toast && S.toast.kind === 'err' ? 'var(--toast-err)' : (S.toast && S.toast.kind === 'warn' ? 'var(--toast-warn)' : 'var(--toast-ok)')) + ';'
     };
     base.showAdvanced = true; // 라이브도 전체 그래프 복원(포락선·켑스트럼·스펙트로그램·첨도·대역 — 실계산)
     base.indicsTitle = this.live ? '진단 지표 (시간영역)' : '스펙트럴 진단 지표';
@@ -3995,6 +4099,7 @@ export class App extends Component {
       self.setState({ srcNotice: '' });
       listTagTables().then(function (t) {
         self.liveTables = t;
+        self._loadSchemas();
         var sel = (self.state.srcSel || []).filter(function (x) { return t.indexOf(x) >= 0; });
         self.setState({ srcSel: sel });
         // 사용자가 변동을 확정한 시점 — 적재 후 감시 대상을 즉시 맞춘다(다음 틱을 기다리지 않게)
@@ -4185,24 +4290,36 @@ export class App extends Component {
     };
     // 상세분석 기간 — 앵커는 선택 태그 1개
     base.periodPresets = this._presetChips([this._activeEq(S.selTag)], '이 태그', 'detail');
-    base.periodFrom = S.from; base.periodTo = S.to;
     var custom = S.period === 'custom';
-    var _fD = Date.parse(S.from), _tD = Date.parse(S.to);
-    var dateInvalid = custom && !isNaN(_fD) && !isNaN(_tD) && _tD < _fD;
-    base.dateStyle = 'height: 34px; padding: 0 10px; border-radius: 6px; border: 1px solid ' + (dateInvalid ? '#e5484d' : 'var(--border-medium)') + '; background: var(--bg-elevated); color: var(--text-primary); font-size: 12px; font-family: var(--font-mono); color-scheme: dark;' + (custom ? '' : ' opacity: .5; pointer-events: none;');
     var _dtTxt = function (s) { return String(s || '').replace('T', ' '); }; // 표시용(입력값의 T 제거)
-    base.onFromChange = function (ev) {
-      if (S.period !== 'custom') return; var v = ev.target.value;
-      if (S.to && Date.parse(v) > Date.parse(S.to)) self._toast('시작 시각이 종료보다 늦습니다', 'warn');
-      else self._toast('조회 기간 적용됨 · ' + _dtTxt(v) + ' ~ ' + _dtTxt(S.to));
-      self.setState({ from: v });
+    /* 직접 입력은 초안 → '적용' 두 단계로 받는다. 네이티브 피커에는 확인 단추가 없어서 날짜·시·분을
+       고르는 사이 값이 서너 번 바뀌는데, 바뀔 때마다 커밋하면 중간 구간으로 조회가 나가고
+       사용자는 무엇이 반영됐는지 알 수 없다. 적용 단추가 곧 피커를 닫는 수단이기도 하다. */
+    var pFrom = S.fromD != null ? S.fromD : S.from;
+    var pTo = S.toD != null ? S.toD : S.to;
+    base.periodFrom = pFrom; base.periodTo = pTo;
+    var _fD = Date.parse(pFrom), _tD = Date.parse(pTo);
+    var dateInvalid = custom && !isNaN(_fD) && !isNaN(_tD) && _tD < _fD;
+    base.dateStyle = 'height: 34px; padding: 0 10px; border-radius: 6px; border: 1px solid ' + (dateInvalid ? '#e5484d' : 'var(--border-medium)') + '; background: var(--bg-elevated); color: var(--text-primary); font-size: 12px; font-family: var(--font-mono);' + (custom ? '' : ' opacity: .5; pointer-events: none;');
+    var pDirty = custom && ((S.fromD != null && S.fromD !== S.from) || (S.toD != null && S.toD !== S.to));
+    base.periodApplyShow = custom;
+    base.periodApplyOff = !pDirty || dateInvalid;
+    base.periodBad = dateInvalid ? '시작이 종료보다 늦습니다' : '';
+    base.periodApplyStyle = 'height: 34px; padding: 0 14px; border-radius: 6px; font-size: 12px; font-weight: 600; cursor: ' + (base.periodApplyOff ? 'default' : 'pointer')
+      + '; border: 1px solid ' + (base.periodApplyOff ? 'var(--border-default)' : 'var(--primary-base)')
+      + '; background: ' + (base.periodApplyOff ? 'var(--bg-elevated)' : 'var(--primary-base)')
+      + '; color: ' + (base.periodApplyOff ? 'var(--text-muted)' : '#fff') + ';';
+    base.onFromChange = function (ev) { if (S.period !== 'custom') return; self.setState({ fromD: ev.target.value }); };
+    base.onToChange = function (ev) { if (S.period !== 'custom') return; self.setState({ toD: ev.target.value }); };
+    base.onPeriodApply = function () {
+      if (dateInvalid) { self._toast('시작 시각이 종료보다 늦습니다', 'warn'); return; }
+      if (!pDirty) return;
+      self._closePicker();
+      self.setState({ from: pFrom, to: pTo, fromD: null, toD: null });
+      self._toast('조회 기간 적용됨 · ' + _dtTxt(pFrom) + ' ~ ' + _dtTxt(pTo));
     };
-    base.onToChange = function (ev) {
-      if (S.period !== 'custom') return; var v = ev.target.value;
-      if (S.from && Date.parse(S.from) > Date.parse(v)) self._toast('종료 시각이 시작보다 빠릅니다', 'warn');
-      else self._toast('조회 기간 적용됨 · ' + _dtTxt(S.from) + ' ~ ' + _dtTxt(v));
-      self.setState({ to: v });
-    };
+    // Enter로도 확정 — 피커를 열어둔 채 키보드로 끝내는 흐름
+    base.onPeriodKey = function (ev) { if (ev.key === 'Enter') { ev.preventDefault(); base.onPeriodApply(); } };
     base.onRefresh = function () { var eq2 = self._activeEq(self.state.selTag); if (eq2) { delete self._detailCache[eq2.id]; } self._rfCache = {}; self._trCacheL = {}; self._toast('새로고침 완료 · ' + E.fmtClock(Date.now())); self.setState({ dxOpen: false, dxAiText: null }); };
     var eq = this._activeEq(S.selTag);
     if (eq) {
@@ -4210,6 +4327,16 @@ export class App extends Component {
     var det = this._detail(eq); // 라이브 eq로 캐시 로드 + 스냅샷 프리즈
     var _dc = this._detailCache[eq.id];
     if (_dc && _dc.eqSnap) eq = _dc.eqSnap; // 이후 게이지·판정·진단·추세는 캡처 스냅샷 값 사용(실시간 미반영)
+    /* 계산이 끝나기 전에는 그 사실을 밝힌다. 파형·스펙트럼·계측 검증은 조회 뒤에야 나오는데,
+       그동안 화면은 경고 없이 멀쩡해 보여 "이상 없음"으로 읽힌다 — 클리핑 같은 계측 이상 경고가
+       몇 초 뒤에야 뜨는 구간이 정확히 그 오독이 일어나는 구간이다. */
+    base.detBusy = !!(_dc && _dc.state === 'loading');
+    base.detBusyText = '분석 중 — 파형·스펙트럼과 계측 검증을 계산하고 있습니다. 아래 판정은 계산이 끝난 뒤 확정됩니다.';
+    // 캡처 실패·빈 구간은 카드가 말없이 비므로 배너로 밝힌다 — 설비 문제인지 데이터 문제인지를 화면이 답한다
+    base.detWarn = (_dc && _dc.state === 'error') ? '상세분석 조회에 실패했습니다 — 네트워크·DB 상태를 확인하고 새로고침하세요.'
+      : (_dc && _dc.state === 'ready' && det.raw && !det.raw.values.length)
+        ? '선택 구간에 원시 파형이 없습니다 — 파형·스펙트럼 카드가 비어 있습니다. 마지막 수집: ' + (eq.lastSeen ? E.fmtDT(eq.lastSeen) : '알 수 없음')
+        : '';
     /* 계측 보류 — 감시가 본 사유를 우선한다. 감시는 1초 창(+롤업 버킷), 상세는 분석 창이라
        같은 순간에도 한쪽만 걸릴 수 있는데, 화면에 붙는 문구는 판정이 실제로 멈춘 이유여야 한다.
        둘 다 걸리지 않았을 때만 보류가 아니다(OR) — 한쪽만 보면 카드와 상세가 또 갈린다. */
@@ -4335,6 +4462,9 @@ export class App extends Component {
     base.cepNote = det.cepstrum.note;
     var dx = this._dx(eq, det);
     base.dxVerdict = dx.verdict; base.dxSub = dx.sub; base.dxGradeKo = dx.gradeKo; base.dxColor = dx.color; base.dxSoft = dx.soft;
+    /* 계산 전 판정은 빈 스펙트럼 위에서 나온 것이라 "정상"으로 보인다 — 결론 자리에 결론 대신
+       진행 중임을 적는다. 등급 뱃지는 RMS 실측이라 그대로 둔다(계산과 무관하게 이미 확정된 값). */
+    if (base.detBusy) { base.dxVerdict = '분석 중…'; base.dxSub = '스펙트럼·계측 검증 계산이 끝나면 판정이 확정됩니다'; }
     base.dxEvidence = dx.evidence; base.dxActions = dx.actions;
     base.dxAiIdle = !S.dxAiText || S.dxAiText === '__fallback__'; base.dxAiLoading = S.dxAiText === '__loading__'; base.dxAiFallback = S.dxAiText === '__fallback__';
     var llmOk = !!LLM.createLLM(this._llmCfg());
@@ -4438,16 +4568,9 @@ export class App extends Component {
               ? '\n\n(잠정) 표시는 가속도계 마운팅의 유효 주파수 상한을 넘는 대역입니다. 값이 오른 것은 사실이지만 설비 진동인지 센서 부착부 공진인지 구분할 수 없어, 그 대역만 이탈했으면 등급을 주의로 묶습니다. 정비 전 센서 부착 상태를 먼저 확인하세요.'
               : '')
           : '',
-        onGo: function () { self._gotoDetail(e.tagId, e.ms); }, onExplain: function () { self._explain(e); } };
+        onGo: function () { self._gotoDetail(e.tagId, e.ms); } };
     });
     var deq = this._activeEq(S.diagTag);
-
-    base.explainOpen = !!S.explainEvent;
-    base.explainTitle = S.explainEvent ? (S.explainEvent.tagAlias + ' · ' + S.explainEvent.typeKo) : '';
-    base.explainLoading = S.explainText === '__loading__';
-    base.explainFallback = S.explainText === '__fallback__';
-    base.explainText = (S.explainText && S.explainText !== '__loading__' && S.explainText !== '__fallback__') ? S.explainText : '';
-    base.onCloseExplain = function () { self.setState({ explainEvent: null, explainText: null }); };
 
     base.reportTags = eqs.map(function (e) { var ck = S.genTags.indexOf(e.id) >= 0; return { id: e.id, alias: e.alias || e.name, nameSub: (e.alias && e.alias !== e.name) ? '(' + e.name + ')' : '', checked: ck, onToggle: function () { self._toggleGenTag(e.id); }, rowStyle: 'display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 6px; cursor: pointer; background: ' + (ck ? 'rgba(0,108,210,.08)' : 'transparent') + ';', boxStyle: 'width: 16px; height: 16px; border-radius: 4px; flex-shrink: 0; display: flex; align-items: center; justify-content: center; border: 1px solid ' + (ck ? 'var(--primary-base)' : 'var(--border-medium)') + '; background: ' + (ck ? 'var(--primary-base)' : 'transparent') + '; color: #fff;' }; });
     base.genTagsCount = S.genTags.length;
@@ -4465,30 +4588,46 @@ export class App extends Component {
     base.genPeriodSummary = S.genPeriod === 'all' ? '각 태그의 데이터 전체 구간'
       : PERIOD_H[S.genPeriod] ? '각 태그의 최신 데이터 기준 · 최근 ' + ({ '1h': '1시간', '6h': '6시간', '24h': '24시간' }[S.genPeriod] || S.genPeriod)
         : '기간을 선택하세요';
-    base.genPeriodFrom = S.genFrom; base.genPeriodTo = S.genTo;
-    var _gfD = Date.parse(S.genFrom), _gtD = Date.parse(S.genTo);
+    // 상세분석과 같은 초안 → '적용' 흐름 (위 periodApply 주석 참조)
+    var gFrom = S.genFromD != null ? S.genFromD : S.genFrom;
+    var gTo = S.genToD != null ? S.genToD : S.genTo;
+    base.genPeriodFrom = gFrom; base.genPeriodTo = gTo;
+    var _gfD = Date.parse(gFrom), _gtD = Date.parse(gTo);
     var genDateInvalid = _genCustom && !isNaN(_gfD) && !isNaN(_gtD) && _gtD < _gfD;
     // 좁은 사이드 칼럼용 — datetime-local은 내재 최소폭이 커서 그냥 두면 카드를 넘친다
-    base.genDateStyle = 'height: 34px; padding: 0 10px; border-radius: 6px; border: 1px solid ' + (genDateInvalid ? '#e5484d' : 'var(--border-medium)') + '; background: var(--bg-elevated); color: var(--text-primary); font-size: 12px; font-family: var(--font-mono); color-scheme: dark; width: 100%; min-width: 0; box-sizing: border-box;';
-    base.onGenFromChange = function (ev) {
-      var v = ev.target.value;
-      if (S.genTo && Date.parse(v) > Date.parse(S.genTo)) self._toast('시작 시각이 종료보다 늦습니다', 'warn');
-      else self._toast('리포트 기간 적용됨 · ' + _dtTxt(v) + ' ~ ' + _dtTxt(S.genTo));
-      self.setState({ genFrom: v });
+    base.genDateStyle = 'height: 34px; padding: 0 10px; border-radius: 6px; border: 1px solid ' + (genDateInvalid ? '#e5484d' : 'var(--border-medium)') + '; background: var(--bg-elevated); color: var(--text-primary); font-size: 12px; font-family: var(--font-mono); width: 100%; min-width: 0; box-sizing: border-box;';
+    var gDirty = _genCustom && ((S.genFromD != null && S.genFromD !== S.genFrom) || (S.genToD != null && S.genToD !== S.genTo));
+    base.genApplyOff = !gDirty || genDateInvalid;
+    base.genPeriodBad = genDateInvalid ? '시작이 종료보다 늦습니다' : '';
+    base.genApplyStyle = 'height: 32px; padding: 0 14px; border-radius: 6px; font-size: 12px; font-weight: 600; cursor: ' + (base.genApplyOff ? 'default' : 'pointer')
+      + '; border: 1px solid ' + (base.genApplyOff ? 'var(--border-default)' : 'var(--primary-base)')
+      + '; background: ' + (base.genApplyOff ? 'var(--bg-elevated)' : 'var(--primary-base)')
+      + '; color: ' + (base.genApplyOff ? 'var(--text-muted)' : '#fff') + ';';
+    base.onGenFromChange = function (ev) { self.setState({ genFromD: ev.target.value }); };
+    base.onGenToChange = function (ev) { self.setState({ genToD: ev.target.value }); };
+    base.onGenPeriodApply = function () {
+      if (genDateInvalid) { self._toast('시작 시각이 종료보다 늦습니다', 'warn'); return; }
+      if (!gDirty) return;
+      self._closePicker();
+      self.setState({ genFrom: gFrom, genTo: gTo, genFromD: null, genToD: null });
+      self._toast('리포트 기간 적용됨 · ' + _dtTxt(gFrom) + ' ~ ' + _dtTxt(gTo));
     };
-    base.onGenToChange = function (ev) {
-      var v = ev.target.value;
-      if (S.genFrom && Date.parse(S.genFrom) > Date.parse(v)) self._toast('종료 시각이 시작보다 빠릅니다', 'warn');
-      else self._toast('리포트 기간 적용됨 · ' + _dtTxt(S.genFrom) + ' ~ ' + _dtTxt(v));
-      self.setState({ genTo: v });
-    };
+    base.onGenPeriodKey = function (ev) { if (ev.key === 'Enter') { ev.preventDefault(); base.onGenPeriodApply(); } };
     // LLM 기능 게이트 = "설정 존재"(ollama 또는 API 키) — 연결 테스트는 검증용일 뿐 게이트 아님
     // (테스트 성공 여부는 세션 한정이라 새로고침 후 토글이 잠기는 문제가 있었다)
     var llmReady = !!LLM.createLLM(this._llmCfg());
     base.genLLM = S.genLLM; base.genLLMConfigured = llmReady;
-    base.genToggleStyle = 'width: 38px; height: 22px; border-radius: 11px; position: relative; cursor: pointer; transition: background .15s; flex-shrink: 0; background: ' + ((S.genLLM && llmReady) ? 'var(--primary-base)' : 'var(--bg-elevated)') + '; border: 1px solid var(--border-default);' + (llmReady ? '' : ' opacity: .5;');
-    base.genKnobStyle = 'position: absolute; top: 2px; left: ' + ((S.genLLM && llmReady) ? '18px' : '2px') + '; width: 16px; height: 16px; border-radius: 50%; background: #fff; transition: left .15s;';
-    base.onToggleGenLLM = function () { if (!llmReady) { self._toast('LLM 미설정 · ⚙ 설정에서 구성하세요', 'warn'); return; } self.setState({ genLLM: !S.genLLM }); };
+    base.genToggleStyle = SWITCH_TRACK(S.genLLM && llmReady) + (llmReady ? '' : ' opacity: .5;');
+    base.genKnobStyle = SWITCH_KNOB(S.genLLM && llmReady);
+    /* 이 토글은 설정 탭 밖(리포트 탭)에 있어 '저장' 버튼을 거치지 않으므로 누른 즉시 저장한다.
+       단 저장은 _persistView로 — 리포트 생성에만 쓰는 값이라 판정·감시와 무관한데,
+       _persistCfg를 쓰면 감시·대역·감시자 타이머를 전부 다시 구워 "감시자 켜짐" 토스트까지 뜬다. */
+    base.onToggleGenLLM = function () {
+      if (!llmReady) { self._toast('LLM 미설정 · ⚙ 설정에서 구성하세요', 'warn'); return; }
+      var on = !S.genLLM;
+      self.setState({ genLLM: on });
+      self._persistView(['genLLM'], { genLLM: on }); // setState 직후라 값을 직접 넘긴다
+    };
     base.genLLMNotice = llmReady ? '' : 'LLM 미설정 — ⚙ 설정 → LLM 연동 구성 시 활성화';
     base.genRunning = S.genRunning;
     base.genSteps = ['데이터 조회', '지표 계산', '소견 생성', '저장'].map(function (l, i) { var st = i < S.genStep ? 'done' : (i === S.genStep ? 'active' : 'pending'); return { label: l, num: st === 'done' ? '✓' : (i + 1), dotStyle: 'width: 22px; height: 22px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 700; flex-shrink: 0; ' + (st === 'done' ? 'background: #2e7d5b; color: #fff;' : st === 'active' ? 'background: var(--primary-base); color: #fff;' : 'background: var(--bg-elevated); color: var(--text-muted); border: 1px solid var(--border-default);'), labelStyle: 'font-size: 13px; color: ' + (st === 'pending' ? 'var(--text-muted)' : 'var(--text-primary)') + '; font-weight: ' + (st === 'active' ? '600' : '500') + ';' }; });
@@ -4505,14 +4644,17 @@ export class App extends Component {
     base.onRpPrev = function () { self.setState({ rpPage: Math.max(0, rpPg - 1) }); };
     base.onRpNext = function () { self.setState({ rpPage: Math.min(rpTotal - 1, rpPg + 1) }); };
     base.rpBtnStyle = 'width: 28px; height: 28px; border-radius: 5px; border: 1px solid var(--border-default); background: var(--bg-elevated); color: var(--text-secondary); cursor: pointer;';
-    base.reportRows = S.reports.slice(rpPg * RPP, rpPg * RPP + RPP).map(function (r) { var pd = { '최근 24시간': 1, '최근 7일': 7, '최근 30일': 30 }[r.period]; var pLabel = pd ? (E.fmtDT(r.ms - pd * 86400000).slice(0, 10) + ' ~ ' + E.fmtDT(r.ms).slice(0, 10) + ' (' + (pd === 1 ? '24시간' : pd + '일') + ')') : r.period; return { id: r.id, dateText: E.fmtDT(r.ms), tagsText: r.tags.join(', '), period: pLabel, llmText: r.llm ? 'LLM 소견' : '지표만', llmBg: r.llm ? 'rgba(0,108,210,.14)' : 'rgba(255,255,255,.07)', llmColor: r.llm ? 'var(--primary-light)' : 'var(--text-muted)', onOpen: function () { self._openReport(r); }, onDownload: function () { self._toast('다운로드 시작 (데모)'); }, onDelete: function () { self._delReport(r.id); } }; });
+    base.reportRows = S.reports.slice(rpPg * RPP, rpPg * RPP + RPP).map(function (r) { var pd = { '최근 24시간': 1, '최근 7일': 7, '최근 30일': 30 }[r.period]; var pLabel = pd ? (E.fmtDT(r.ms - pd * 86400000).slice(0, 10) + ' ~ ' + E.fmtDT(r.ms).slice(0, 10) + ' (' + (pd === 1 ? '24시간' : pd + '일') + ')') : r.period; return { id: r.id, dateText: E.fmtDT(r.ms), tagsText: r.tags.join(', '), period: pLabel, llmText: r.llm ? 'LLM 소견' : '지표만', llmBg: r.llm ? 'rgba(0,108,210,.14)' : 'rgba(255,255,255,.07)', llmColor: r.llm ? 'var(--primary-light)' : 'var(--text-muted)', onOpen: function () { self._openReport(r); }, onDelete: function () { self.setState({ delRep: r }); } }; });
     base.reportEmpty = S.reports.length === 0;
-    base.rvOpen = !!S.viewReport;
-    if (S.viewReport) {
-      base.rvUrl = S.viewReport.url;
-      base.rvFname = S.viewReport.fname;
-      base.onCloseRv = function () { self.setState({ viewReport: null }); };
-      base.stopClick = function (ev) { if (ev && ev.stopPropagation) ev.stopPropagation(); };
+    // 모달 내부 클릭이 오버레이 닫기로 번지지 않게 막는다 — 오버레이 닫기를 쓰는 모든 모달이 공유
+    base.stopClick = function (ev) { if (ev && ev.stopPropagation) ev.stopPropagation(); };
+    // 리포트 삭제 확인 — 보관함 파일은 복구할 수 없어 즉시 지우지 않는다
+    base.delRepOpen = !!S.delRep;
+    if (S.delRep) {
+      base.delRepName = S.delRep.fname;
+      base.delRepDate = E.fmtDT(S.delRep.ms);
+      base.onDelRepCancel = function () { self.setState({ delRep: null }); };
+      base.onDelRepDo = function () { var r = S.delRep; self.setState({ delRep: null }); self._delReport(r.id); };
     }
 
     this._vmSettings(base, eqs);
@@ -4552,19 +4694,21 @@ export class App extends Component {
     if (base.secData) this._dataVals(base);
     base.mcOptions = ['I', 'II', 'III', 'IV'].map(function (c) { var a = S.machineClass === c; return { label: 'Class ' + c, onClick: function () { self.setState({ machineClass: c, dirty: true }); }, style: 'flex: 1; text-align: center; padding: 10px 6px; border-radius: 6px; cursor: pointer; font-size: 13px; font-weight: ' + (a ? '600' : '500') + '; border: 1px solid ' + (a ? 'var(--primary-base)' : 'var(--border-default)') + '; background: ' + (a ? 'rgba(0,108,210,.1)' : 'var(--bg-elevated)') + '; color: ' + (a ? 'var(--primary-light)' : 'var(--text-secondary)') + ';' }; });
     var mz = self._effZones({ unit: 'mm/s', cls: S.machineClass });
-    var MC_DESC = { I: ['Class I · 소형 기계', '15 kW 이하의 소형 전동기·펌프 등. 기계가 기초와 일체로 거동하는 설비.'], II: ['Class II · 중형 기계', '15–75 kW급 전동기, 또는 특수 기초에 강체 설치된 300 kW 이하 중형 기계.'], III: ['Class III · 대형 · 강성 기초', '강성(rigid) 기초 위에 설치된 대형 회전기계. 기초가 진동을 거의 흙수하지 않음.'], IV: ['Class IV · 대형 · 연성 기초', '연성(flexible) 기초 위의 대형·고속 터보기계(터빈·발전기 등). 허용 진동 범위가 가장 넓음.'] };
+    var MC_DESC = { I: ['Class I · 소형 기계', '15 kW 이하의 소형 전동기·펌프 등. 기계가 기초와 일체로 거동하는 설비.'], II: ['Class II · 중형 기계', '15–75 kW급 전동기, 또는 특수 기초에 강체 설치된 300 kW 이하 중형 기계.'], III: ['Class III · 대형 · 강성 기초', '강성(rigid) 기초 위에 설치된 대형 회전기계. 기초가 진동을 거의 흡수하지 않음.'], IV: ['Class IV · 대형 · 연성 기초', '연성(flexible) 기초 위의 대형·고속 터보기계(터빈·발전기 등). 허용 진동 범위가 가장 넓음.'] };
     var md = MC_DESC[S.machineClass];
     base.mcDescTitle = md ? md[0] : '머신 클래스 미선택';
     base.mcDescBody = md ? md[1] : '클래스를 선택하세요 — 미선택 시 Class II 기준으로 판정합니다.';
     base.mcZones = [{ ko: '양호 A/B', color: '#3aa76d', range: '< ' + mz[0] }, { ko: '주의 B/C', color: '#d99a2b', range: mz[0] + '–' + mz[1] }, { ko: '위험 C/D', color: '#e07b39', range: mz[1] + '–' + mz[2] }, { ko: '심각 D', color: '#e5484d', range: '> ' + mz[2] }].map(function (z) { return { ko: z.ko, range: z.range + ' mm/s', barStyle: 'height: 6px; border-radius: 3px; background: ' + z.color + ';', dot: z.color }; });
     base.srcTables = (self.liveTables || []).map(function (name) {
-      var on = S.srcSel.indexOf(name) >= 0;
-      return { name: name, kind: 'TAG', checked: on, kindColor: '#005fb8', onToggle: function () { self._toggleSrcTable(name); } };
+      var on = S.srcSel.indexOf(name) >= 0, blk = self._srcBlock(name);
+      return { name: name, kind: 'TAG', checked: on, kindColor: '#005fb8', blocked: !!blk, blockReason: blk,
+        onToggle: function () { self._toggleSrcTable(name); } };
     });
-    base.srcSelAllLabel = (self.liveTables || []).length && S.srcSel.length === self.liveTables.length ? '전체 해제' : '전체 선택';
+    // 전체 선택은 고를 수 있는 것만 — 미지원 table까지 담으면 저장 직후 조회가 실패한다
+    var _srcOk = base.srcTables.filter(function (t) { return !t.blocked; }).map(function (t) { return t.name; });
+    base.srcSelAllLabel = _srcOk.length && S.srcSel.length === _srcOk.length ? '전체 해제' : '전체 선택';
     base.onSrcSelectAll = function () {
-      var all = self.liveTables || [];
-      self.setState({ srcSel: S.srcSel.length === all.length ? [] : all.slice(), dirty: true });
+      self.setState({ srcSel: S.srcSel.length === _srcOk.length ? [] : _srcOk.slice(), dirty: true });
     };
     base.srcTotal = base.srcTables.length;
     base.srcSelCount = base.srcTables.filter(function (t) { return t.checked; }).length;
@@ -4838,8 +4982,8 @@ export class App extends Component {
          data-tip은 textContent로 렌더되므로 &#10; 같은 HTML 엔티티가 디코딩되지 않고 그대로 보인다.
          일반 JS 문자열이라 \n이 실제 줄바꿈으로 들어간다. */
       '대역 추출 주기': '대역 에너지는 시간·일 단위로 변하는 값이라 평상시엔 10분이면 충분합니다. 급변하는 사고는 전체 RMS 알람이 10초 주기로 따로 잡습니다.'
-        + '\n\n다만 베이스라인 학습에는 표본 30개가 필요해 10분 주기면 5시간이 걸립니다. 처음 도입할 때만 1분으로 두면 30분 만에 학습이 끝나고, 그 뒤 10분으로 되돌리면 됩니다.'
-        + '\n\n40대 기준 서버 부하 — 1분 55% · 5분 11% · 10분 5.5%',
+        + '\n\n다만 베이스라인 학습에는 표본 30개가 필요해 10분 주기면 5시간이 걸립니다. 처음 도입할 때는 과거 채우기로 지난 구간을 소급 추출하면 기다리지 않고 바로 학습할 수 있습니다.'
+        + '\n\n40대 기준 서버 부하 — 10분 5.5% · 30분 1.8% · 1시간 0.9%',
       '전원 계통주파수': '모터에 공급되는 상용전원의 주파수로, 한국은 60 Hz입니다. 전기적 결함은 이 값의 2배(120 Hz)에서 나타나며, 기계적 결함과 달리 회전수가 변해도 움직이지 않는 것이 구분 기준입니다. 입력된 RPM이 다른 계통의 동기속도에 맞으면 경고를 표시합니다.',
       // 직접 입력(베어링 형상) — 네 값 모두 제조사 카탈로그의 기하 제원 표에 있다
       '볼 수 n': '전동체(볼 또는 롤러)의 개수입니다. 베어링 제조사 카탈로그의 형상 제원에서 확인합니다. 네 값이 모두 있어야 결함 주파수가 계산됩니다.',
@@ -5031,8 +5175,8 @@ export class App extends Component {
     base.llmStatusText = (S.llmConfigured ? '연결됨' : (llmReady2 ? '설정됨 · 테스트 권장' : '미설정')) + (llmReady2 ? ' — ' + this._llmLabel() : '');
     base.llmStatusColor = S.llmConfigured ? '#3aa76d' : (llmReady2 ? '#d99a2b' : 'var(--text-muted)');
     base.monitorOn = S.monitorOn;
-    base.monToggleStyle = 'width: 40px; height: 23px; border-radius: 12px; position: relative; cursor: pointer; transition: background .15s; flex-shrink: 0; background: ' + (S.monitorOn ? 'var(--primary-base)' : 'var(--bg-elevated)') + '; border: 1px solid var(--border-default);';
-    base.monKnobStyle = 'position: absolute; top: 2px; left: ' + (S.monitorOn ? '19px' : '2px') + '; width: 17px; height: 17px; border-radius: 50%; background: #fff; transition: left .15s;';
+    base.monToggleStyle = SWITCH_TRACK(S.monitorOn);
+    base.monKnobStyle = SWITCH_KNOB(S.monitorOn);
     base.onMonToggle = function () { self.setState({ monitorOn: !S.monitorOn, dirty: true }); };
     /* 판정 주기(얼마나 자주)와 RMS 구간(얼마나 넓게)은 다른 축이다.
        구간이 주기보다 짧으면 그 사이 데이터가 판정에 한 번도 안 들어간다 — 주기보다 짧은 구간은 고를 수 없게 막는다. */
@@ -5084,7 +5228,7 @@ export class App extends Component {
     base.recHoldOptions = [{ v: '0', l: '즉시' }, { v: '1m', l: '1분' }, { v: '5m', l: '5분' }, { v: '10m', l: '10분' }];
     base.onEscHold = function (ev) { self.setState({ escHold: ev.target.value, dirty: true }); };
     base.onRecHold = function (ev) { self.setState({ recHold: ev.target.value, dirty: true }); };
-    var RENO_OPTS = [{ v: '0', l: '꿈' }, { v: '30m', l: '30분' }, { v: '1h', l: '1시간' }, { v: '2h', l: '2시간' }, { v: '6h', l: '6시간' }];
+    var RENO_OPTS = [{ v: '0', l: '끔' }, { v: '30m', l: '30분' }, { v: '1h', l: '1시간' }, { v: '2h', l: '2시간' }, { v: '6h', l: '6시간' }];
     base.renotifyOptions = RENO_OPTS;
     // 베이스라인 미학습 경고(판정기준 카드) — 학습 가능한데 미학습인 태그 수 (setNav의 _blUnCnt와 동일 기준)
     base.monBlUnlearned = _blUnCnt;
@@ -5122,8 +5266,8 @@ export class App extends Component {
         testShow: !!t, testMsg: t ? t.msg : '',
         testMsgStyle: 'font-size: 11px; margin-top: 4px; color: ' + (t && t.ok ? '#3aa76d' : '#e5484d') + ';',
         testBtnStyle: 'height: 32px; padding: 0 12px; border-radius: 6px; border: 1px solid var(--border-medium); background: var(--bg-elevated); color: var(--text-secondary); font-size: 12px; font-weight: 600; white-space: nowrap;' + (usable ? ' cursor: pointer;' : ' opacity: .4; pointer-events: none;'),
-        toggleStyle: 'width: 40px; height: 23px; border-radius: 12px; position: relative; cursor: pointer; transition: background .15s; flex-shrink: 0; background: ' + (on ? 'var(--primary-base)' : 'var(--border-medium)') + ';',
-        knobStyle: 'position: absolute; top: 2px; left: ' + (on ? '19px' : '2px') + '; width: 17px; height: 17px; border-radius: 50%; background: #fff; transition: left .15s;',
+        toggleStyle: SWITCH_TRACK(on),
+        knobStyle: SWITCH_KNOB(on),
         inputStyle: 'height: 32px; width: 100%; padding: 0 10px; border-radius: 6px; border: 1px solid var(--border-medium); background: var(--bg-elevated); color: var(--text-primary); font-size: 12px; font-family: var(--font-mono);' + (on && c.ready ? '' : ' opacity: .4; pointer-events: none;'),
         onToggle: function () { self._toggleNotifCh(c.key); },
         onInput: function (ev) { var m = Object.assign({}, self.state.notifTo); m[c.key] = ev.target.value; self.setState({ notifTo: m, dirty: true, notifTest: null }); },
@@ -5366,8 +5510,8 @@ export class App extends Component {
     base.bandIvApplyStyle = 'height: 34px; padding: 0 14px; border-radius: 6px; border: none; font-size: 13px; font-weight: 600; '
       + (base.bandIvSame ? 'background: var(--border-medium); color: var(--text-muted); cursor: not-allowed;' : 'background: var(--primary-base); color: #fff; cursor: pointer;');
     base.onBandIvApply = function () { self._applyBandInterval(); };
-    base.bandToggleStyle = 'width: 40px; height: 23px; border-radius: 12px; position: relative; cursor: pointer; transition: background .15s; flex-shrink: 0; background: ' + (S.bandOn ? 'var(--primary-base)' : 'var(--border-medium)') + ';';
-    base.bandKnobStyle = 'position: absolute; top: 2px; left: ' + (S.bandOn ? '19px' : '2px') + '; width: 17px; height: 17px; border-radius: 50%; background: #fff; transition: left .15s;';
+    base.bandToggleStyle = SWITCH_TRACK(S.bandOn);
+    base.bandKnobStyle = SWITCH_KNOB(S.bandOn);
     base.routeTimings = ['즉시', '알림 안 함']; // 묶음(digest)은 미구현 — 동작 안 하는 선택지를 두지 않는다
     base.settingsDirty = S.dirty;
     base.onSaveSettings = function () { self._saveSettings(); };

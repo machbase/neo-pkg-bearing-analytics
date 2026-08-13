@@ -40,7 +40,7 @@ The app connects to your Neo instance on launch, auto-detects TAG tables, and ru
 - [How detection works](docs/detection.en.md) ([한국어](docs/detection.kr.md)) — what is measured and how grades are decided
 - [Troubleshooting](docs/troubleshooting.en.md) ([한국어](docs/troubleshooting.kr.md))
 
-The expert persona behind the optional LLM opinions — identity, reasoning order, judgment rules, and copy-paste system prompts — is documented separately in [persona/](persona/README.md).
+Two expert personas — identity, reasoning order, judgment rules, and copy-paste system prompts — are documented separately in [persona/](persona/README.md): a rotating-machinery diagnostician who reviews what a report claims, and a monitoring-UI engineer who reviews the screen that carries it.
 
 ## Current Status
 

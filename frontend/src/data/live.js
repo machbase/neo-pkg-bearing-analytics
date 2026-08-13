@@ -22,6 +22,7 @@ const ENV_COLOR = ['#9aa4b2', '#d9534f', '#c77dff', '#2a9d8f'];
 
 // db.js 재노출 — app.js가 데이터 진입점을 이 파일 하나로 유지
 export const listTagTables = DB.listTagTables;
+export const tagSchemas = DB.tagSchemas;
 export const loadConfig = DB.loadConfig;
 export const saveConfig = DB.saveConfig;
 export const saveConfigPartial = DB.saveConfigPartial;
@@ -550,7 +551,7 @@ export async function liveDetail(E, eq, anchorMs, viewUnit) {
       freqs: cep.freqs, mags: cep.mags,
       markers: frUse > 0 ? [{ freq: qms, label: '1/1×', kind: 'f' }] : [],
       note: '하모닉·측대역 간격을 quefrency(ms)로 표시 · 1/1× = ' + qms.toFixed(1) + ' ms('
-        + (det.frMeas ? '실측 1× 기준' : '명판 1× 기준') + ') — 해당 quefrency 라모닉 '
+        + (det.frMeas ? '실측 1× 기준' : '명판 1× 기준') + ') — 해당 quefrency 하모닉 '
         + (found ? '검출됨(중앙값 4배 초과)' : '미검출'),
     };
   }

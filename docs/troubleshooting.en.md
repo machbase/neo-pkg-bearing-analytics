@@ -15,7 +15,7 @@ weight: 60
 
 ## Only some tags appear
 
-Load limits — the app loads at most **20 tags per table** and **40 pieces of equipment overall**, to avoid query storms.
+Load limits — the app loads at most **60 tags per table** and **100 pieces of equipment overall**, to avoid query storms.
 
 Narrow the scope by selecting only the tables you need, or work through your tags in batches.
 
