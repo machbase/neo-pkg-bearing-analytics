@@ -37,9 +37,9 @@ The event list below shows recorded events with time · tag · type · measured 
 
 - Period chips and the **tag** and **type** dropdowns narrow the list.
 - Only the most recent **200** events are rendered. Use export to see beyond that.
-- Beyond threshold exceedances, types include improved, recovered, baseline breach, band breach, and signal lost. What each means is laid out in [How detection works](./detection.en.md).
+- Beyond threshold exceedances, types include sustained, improved, recovered, instrumentation fault, and signal lost. What each means is laid out in [How detection works](./detection.en.md).
 
-> The measured value on a band breach event is a **ratio to the limit**, not an absolute value. Bands differ in magnitude, so no single absolute value compares across them.
+> **Baseline and band produce no events.** A breach never appears in this list — it is displayed on the card and in the evidence table. Events come only from the 10-minute fault-pattern axis.
 
 ### Exporting events
 

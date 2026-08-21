@@ -2,7 +2,8 @@
 // (최초 골격만 프로토타입 dc.html에서 자동 변환했고, 그 변환기는 지금 없다.)
 import { Component } from 'preact/compat';
 import { view } from './view.js';
-import { listTagTables, tagSchemas, listTags, tagStats, rollupTrend, loadConfig, saveConfig, saveConfigPartial, buildLiveData, liveDetail, emptyDet, rollupBatch, loadTrendChunks , timerStates, MON_TIMER, BAND_TIMER, WD_TIMER, createWdTimer, deleteWdTimer, rawWindow, CAPS, pkgBase} from './data/live.js';
+import { pickerOpen } from './daterange.js';
+import { listTagTables, tagSchemas, listTags, tagStats, rollupTrend, loadConfig, saveConfig, saveConfigPartial, buildLiveData, liveDetail, sweepAnchors, monPattern, emptyDet, rollupBatch, loadTrendChunks , timerStates, MON_TIMER, BAND_TIMER, WD_TIMER, createWdTimer, deleteWdTimer, rawWindow, CAPS, pkgBase} from './data/live.js';
 import { ensureMonTables, loadEventsRange, countEvents, loadBaselines, saveBaseline, deleteBaseline, insertEvent, loadMonState, saveMonState, createMonitorTimer, deleteMonitorTimer, createBandTimer, deleteBandTimer, bandRaw, bandLatest, bandTrend, bandBackfill, bandTimes } from './data/live.js';
 import { usageStats, countRange, tagUsage, deleteEventsRange, deleteEventsOfTag, deleteBandRange, deleteBandOfTag, deleteMonState } from './data/live.js';
 import { runTql } from './data/live.js';
@@ -34,9 +35,12 @@ var ISO_TTL_QUIET_MS = 300000;
    소진되면 손을 떼고 사유를 그대로 보여준다. */
 /* 감시자 주기 — 하는 일이 남의 심박 조회뿐이라 짧게 잡아도 부담이 없다. 앱이 닫혀 있을 때
    감시가 죽으면 이 주기 안에 되살아난다. */
-/* 대역 추출 한 태그당 예상 소요(초) — 원본 조회 + FFT(32,768점).
-   주기를 고를 때 "이 설치에서 한 회차가 몇 초인지"를 계산하는 데 쓴다. */
-var BAND_TAG_SEC = 0.9;
+/* 이 주기에 도는 두 축의 태그당 예상 소요(초) — 주기를 고를 때 "이 설치에서 한 회차가 몇 초인지"를
+   계산하는 데 쓴다. 둘 다 원시 파형을 읽어야 해서 10초 판정과 따로 도는 것들이다.
+     대역   원본 조회 + FFT(32,768점)
+     패턴   원본 조회(25회전) + 포락선 FFT — 서버(goja) 실측 0.31초/태그
+   서버가 앱보다 100~400배 느리므로 이 값은 서버 기준이다(앱은 훨씬 빠르게 끝난다). */
+var BAND_TAG_SEC = 0.9 + 0.35;
 /* "타이머가 없는 것이 맞는 상태"를 나타내는 서명. 서명을 null로 두면 다음 확인 때 또 지우러
    가는데, 없는 타이머 DELETE는 Neo가 500을 돌려준다 — 새 설치에서 10초마다 실패 요청 세 건이
    영원히 나가고, 그 소음이 진짜 오류를 덮는다. 한 번 지웠으면 지웠다고 기억한다. */
@@ -240,7 +244,13 @@ function judgeTick(prev, rg, breach, now, cfg, bandState, run) {
       if (now - bcs >= (cfg.recHold || 0)) { nowB = false; bcs = null; }
     }
   }
-  if (nowB && !wasB) events.push({ etype: 'baseline', gi: Math.max(1, rg) });
+  /* 베이스라인도 **이벤트를 내지 않는다** — 대역과 같은 이유에 시간축 문제가 하나 더 있다.
+     이탈 판정값(cur)은 10초 축의 구간 RMS인데 등급은 10분 축의 결함 패턴이 정한다.
+     둘을 같은 이벤트 흐름에 섞으면 이벤트 시각이 무엇을 가리키는지가 흐려진다 —
+     "10분마다 확인한 결과"라는 약속이 깨지고, 알림 간격도 두 주기가 뒤섞인다.
+     진폭이 평소보다 높다는 사실은 근거표와 카드에 그대로 남는다(next.b) — 숨기지 않는다.
+     ⚠ 대가: 단독 오탐 0%·검출 28%인 가장 깨끗한 축이 알림에서 빠진다.
+        베어링 결함이 아닌 원인(불평형·정렬불량·풀림)의 진폭 상승은 이제 사람이 화면에서 봐야 한다. */
   next.b = nowB;
   if (bos != null) next.bos = bos;
   if (bcs != null) next.bcs = bcs;
@@ -248,12 +258,12 @@ function judgeTick(prev, rg, breach, now, cfg, bandState, run) {
      상관된 대역(fault+high+vhigh 등)은 한 결함의 세 표현이라 따로 알리면 알람이 3배가 된다.
      시간 홀드를 걸지 않는 이유: 대역 추출이 이미 분 단위 주기라 여기서 더 늦추면 반응이 30분을 넘는다.
      대신 복귀 판정에 히스테리시스(×0.9)를 둬서 한계 근처 진동으로 이벤트가 반복되지 않게 한다. */
-  if (bandState) {
-    var pb = !!(prev && prev.bb);
-    if (bandState.on && !pb) events.push({ etype: 'band', gi: bandState.gi });
-    else if (!bandState.on && pb) events.push({ etype: 'bandrec', gi: 0 });
-    next.bb = bandState.on;
-  } else if (prev) next.bb = prev.bb;
+  /* 대역은 **이벤트를 내지 않는다**(2026-08-21) — 8개 계열을 각각 한계와 대보고 하나라도 넘으면
+     켜는 구조라 그 자체가 작은 다중비교다(단독 오탐 13% · 베이스라인 0%와 대조된다).
+     대역이 움직이면 대개 베이스라인도 같이 움직이므로(둘 다 "평소 대비") 알림은 그쪽이 낸다.
+     대역 값은 근거표에 남아 "어느 계열이 움직였나"로 원인을 좁히는 데 쓴다 — 상태는 계속 추적한다. */
+  if (bandState) next.bb = bandState.on;
+  else if (prev) next.bb = prev.bb;
   return { next: next, events: events };
 }
 export { judgeTick, durMs }; // 테스트·서버 타이머 재사용
@@ -275,10 +285,6 @@ export class App extends Component {
       ready: false, tab: (props && props.defaultTab) || 'monitor', theme: theme,
       configured: true, monitorOn: true,
       selTag: null, period: '1h', from: '', to: '', // 기본 1시간 — 진동은 짧은 창이라야 초 단위 해상도가 잡힌다
-      /* 직접 입력 기간의 초안(D 접미사). 네이티브 피커에는 확인 단추가 없어 날짜·시·분을 고르는 동안
-         값이 여러 번 바뀌는데, 그때마다 커밋하면 중간값으로 조회가 나가고 무엇이 반영됐는지도 알 수 없다.
-         고르는 동안은 여기에만 담고 '적용'에서 from/to로 옮긴다. null = 미편집(커밋값을 그대로 보여준다). */
-      fromD: null, toD: null,
       diagTag: null, evtTag: 'all', evtType: 'all', evtScope: 'today', // 이벤트 목록 기간: today | 7d | all
       detailAnchor: null, // 스펙트럼 분석 기준 시각 — 이벤트 클릭 시 그 시각, 아니면 선택 기간 끝
       fftFull: false, // FFT·스펙트로그램 주파수 범위: false=기본(dispHz) · true=전대역(Nyquist)
@@ -304,7 +310,7 @@ export class App extends Component {
       llmKeys: {}, llmModels: {}, ollamaUrl: 'http://127.0.0.1:11434',
       genRunning: false, genStep: 0, genTags: [], genLLM: false,
       // 리포트 탭 조회 기간 — 상세분석(period/from/to)과 분리. 대상 태그가 없으면 기간도 없다('')
-      genPeriod: '', genFrom: '', genTo: '', genFromD: null, genToD: null,
+      genPeriod: '', genFrom: '', genTo: '',
       dirty: false, toast: null, pendingNav: null, monitorInterval: '3s', cardSize: 232,
       notifCh: { webhook: false }, // 알람 채널은 웹훅 하나 — 이메일·SMS는 발송 수단이 없다(저장본 잔존 키는 무시됨)
       notifTo: { webhook: '' }, // 발송 대상 URL
@@ -456,8 +462,8 @@ export class App extends Component {
     var initR = worst ? this._periodRange(worst, initP) : { from: this._dtVal(anchor - 3600000), to: this._dtVal(anchor) };
     var patch = {
       ready: true, srcSel: sel, srcCap: d.cap || null, selTag: worst ? worst.id : null, diagTag: worst ? worst.id : null, events: [], reports: [],
-      genTags: [], genPeriod: '', genFrom: '', genTo: '', genFromD: null, genToD: null, // 리포트 대상 태그는 기본 미선택 → 기간도 아직 없음
-      period: initP, from: initR.from, to: initR.to, fromD: null, toD: null,
+      genTags: [], genPeriod: '', genFrom: '', genTo: '', // 리포트 대상 태그는 기본 미선택 → 기간도 아직 없음
+      period: initP, from: initR.from, to: initR.to,
     };
     // 저장된 설정 복원 (state 키와 1:1)
     CFG_KEYS.forEach(function (k) {
@@ -570,12 +576,11 @@ export class App extends Component {
       self._judgeLive().then(function (n) { if (n) self._loadEventsLive(); }); // 새 이벤트가 났을 때만 목록 갱신
       /* 설정 화면은 이 틱으로 다시 그리지 않는다 — 입력칸이 전부 제어 입력(value=상태)이라
          타이핑 도중 다시 그리면 preact가 옛 상태값을 DOM에 도로 써넣어 입력이 지워진다.
-         날짜·시간 입력이 포커스를 쥔 동안도 같다 — 네이티브 피커는 날짜·시·분을 고르는 데 몇 초가
-         걸려서, 그 사이 틱 리렌더가 값을 되돌리며 피커를 닫아버린다.
+         기간 달력이 열려 있는 동안도 같다 — 고르는 사이 버튼과 팝오버가 다시 그려지면 안 된다.
+         상세분석도 마찬가지다 — 캡처한 스냅샷을 보는 화면이라 틱이 끌고 갈 이유가 없다
+         (감시가 켜져 있으면 이 틱은 탭과 무관하게 돈다). 새로고침·태그전환·기간변경으로만 갱신한다.
          판정·알림은 그대로 돈다(막는 것은 화면 갱신뿐). */
-      var _ae = typeof document !== 'undefined' ? document.activeElement : null;
-      var _dtEditing = !!(_ae && _ae.tagName === 'INPUT' && (_ae.type === 'date' || _ae.type === 'datetime-local'));
-      if (self.state.tab !== 'settings' && !_dtEditing) self.forceUpdate();
+      if (self.state.tab !== 'settings' && self.state.tab !== 'detail' && !pickerOpen.n) self.forceUpdate();
     }).catch(function () { self._ticking = false; });
   }
   /* 설비별 운전 상태 — 정지 / 신호 두절 / 운전 중.
@@ -611,7 +616,15 @@ export class App extends Component {
       if (gate) run = false;                 // 계측을 못 믿는 동안은 판정 동결(배지도 정지보다 우선)
       m[key] = { lost: lost, run: run, age: age, gate: gate };
     });
+    var _prev = this._runState;
     this._runState = m;
+    /* 상세분석은 틱으로 다시 그리지 않지만(스냅샷), 감시가 본 계측 상태가 캡처 시점과 갈린 것은
+       알려야 한다 — 화면 값은 그대로 두고 배너(detStale)만 뜨도록 이 변화에서만 한 번 다시 그린다. */
+    if (S.tab === 'detail' && S.selTag) {
+      var _de = this._activeEq(S.selTag), _dk = _de && (_de.table + ':' + _de.name);
+      var _g0 = _dk && _prev ? (_prev[_dk] || {}).gate : null, _g1 = _dk ? (m[_dk] || {}).gate : null;
+      if (_dk && (_g0 && _g0.label) !== (_g1 && _g1.label)) this.forceUpdate();
+    }
     /* 서버 모드는 _judgeLive가 즉시 리턴하므로 표시 등급을 계산할 곳이 여기밖에 없다.
        안 하면 카드·KPI·필터가 폴백(전대역 존 등급)으로 떨어져, ISO 대역제한도 세 판정 합성도
        화면에 반영되지 않는다 — 서버 모드가 실사용 모드이므로 그러면 작업이 통째로 안 보인다.
@@ -623,6 +636,7 @@ export class App extends Component {
   _refreshDisplayGrade() {
     var self = this, S = this.state;
     this._refreshBandNow();             // 최신 대역값 — 판정 경로와 같은 캐시를 쓴다
+    this._refreshPatNow();              // 결함 패턴도 같은 주기 — 등급을 켜는 축이라 표시에도 필요하다
     if (!this._gradeState) this._gradeState = {};
     this._activeEqs().forEach(function (eq) {
       var key = eq.table + ':' + eq.name;
@@ -632,15 +646,27 @@ export class App extends Component {
       var b = (self._blMap || S.baselines || {})[key];
       var iso = self._isoValue(eq, wide);
       var isoV = iso.pending ? wide : iso.v;                 // 계산 전에는 상한값으로 둔다
-      var zg = VC.gradeFor(isoV, eq.zones);
+      /* ISO 존은 속도(mm/s) 규격이다. 원본이 가속도·변위면 변환된 값(basis='iso')만 이 축에 쓸 수 있고,
+         변환 전에는 이 축을 비운다 — 원본 단위 값을 mm/s 경계에 대면 다른 양을 재게 된다.
+         비운 축은 커버리지로 드러난다(등급이 조용히 낮아지지 않게). */
+      var isoUsable = eq.unit === 'mm/s' || iso.basis === 'iso';
+      var zg = isoUsable ? VC.gradeFor(isoV, self._isoZones(eq)) : 0;
       var lim = revived ? null : VC.baselineLimit(b);
       var bg = (lim != null && wide > lim) ? Math.max(1, zg) : 0;
       var bnow = (self._bandNow || {})[key];
-      var bj = (bnow && !revived) ? VC.bandJudge(bnow, self._bandBaselines(eq), false, self._softBands(eq)) : null;
-      var wg = VC.worstGrade(zg, bg, bj && bj.on ? bj.gi : 0);
+      var bj = (bnow && !revived) ? VC.bandJudge(bnow, self._bandBaselines(eq), false, self._softBands(eq),
+        (self._monState || {})[key] && self._monState[key].elat, Date.now()) : null;
+      /* 서버 모드에서도 게이트 규칙은 같다 — 결함 패턴이 켜고 ISO가 높이를 정한다.
+         전에는 여기서 ISO·베이스라인·대역을 최댓값으로 얹어, 서버가 쓴 등급과 카드가 갈렸다. */
+      var _p = (self._patNow || {})[key] || null;
+      var _hz = (_p && _p.iso != null) ? VC.gradeFor(_p.iso, self._isoZones(eq)) : zg;
+      var wg = VC.worstGrade(0, 0, 0, VC.patternGate(!!(_p && _p.on), _hz));
       /* 카드가 세 축을 한 줄로 보여주려면 각 축의 "값"이 필요하다 — 등급만으로는
          왜 그 등급인지 설명이 안 된다. 베이스라인은 한계 대비 배수, 대역은 최대 배수. */
       wg.iso = isoV; wg.wide = wide; wg.limited = VC.isoNeeded(eq.fs); wg.basis = iso.basis || 'wide';
+      wg.isoOk = isoUsable; wg.isoUnit = isoUsable ? 'mm/s' : eq.unit;
+      wg.blOk = lim != null; wg.bandOk = !!bj;
+      wg.patOk = !!_p; wg.patOn = !!(_p && _p.on); wg.patR = _p ? _p.r : null;
       wg.blR = (lim != null && lim > 0) ? wide / lim : null;
       wg.bandR = bj ? bj.maxR : null;
       self._gradeState[key] = wg;
@@ -906,6 +932,12 @@ export class App extends Component {
            바깥 이름을 참조하면 첫 회차에서 죽는다). 앱이 계산해 값으로 구워 넣는다. */
         soft: self._softBands(eq),
         // 확인 대기 중인 태그는 학습값을 굽지 않는다 — 서버도 같은 이유로 멈춰야 한다
+        /* 결함 패턴 축이 서버에서 결함주파수 격자를 세우려면 회전수·기하가 필요하다.
+           둘 중 하나라도 없으면 patValue가 null을 내고 등급이 안 오른다 — 그건 "정상"이 아니라
+           "판정 못 함"이고, 화면 커버리지가 그 사실을 드러낸다. */
+        rpm: eq.rpm > 0 ? eq.rpm : 0,
+        geo: (eq.bearing && eq.bearing.n > 0)
+          ? { n: eq.bearing.n, Bd: eq.bearing.Bd, Pd: eq.bearing.Pd, phi: eq.bearing.phi || 0 } : null,
         zones: eq.zones, bl: (b && !self._isRevived(eq.table + ':' + eq.name)) ? { mu: b.mu, sigma: b.sigma, k: b.k || 3 } : null,
         bb: self._isRevived(eq.table + ':' + eq.name) ? null : bb,
       };
@@ -924,6 +956,10 @@ export class App extends Component {
       /* 계측 게이트 — 파형이 계측 문제로 보이면 서버도 진동 판정을 멈추고 계측 이상으로 알린다.
          gateFromRaw→signalQuality→kurtosis로 서로를 부르므로 calc가 한 스코프로 묶어 준다. */
       gateSrc: VC.gateSrc(),
+      /* 결함 패턴 — 등급을 켜는 축이라 서버도 같은 소스를 돌려야 앱과 갈리지 않는다.
+         재계산 간격은 대역 추출 주기와 맞춘다 — 둘 다 원시 파형을 읽으므로 같이 도는 게 맞다. */
+      patSrc: VC.patSrc(),
+      patTtlMs: durMs(S.bandInterval || '10m') || 600000,
       isoTtlMs: ISO_TTL_MS, isoWinMs: ISO_WIN_MS,
       tickMs: durMs(S.monitorInterval) || 3000,   // 두절 기준(주기의 6배)의 근거
       winMs: Math.max(durMs(S.evalWindow) || 10000, durMs(S.monitorInterval) || 3000),
@@ -1062,6 +1098,9 @@ export class App extends Component {
      닫혀 있던 사이의 순변화를 따라잡기 판정으로 소급한다(닫힌 사이의 일시 스파이크는 미포착). */
   // 판정: 심각도 평가와 동일한 값(_evalValue: 평가 윈도우+집계) 기준. 지속시간 개념을 넣은 상태머신.
   //  · 악화(등급 상승)  — escHold(진입 확인) 이상 지속되면 확정 → 'threshold' 이벤트
+  //    ⚠ 등급은 결함 패턴이 켜고 그 축은 추출 주기(기본 10분)로 도므로, escHold가 1분이어도
+  //      실제 확정은 두 번째 판정(10~20분)에 난다. 진폭·정지·계측 이벤트는 10초 축이라 설정 그대로다.
+  //      리드타임이 며칠~2주라 이 지연은 무의미해서 상태기를 따로 두지 않는다(분기가 늘면 규칙이 갈린다).
   //  · 지속(같은 등급)  — renotify[등급] 주기마다 → 'sustained' 이벤트 (0=끔)
   //  · 복귀(→ 양호)     — recHold(복귀 유지) 이상 정상 지속되면 확정 → 'recovery' 이벤트
   //  · 완화(나쁨→덜나쁨) — recHold 후 조용히 상태만 갱신 (알림 없음)
@@ -1081,9 +1120,10 @@ export class App extends Component {
     };
     var jobs = [], nEv = 0;
     var zoneLim = function (eq, g) { return g > 0 ? eq.zones[g - 1] : eq.zones[0]; };
-    // 최신 대역값 적재 — 판정 주기(10초)보다 추출 주기(10분)가 훨씬 느리므로 여기서 매번 읽지 않고
-    // 캐시를 쓴다. 추출 주기의 절반이 지났을 때만 갱신한다(불필요한 조회 방지).
+    // 최신 대역값·결함 패턴 적재 — 판정 주기(10초)보다 추출 주기(10분)가 훨씬 느리므로 여기서
+    // 매번 읽지 않고 캐시를 쓴다. 추출 주기의 절반이 지났을 때만 갱신한다(불필요한 조회 방지).
     this._refreshBandNow();
+    this._refreshPatNow();
     this._activeEqs().forEach(function (eq) {
       var key = eq.table + ':' + eq.name;
       var b = (self._blMap || S.baselines || {})[key];
@@ -1098,7 +1138,21 @@ export class App extends Component {
       var iso = self._isoValue(eq, wide);
       var prevG = (self._monState[key] || {}).g || 0;
       var val = iso.pending ? null : iso.v;                  // 존 판정값
-      var rg = iso.pending ? prevG : VC.gradeFor(val, eq.zones);
+      /* ISO 존은 속도(mm/s) 규격 — 원본이 가속도·변위면 변환된 값(basis='iso')만 쓴다.
+         변환 전에는 직전 등급을 유지한다(원본 단위 값을 mm/s 경계에 대면 다른 양을 재게 된다). */
+      var isoUsableW = eq.unit === 'mm/s' || iso.basis === 'iso';
+      /* 등급은 **결함 패턴이 켤 때만** 오른다 — ISO는 그 높이를 정한다.
+         ISO를 독립 축으로 두면 이 검증 풀에서 단독 오탐 69%가 그대로 등급이 된다(게이트로 4%).
+         패턴 값은 10분 주기 캐시(_patNow)라 판정 틱마다 새로 계산하지 않는다.
+         ⚠ 패턴을 못 잰 태그(회전수·기하 미입력, 저샘플, 표본 부족)는 등급이 안 오른다 —
+            그건 "정상"이 아니라 "판정 못 함"이므로 커버리지가 화면에 드러낸다. */
+      var _isoG = (iso.pending || !isoUsableW) ? prevG : VC.gradeFor(val, self._isoZones(eq));
+      var _pat = (self._patNow || {})[key] || null;
+      /* 높이는 **패턴을 잰 그 파형의 ISO**로 정한다 — 10초 축의 최신 ISO를 쓰면 등급이
+         10초마다 움직여 10분 주기인 패턴과 시간축이 어긋난다(이벤트 시각의 뜻이 흐려진다).
+         패턴 계산 때 ISO를 못 쟀으면 10초 축 값으로 물러선다 — 등급을 0으로 떨어뜨리진 않는다. */
+      var _hG = (_pat && _pat.iso != null) ? VC.gradeFor(_pat.iso, self._isoZones(eq)) : _isoG;
+      var rg = VC.patternGate(!!(_pat && _pat.on), _hG);
       var cur = wide;                                        // 베이스라인 판정값
       /* 되살아난 태그(지웠다 다시 등록)는 확인 전까지 학습 기반 판정을 멈춘다 — 옛 설비의
          기준으로 새 설비를 재면 조용히 틀린다. ISO 존은 절대 기준이라 계속 돈다. */
@@ -1133,10 +1187,16 @@ export class App extends Component {
       if (sens.on) run = false;                              // 계측을 못 믿는 동안은 판정 동결
       // 대역 판정 — 추출 타이머가 적재한 최신 대역값 vs 대역별 베이스라인. 설비당 1건으로 합성된다.
       var bj = null, bnow = (self._bandNow || {})[key];
-      if (bnow && !revived && !sens.on) bj = VC.bandJudge(bnow, self._bandBaselines(eq), !!(prev && prev.bb), self._softBands(eq));
+      /* elat: 포락선 계열의 이탈 이력(최고 배수·최초 시각). 결함 패턴은 되돌아가지 않으므로
+         신호가 묻혀도 유지한다 — 되살아난 태그는 옛 설비 이력이라 넘기지 않는다. */
+      if (bnow && !revived && !sens.on) bj = VC.bandJudge(bnow, self._bandBaselines(eq), !!(prev && prev.bb),
+        self._softBands(eq), revived ? null : (prev && prev.elat), nowW);
       var r = judgeTick(prev, rg, breach, nowW, cfg, bj, run);
       // 계측 이상·복귀는 진동 이벤트와 별개 축이라 그대로 이어 붙인다
       sens.events.forEach(function (ev) { r.events.push(ev); });
+      // 대역 판정을 못 한 틱(추출 지연·계측 이상)에서 이력을 잃으면 latch의 뜻이 없어진다
+      var _elat = bj ? bj.latch : (prev && prev.elat);
+      if (_elat && Object.keys(_elat).length) r.next.elat = _elat;
       r.next.sf = sens.next.sf;
       if (sens.next.sfs != null) r.next.sfs = sens.next.sfs;
       if (sens.next.sfc != null) r.next.sfc = sens.next.sfc;
@@ -1169,9 +1229,16 @@ export class App extends Component {
       /* 표시 등급 — 세 판정 중 가장 나쁜 것과 그 원인. 카드·KPI·필터가 이걸 쓴다.
          존만 쓰면 고주파가 지배하는 센서에서 베어링이 나빠져도 화면이 양호로 남는다. */
       if (!self._gradeState) self._gradeState = {};
-      var _wg = VC.worstGrade(r.next.g, r.next.b ? Math.max(1, r.next.g) : 0, bj && bj.on ? bj.gi : 0);
+      /* 카드 등급은 판정 등급 그대로다 — 전에는 여기서 베이스라인·대역을 최댓값으로 얹어
+         카드와 알람이 다른 값을 보였다(카드 69% vs 알람 ISO 단독). 축은 아래 필드로 따로 보여준다. */
+      var _wg = VC.worstGrade(0, 0, 0, r.next.g);
       // 화면이 판정값과 세 축을 그대로 보여주도록 — 등급을 만든 축이 어느 것인지도 함께
       _wg.iso = val; _wg.wide = wide; _wg.limited = VC.isoNeeded(eq.fs); _wg.basis = iso.basis || 'wide';
+      _wg.isoOk = isoUsableW && !iso.pending; _wg.isoUnit = isoUsableW ? 'mm/s' : eq.unit;
+      _wg.blOk = lim != null; _wg.bandOk = !!bj;
+      /* 등급을 켠 축이 패턴이므로 그 값을 화면에 내린다 — "왜 이 등급인가"의 답이다.
+         패턴을 못 잰 태그(회전수·기하 미입력·저샘플)는 patOk=false로 커버리지에 드러난다. */
+      _wg.patOk = !!_pat; _wg.patOn = !!(_pat && _pat.on); _wg.patR = _pat ? _pat.r : null;
       _wg.blR = (lim != null && lim > 0) ? wide / lim : null;
       _wg.bandR = bj ? bj.maxR : null;
       self._gradeState[key] = _wg;
@@ -1485,6 +1552,15 @@ export class App extends Component {
       var ent = {};
       ok.forEach(function (r) { ent[base + ':' + r.bn] = r.obj; });
       self.setState({ baselines: self._blMerge(ent) });
+      /* 포락선 이탈 이력(elat)을 지운다 — 재학습은 "이 설비의 평소가 이제 이것"이라는 선언이고,
+         베어링을 갈았거나 기준이 바뀐 시점이다. 옛 한계로 잡은 이력을 새 한계에 끌고 오면
+         새 베어링이 영영 "결함 있음"으로 남는다. latch를 푸는 유일한 자리다. */
+      var _ms = (self._monState || {})[base];
+      if (_ms && _ms.elat) {
+        var _n2 = Object.assign({}, _ms); delete _n2.elat;
+        self._monState[base] = _n2;
+        saveMonState(base, _n2).catch(function () {});
+      }
       return { ok: ok.length, fail: res.filter(function (r) { return r.err; }) };
     });
   }
@@ -1520,6 +1596,31 @@ export class App extends Component {
       self._bandNow = m;
       self._bandNowBusy = false;
     }).catch(function () { self._bandNowBusy = false; });
+  }
+  /* 최신 결함 패턴 캐시 — 대역과 같은 주기(기본 10분)로 돈다.
+     원시 파형을 태그마다 읽어야 해서 10초 판정마다 돌릴 수 없다(91태그면 회차 3.2초·14 MB).
+     베어링 열화는 며칠 단위라 10분이면 충분하고, 급변은 10초 축(ISO·베이스라인)이 따로 본다. */
+  _refreshPatNow() {
+    var self = this, S = this.state;
+    if (!S.monitorOn) { this._patNow = null; return; }
+    var iv = durMs(S.bandInterval || '10m') || 600000;   // 대역과 같은 주기를 쓴다 — 둘 다 원시 파형이라
+    var now = Date.now();
+    if (this._patNowAt && now - this._patNowAt < iv / 2) return;
+    if (this._patNowBusy) return;
+    this._patNowBusy = true;
+    this._patNowAt = now;
+    var eqs = this._activeEqs();
+    var t0 = Date.now();
+    Promise.all(eqs.map(function (eq) {
+      return monPattern(eq, null).catch(function () { return null; })
+        .then(function (p) { return { key: eq.table + ':' + eq.name, pat: p }; });
+    })).then(function (res) {
+      var m = {};
+      res.forEach(function (r) { if (r.pat) m[r.key] = r.pat; });
+      self._patNow = m;
+      self._patTickMs = Date.now() - t0;   // 회차 소요 — 설정 화면이 주기 하한을 실측으로 경고한다
+      self._patNowBusy = false;
+    }).catch(function () { self._patNowBusy = false; });
   }
   // 학습 실행 래퍼 — 진행 표시와 결과 토스트를 붙인다(학습 자체는 _learnBandBaseline)
   _runBandLearn(eq) {
@@ -1718,7 +1819,8 @@ export class App extends Component {
       var job = jobs[ji];
       if (ai >= job.anchors.length) return step(ji + 1, 0);
       var chunk = job.anchors.slice(ai, ai + BAND_CHUNK);
-      var tql = Band.buildBandTql({ tags: [job.t], anchors: chunk, nowMs: now });
+      // grid = 앵커 격자 — 서버가 빈 앵커를 되짚을 범위이자 이미 채운 칸을 가려내는 단위
+      var tql = Band.buildBandTql({ tags: [job.t], anchors: chunk, nowMs: now, grid: plan.iv });
       return bandBackfill(tql).then(function (nOk) {
         // 서버가 실제로 저장한 개수를 쓴다 — 원본이 없는 구간은 조용히 건너뛰므로 요청 수와 다를 수 있다
         var got = isFinite(nOk) && nOk > 0 ? Math.min(nOk, chunk.length) : 0;
@@ -1844,8 +1946,8 @@ export class App extends Component {
     this.data = { now: now, equipment: [], events: [], reports: [] };
     this.setState({
       ready: true, srcSel: [], selTag: null, diagTag: null, events: [], reports: [], genTags: [],
-      genPeriod: '', genFrom: '', genTo: '', genFromD: null, genToD: null,
-      from: this._dtVal(now - PERIOD_H['1h'] * 3600000), to: this._dtVal(now), fromD: null, toD: null,
+      genPeriod: '', genFrom: '', genTo: '',
+      from: this._dtVal(now - PERIOD_H['1h'] * 3600000), to: this._dtVal(now),
     });
     if (msg) this._toast(msg, 'warn');
   }
@@ -1858,23 +1960,112 @@ export class App extends Component {
   // 스펙트럼 분석 기준 시각 — 이벤트 클릭 시 그 시각, 아니면 선택 기간의 끝. 데이터 범위로 클램프.
   _detailAnchorMs(eq) {
     var S = this.state, a = S.detailAnchor;
-    if (a == null) { var t = Date.parse(S.to); if (isFinite(t)) a = t; } // 선택 기간의 끝
+    /* 기간 입력은 분 단위라 "23:39"는 23:39:00이 아니라 그 분의 끝까지를 뜻한다 — 초를 채워
+       읽지 않으면 앵커가 마지막 수집보다 최대 59초 앞서고, 그만큼 창이 뒤로 밀린다.
+       (이벤트 클릭으로 온 detailAnchor는 초·밀리초까지 있는 실제 시각이라 그대로 쓴다.) */
+    if (a == null) { var t = Date.parse(S.to); if (isFinite(t)) a = t + 59999; } // 선택 기간의 끝
     if (a == null) a = eq.lastSeen || (this.data && this.data.now); // 최후 폴백(안정값 — Date.now() 금지: 매 렌더 재캡처 유발)
-    if (eq.lastSeen && a > eq.lastSeen) a = eq.lastSeen; // 미래 데이터 없음
+    // 미래 데이터 없음 — 다만 lastSeen(V$STAT MAX_TIME)은 ms로 내림된 값이라 그 1ms를 마저 덮어야
+    // 마지막 표본까지 창에 들어온다(고샘플레이트 태그에선 1ms가 수십 표본이다)
+    if (eq.lastSeen && a > eq.lastSeen) a = eq.lastSeen + 1;
     var mn = eq.stat && eq.stat.minMs;
     if (mn && a < mn) a = mn;
     return a;
   }
+  /* 기간 안에서 판정 앵커를 고른다 — 창의 끝 한 점을 쓰면 그 순간이 정지·무부하일 때
+     설비가 파손 중이어도 양호가 나온다(IMS Set2 B1: 끝이 정지라 ISO 0.02 mm/s 양호,
+     기간 최악은 0.71 mm/s 주의). 스윕은 "어디를 볼지"만 정하고, 등급은 고른 앵커에서
+     평소의 전체 파이프라인이 낸다 — 재는 법이 둘로 갈리지 않게 한다. */
+  _pickAnchor(eq, sw, fallback) {
+    var live = (sw.anchors || []).filter(function (a) { return !a.empty; });
+    if (!live.length) return { at: fallback, sweep: sw };
+    /* 정지 판정은 절대값이 아니라 기간 자기 자신 대비로 한다 — 설비마다 정상 진폭이 다르고
+       단위도 다르다. 기간 대표값의 5%에 못 미치는 점은 "그 기간의 이 설비"가 아니다.
+       전부 정지면 중앙값도 같이 낮아져 아무도 안 걸린다(비교 대상이 없으면 판단하지 않는다). */
+    var ac = live.map(function (a) { return a.acRms; }).sort(function (x, y) { return x - y; });
+    var med = ac[Math.floor(ac.length / 2)] || 0;
+    var zones = this._isoZones(eq);
+    var self = this;
+    var rank = function (a) {
+      return {
+        stopped: med > 0 && a.acRms < 0.05 * med,
+        iso: VC.gradeFor(a.isoRms, zones),
+        hit: a.patScore >= VC.TGT_ADOPT ? 1 : 0,
+        score: a.patScore, rms: a.isoRms, a: a,
+      };
+    };
+    var rs = live.map(rank);
+    // 정지 의심은 맨 뒤로 — 다만 전부 정지면 그 중에서라도 고른다(빈 화면보다 낫다)
+    var pool = rs.filter(function (r) { return !r.stopped; });
+    if (!pool.length) pool = rs;
+    pool.sort(function (x, y) {
+      return (y.iso - x.iso) || (y.hit - x.hit) || (y.score - x.score) || (y.rms - x.rms);
+    });
+    var win = pool[0];
+    /* 최댓값을 쓰는 이상 "몇 곳이 같은 수준이었나"를 함께 내야 한다 — 8곳 중 1곳만 걸린 것과
+       7곳이 걸린 것은 정비 판단이 완전히 다른데 등급어 하나로는 구분되지 않는다.
+       판정에는 안 태운다: 지속성을 판정 기준에 넣으면 단발로 서는 진짜 결함이 같이 죽는다. */
+    var lvl = function (r) { return Math.max(r.iso, r.hit); };
+    var wl = lvl(win);
+    return { at: win.a.at, sweep: sw, worst: win, live: live.length,
+      atLevel: pool.filter(function (r) { return lvl(r) >= wl; }).length, poolN: pool.length, level: wl,
+      stopped: rs.filter(function (r) { return r.stopped; }).length };
+  }
+  /* 화면과 리포트가 같은 앵커를 쓰도록 상세 취득을 한 곳으로 모은다 — 따로 구하면
+     리포트의 스펙트럼이 화면과 다른 시점을 가리킨다. */
+  _detailAt(eq, fromMs, toMs, vu, useSweep) {
+    var self = this;
+    if (!useSweep) return Promise.resolve({ at: toMs }).then(function (p) {
+      return liveDetail(self.E, eq, p.at, vu, fromMs).then(function (det) { return { det: det, pick: p }; });
+    });
+    return sweepAnchors(self.E, eq, fromMs, toMs, null)
+      .catch(function () { return { anchors: [], scanned: 0 }; })
+      .then(function (sw) {
+        var p = self._pickAnchor(eq, sw, toMs);
+        return liveDetail(self.E, eq, p.at, vu, fromMs).then(function (det) { return { det: det, pick: p }; });
+      });
+  }
+  _anchorNote(snap) {
+    if (!this.live || !snap || !snap.anchor) return '';
+    var E = this.E, at = E.fmtDT(snap.anchor);
+    var p = snap.pick;
+    if (!p || !p.worst) return '판정 기준 시각 ' + at;   // 사용자가 이벤트에서 짚은 시각
+    var s = '판정 기준 시각 ' + at + ' · 기간 ' + p.live + '곳 중 ';
+    /* 정상 수준(level 0)에서 "8곳 중 8곳"이라고 적으면 아무 뜻이 없다 — 이상이 섰을 때만 분포를 말한다. */
+    if (!p.level) s += '가장 나쁜 곳';
+    else if (p.atLevel <= 1) s += '이 1곳만 이 수준 — 단발일 수 있습니다';
+    else s += p.atLevel + '곳이 이 수준';
+    if (p.stopped) s += ' (정지 의심 ' + p.stopped + '곳 제외)';
+    return s;
+  }
+  // 감시가 지금 보고 있는 계측 이상 사유({label,detail}) — 없으면 null
+  _gateOf(eq) { return ((this._runState || {})[eq.table + ':' + eq.name] || {}).gate || null; }
+  /* 재캡처 판단 키 — 사용자가 고른 것(기간·기준시각·표시 물리량)만 넣는다.
+     앵커 값(_detailAnchorMs)으로 키를 잡으면 그 값이 lastSeen에 물려 있어(위 클램프),
+     감시가 켜져 있는 동안 판정 틱마다 캐시가 버려지고 상세분석이 통째로 다시 캡처된다. */
+  _detailKey() {
+    var S = this.state;
+    return [S.period, S.from, S.to, S.detailAnchor == null ? '' : S.detailAnchor, S.viewUnit || ''].join('|');
+  }
   _detail(eq) {
     if (this.live) {
-      var anchor = this._detailAnchorMs(eq), vu = this.state.viewUnit || null, self = this;
+      var key = this._detailKey(), vu = this.state.viewUnit || null, self = this;
       var c = this._detailCache[eq.id];
-      if (c && (c.anchor !== anchor || c.viewUnit !== vu)) { delete this._detailCache[eq.id]; c = null; } // 기준 시각·표시 물리량 바뀌면 재캡처
+      if (c && c.key !== key) { delete this._detailCache[eq.id]; c = null; } // 조회 기간·기준 시각·표시 물리량이 바뀌면 재캡처
       if (!c) {
-        // 순수 스냅샷: 캡처 시점의 등급·RMS·기준시각을 함께 고정 → 재캡처 전까지 상세분석 전체가 불변
-        c = this._detailCache[eq.id] = { state: 'loading', det: emptyDet(eq), eqSnap: Object.assign({}, eq), snapNow: (this.data && this.data.now) || Date.now(), anchor: anchor, viewUnit: vu };
-        liveDetail(this.E, eq, anchor, vu).then(function (det) {
-          c.det = det; c.state = 'ready';
+        /* 순수 스냅샷: 캡처 시점의 등급·RMS·기준시각·감시가 본 계측 상태(gate)를 함께 고정
+           → 재캡처 전까지 상세분석 전체가 불변. 앵커도 여기서 한 번만 구한다(이후 렌더는 c.anchor).
+           gate까지 얼리는 이유 — 이게 판정 동결 여부로 지표·등급·권고까지 내려가므로, 라이브로 읽으면
+           스냅샷을 얼려 놓고도 판정만 화면에서 계속 바뀐다. */
+        var anchor = this._detailAnchorMs(eq);
+        var reqFrom = Date.parse(this.state.from);
+        /* 사용자가 이벤트를 클릭해 시각을 지정했으면 그 시각을 존중한다 — 스윕은 "기간을 골랐을 때"
+           어디를 볼지 정하는 것이지, 사용자가 짚은 순간을 옮기라는 뜻이 아니다. */
+        var useSweep = this.state.detailAnchor == null;
+        c = this._detailCache[eq.id] = { state: 'loading', det: emptyDet(eq), eqSnap: Object.assign({}, eq), snapNow: (this.data && this.data.now) || Date.now(), key: key, anchor: anchor, reqFrom: reqFrom, reqTo: anchor, viewUnit: vu, gate: this._gateOf(eq) };
+        this._detailAt(eq, reqFrom, anchor, vu, useSweep).then(function (r) {
+          var det = r.det;
+          c.det = det; c.state = 'ready'; c.anchor = r.pick.at; c.pick = r.pick;
           if (det.raw && !det.raw.values.length) self._toast('선택 구간에 원시 파형이 없습니다 · 마지막 수집 ' + (eq.lastSeen ? self.E.fmtDT(eq.lastSeen) : '-'), 'warn');
           self.forceUpdate();
         }).catch(function (e) { c.state = 'error'; self._toast('상세분석 조회 실패 — 네트워크·DB 상태 확인 후 새로고침하세요', 'err'); self.forceUpdate(); console.warn('[vibe] detail load failed', e); });
@@ -1892,10 +2083,12 @@ export class App extends Component {
       var c = this._trCacheL[key], self = this;
       if (!c) {
         c = this._trCacheL[key] = { kurt: [], bands: [], xLabels: [], xTips: [], state: 'loading' };
+        /* 끝나면 화면도 다시 그린다 — 캔버스만 갱신하면(_scheduleDraw) 카드 안의 안내 문구는
+           로딩 시점 값에 멈춰, 그래프는 나왔는데 "표본이 부족합니다"가 함께 떠 있는 상태가 된다. */
         loadTrendChunks(this.E, eq, roll).then(function (tr) {
           Object.assign(c, tr, { state: 'ready' });
-          self._scheduleDraw();
-        }).catch(function (e) { c.state = 'error'; console.warn('[vibe] trend chunks failed', e); });
+          self._scheduleDraw(); self.forceUpdate();
+        }).catch(function (e) { c.state = 'error'; self.forceUpdate(); console.warn('[vibe] trend chunks failed', e); });
       }
       return c;
     }
@@ -1909,15 +2102,20 @@ export class App extends Component {
     if (p === 'all') {
       fromMs = (st && st.minMs) ? st.minMs : now - PERIOD_H['7d'] * 3600000; // 데이터 전 구간
     } else if (p === 'custom') {
-      // 직접 입력은 날짜+시각(datetime) — 짧은 창을 정확히 지정해 초 단위 해상도까지 볼 수 있다
-      /* 리포트는 적용 전 초안도 인정한다 — 날짜를 고르고 '적용'을 누르지 않은 채 생성하면
-         화면에 보이는 것과 다른 구간으로 리포트가 나가기 때문이다. 상세분석은 커밋값만 쓴다
-         (조회 캐시 키가 커밋값이라, 초안을 섞으면 키와 내용이 어긋난다). */
-      var cf = Date.parse(rep ? (S.genFromD != null ? S.genFromD : S.genFrom) : S.from);
-      var ct = Date.parse(rep ? (S.genToD != null ? S.genToD : S.genTo) : S.to);
+      // 달력으로 고른 구간은 하루 단위(시작일 00:00 ~ 종료일 23:59)
+      var cf = Date.parse(rep ? S.genFrom : S.from);
+      var ct = Date.parse(rep ? S.genTo : S.to);
       fromMs = !isNaN(cf) ? cf : now - PERIOD_H['7d'] * 3600000;
       if (!isNaN(ct)) toMs = ct;
     } else fromMs = now - (PERIOD_H[p] || 1) * 3600000;
+    /* 데이터가 있는 만큼으로 창을 좁힌다 — 고른 구간을 그대로 두면 차트 축이 데이터 없는 쪽까지
+       늘어나 빈 여백이 생기고(하루 단위로 고르면 마지막 날 대부분이 그렇다), 버킷 단위도
+       실제보다 긴 구간 기준으로 잡혀 해상도를 잃는다. 겹치는 부분이 있을 때만 좁힌다 —
+       구간과 데이터가 아예 어긋난 경우까지 당기면 요청과 다른 시기의 데이터를 보여주게 된다. */
+    if (st && st.minMs && st.maxMs && toMs > st.minMs && fromMs < st.maxMs) {
+      fromMs = Math.max(fromMs, st.minMs);
+      toMs = Math.min(toMs, st.maxMs);
+    }
     if (!(toMs > fromMs)) fromMs = toMs - 3600000;
     // 단위 사다리 — 각 티어의 버킷 수 상한을 묶어 DB·렌더 비용을 일정하게 유지 (구간이 아무리 길어도 상한 안)
     //   ~2시간 초별(≤7,200) / ~5일 분별(≤7,200) / ~1년 시간별(≤8,760) / ~10년 일별(≤3,650) / 그 이상 월별(100년=1,200)
@@ -1959,12 +2157,13 @@ export class App extends Component {
   }
   // detIn: 이미 계산된 상세(리포트는 리포트 기간 끝을 앵커로 쓴다). 넘기지 않으면 화면 기준으로 다시 찾는데,
   // 그 경우 앵커가 달라져 _detail이 캐시를 버리고 emptyDet을 돌려주므로 판정이 통째로 빈 데이터 위에서 나온다.
-  _dx(eq, detIn) { return this._dxLive(eq, detIn); }
+  // sev: VC.sevMetrics 결과. 넘기면 진폭 정상 구간에서도 Crest 초과를 문구에 반영한다.
+  _dx(eq, detIn, sev) { return this._dxLive(eq, detIn, sev); }
   // 라이브 진단: FFT 지배 주파수를 1×/2×/베어링 결함 주파수와 대조하는 규칙 판정
-  _dxLive(eq, detIn) {
+  _dxLive(eq, detIn, sev) {
     var E = this.E, det = detIn || this._detail(eq), g = E.STATUS[eq.grade];
     var ev = [], verdict, fr = eq.rpm / 60;
-    var bf = eq.bearing && eq.bearing.n > 0 ? VC.bearingFreqs(eq.rpm, eq.bearing) : null;
+    var bf = (eq.bearing && eq.bearing.n > 0 && eq.rpm > 0) ? VC.bearingFreqs(eq.rpm, eq.bearing) : null;
     var dom = det.fft.freqs.length ? VC.diagnoseDominant(det.fft.freqs, det.fft.mags, fr, bf) : null;
     var sp = det.spectral || { notes: [], cause: null };
     var cause = sp.cause || (dom ? dom.cause : null); // 하모닉 패턴 우선(단일 피크보다 신뢰↑)
@@ -1981,7 +2180,7 @@ export class App extends Component {
     var evx = det.fft.freqs.length ? this._evidence(eq, det) : null;
     if (!cause && evx) {
       var t = evx.top;
-      if (t && t.score >= 55) {
+      if (t && t.score >= VC.EVID_ADOPT) {
         if (/베어링/.test(t.f)) cause = '베어링 충격성 의심' + (evx.hasBearing ? '' : ' (베어링 형식 미지정 — 확정 불가)');
         else if (/벨트|Sub-sync/.test(t.f)) cause = '비동기·sub-synchronous 성분 의심 (벨트·오일훨 등)';
         else if (/풀림/.test(t.f)) cause = '기계적 풀림 의심';
@@ -1989,18 +2188,116 @@ export class App extends Component {
         else if (/불평형/.test(t.f)) cause = '질량 불평형 의심';
       }
     }
-    if (eq.grade === 0) verdict = '뚜렷한 결함 징후 없음 — 정상 운전';
-    else verdict = (cause || '이상 진동 — 다축 정밀 측정 권장') + ' — ' + (eq.grade >= 3 ? '심각 단계' : eq.grade === 2 ? '진행 단계' : '초기 징후');
+    /* 진폭이 정상이어도 충격성 신호가 있으면 "징후 없음"으로 단정하지 않는다. 낮은 RMS + 높은 Crest는
+       국부 결함 초기의 시그니처이기도 하고 계측 스파이크이기도 해서, 이 값만으로는 갈리지 않는다.
+       등급(worstGrade)에는 태우지 않는다 — 저진폭 구간의 Crest는 분모가 작아 오경보가 쏟아진다.
+       대신 문구로 남긴다: 빨간 Crest 카드 옆에 "정상 운전"이라고 쓰면 화면이 스스로 모순된다. */
+    /* 결함 패턴 축 — 학습 없이 스펙트럼만으로 나온 절대 판정이다. 진폭이 정상이어도 패턴이
+       확실하면 등급이 올라가야 한다: 이전에는 grade===0이면 원인을 이미 지목해 놓고도
+       "징후 없음"으로 덮었다(진폭에 안 나타나는 초기 베어링 결함이 정확히 그 구간이다). */
+    var _patOn = VC.patternGrade(evx && evx.top ? evx.top.score : 0, !!(evx && evx.gate)) > 0;
+    /* ISO 축은 이 화면이 앵커 시점에서 직접 계산해 둔 값(det.isoRms, 이미 mm/s)을 쓴다.
+       감시 판정 상태를 기다리면 감시 대상이 아닌 태그(정적 데이터셋 등)는 ISO를 계산해 놓고도
+       "미적용"으로 남고, 등급도 옛 원본 단위 판정에 묶인다. 학습이 필요 없는 축이라 즉시 쓸 수 있다. */
+    var isoGi = det.isoRms != null ? VC.gradeFor(det.isoRms, this._isoZones(eq)) : null;
+    /* 나머지 두 축도 앵커 시점으로 맞춘다 — 이 화면은 파형·스펙트럼·카드가 전부 선택 기간인데
+       등급만 최신(eq.grade)을 쓰면 기간을 옮겨도 등급이 안 따라온다. 감시 화면은 최신 기준이
+       맞으므로 그쪽(_severityOf)은 건드리지 않는다: 같은 구간을 보면 같은 값이 나오면 된다. */
+    var _bkey = eq.table + ':' + eq.name;
+    var _bl = (this._blMap || this.state.baselines || {})[_bkey];
+    var _blLim = this._isRevived(_bkey) ? null : VC.baselineLimit(_bl);
+    var _acRms = (det.raw && det.raw.values.length) ? (function (a) {
+      var m = 0, i; for (i = 0; i < a.length; i++) m += a[i]; m /= a.length;
+      var ss = 0; for (i = 0; i < a.length; i++) { var d2 = a[i] - m; ss += d2 * d2; }
+      return Math.sqrt(ss / a.length);
+    })(det.raw.values) : null;
+    var blGi = (_blLim != null && _acRms != null) ? ((_acRms > _blLim) ? Math.max(1, isoGi || 0) : 0) : null;
+    var _bandJ = det.bandAt
+      ? VC.bandJudge(det.bandAt, this._bandBaselines(eq), false, this._softBands(eq),
+        (this._monState || {})[_bkey] && this._monState[_bkey].elat, det.anchorMs || Date.now())
+      : null;
+    /* 결함 패턴은 **게이트**다 — 베어링 결함이 있는지만 말하고(이진), 얼마나 급한지는 ISO가 매긴다.
+       베이스라인 축이 이미 쓰는 관용구와 같다(blGi = 켜지면 max(1, isoGi)).
+
+       ISO를 독립 축으로 두지 않는 이유: 이 풀에서 ISO 단독 오탐이 69%인데 그게 등급을 그대로 끌어올린다.
+       게이트로 바꾸면 오탐 69%→3%, 검출 72%→65%다. 그리고 머신 클래스를 잘못 잡아도
+       오탐이 안 흔들린다(Class I·II·III 전부 3%) — ISO가 경보를 켜지 않으니까.
+       ⚠ 대신 베어링이 아닌 원인(불평형·정렬불량·풀림)으로 진동만 높은 경우는 등급이 안 오른다.
+       그건 등급이 아니라 아래 isoOnly 문구가 밝힌다 — 숨기지는 않는다. */
+    var patGi = _patOn ? Math.max(1, isoGi || 0) : 0;
+    /* 상세분석의 게이트는 **결함 패턴 하나**다. 베이스라인·대역은 학습이 있어야 살아나는 축이라,
+       게이트에 넣으면 **같은 태그가 학습 여부로 다른 등급**을 낸다(실측: 학습 전 오탐 3% → 후 15%).
+       일회성 분석은 "지금 이 신호가 무엇처럼 보이나"에 답하는 도구이므로 학습 상태에 매이면 안 된다.
+       (대역은 8개 계열을 각각 한계와 대보고 하나라도 넘으면 켜는 구조라 그 자체가 작은 다중비교다 —
+        단독 오탐 13%로 베이스라인 0%와 대조된다.)
+       두 축은 등급을 만들지 않고 **근거로 표시**된다 — 켜졌다는 사실은 아래 blOnly가 밝힌다. */
+    var wgA = VC.worstGrade(0, 0, 0, patGi);
+    var gi = wgA.gi;
+    /* 등급은 안 올렸지만 사실은 남긴다 — 화면이 "양호"만 말하면 거짓이 된다. */
+    var isoOnly = (isoGi != null && isoGi > gi) ? isoGi : 0;
+    var blOnly = (gi === 0 && (blGi || 0) > 0) ? 1 : 0;                       // 평소 대비 급증
+    var bandOnly = (gi === 0 && _bandJ && _bandJ.on && _bandJ.gi > 0) ? 1 : 0; // 대역 이탈
+    g = E.STATUS[gi];
+    /* 커버리지 — 판정에 실제로 참여한 축 수. worstGrade는 최댓값이라 축이 늘면 등급은 올라가기만
+       하므로 관측 등급은 하한이다. 그래서 비대칭이 생긴다: "주의 이상"은 축 하나로도 참이지만
+       "양호"는 축이 다 살아있을 때만 단정할 수 있다. 비어 있는 축을 감춘 채 "징후 없음"이라고
+       쓰면 갖지 않은 근거를 주장하는 것이다. */
+    /* 축을 필수와 보강으로 나눈다. 필수 둘은 학습이 필요 없어서 이 화면만으로 완결되고,
+       보강 둘은 "평소 대비"라 지속 감시의 개념이다 — 일회성 분석에는 "평소"가 없다.
+       ⚠ 상세분석에서 보강 둘은 **등급을 만들지 않는다**(학습 여부로 등급이 갈리면 안 되므로).
+          근거로만 표시되고, 켜졌다는 사실은 판정문이 밝힌다.
+       넷을 한 분모로 두면 학습을 안 한 설비에서 상세분석·리포트가 미완성으로 읽힌다:
+       학습은 감시 설정이지 분석의 전제가 아니다. 보강 축은 있으면 민감도가 올라가는 것이다.
+       축 이름에 가운뎃점을 쓰지 않는다 — 이름을 가운뎃점으로 이어 붙이므로 개수가 오독된다. */
+    /* 회전수가 없으면 결함 패턴·대역은 "0점"이 아니라 **측정 불가**다 — 둘 다 1× 상대 정의라
+       회전수 없이는 격자도 대역 경계도 그을 수 없다. 빠진 축을 감춘 채 등급을 내면
+       "양호"가 갖지 않은 근거를 주장하게 된다. */
+    var _rpmOk = eq.rpm > 0;
+    var coreAx = [
+      { ko: 'ISO 존', ok: isoGi != null },
+      { ko: '결함 패턴', ok: _rpmOk && !!(evx && !evx.gate) },
+    ];
+    var extraAx = [
+      { ko: '베이스라인', ok: blGi != null },
+      { ko: '대역', ok: _rpmOk && !!_bandJ },
+    ];
+    var okOf = function (a) { return a.ok; };
+    var koOf = function (a) { return a.ko; };
+    var covN = coreAx.filter(okOf).length;
+    var covMiss = coreAx.filter(function (a) { return !a.ok; }).map(koOf);
+    var extraOn = extraAx.filter(okOf).map(koOf);
+    var impulse = gi === 0 && !!(sev && sev.crest && sev.crest.grade > 0);
+    if (gi === 0 && (isoOnly > 0 || blOnly || bandOnly)) {
+      var _why = [];
+      if (blOnly) _why.push('평소 대비 급증');
+      if (bandOnly) _why.push('대역 이탈');
+      if (isoOnly > 0) _why.push('진동 수준 ' + E.STATUS[isoOnly].ko + ' 구간');
+      verdict = '베어링 결함 징후 없음 · ' + _why.join(' · ')
+        + ' — 불평형·정렬불량·풀림 등 베어링 외 원인 점검 권장';
+    }
+    else if (gi === 0) verdict = impulse ? '진폭 정상 · 충격성 신호 존재 — 계측 확인 후 재평가'
+      : covN >= coreAx.length ? '뚜렷한 결함 징후 없음 — 정상 운전'
+        : '관측 범위 내 이상 없음 — 판정 기준 ' + covN + '/' + coreAx.length;
+    else verdict = (cause || '이상 진동 — 다축 정밀 측정 권장') + ' — ' + (gi >= 3 ? '심각 단계' : gi === 2 ? '진행 단계' : '초기 징후');
     // 계측 게이트: 계측 문제로 보이는 파형은 결함이 아닐 수 있음 — 진단보다 검증이 먼저.
     // 사유를 문구에 넣는다(클리핑·DC·스파이크는 값이 틀리는 방향이 서로 다르다).
     var _gr = VC.gateReason(det.quality, null);
-    if (_gr) verdict = '계측 검증 필요(' + _gr.label + ') — 결함 진단 보류 · 센서·케이블·마운팅 점검';
+    if (_gr) { verdict = '계측 검증 필요(' + _gr.label + ') — 결함 진단 보류 · 센서·케이블·마운팅 점검'; impulse = false; }
+    /* 계측 게이트보다 뒤에 둔다 — 계측을 못 믿으면 그게 먼저다. 회전수는 그 다음 사유다. */
+    else if (!_rpmOk && gi === 0) verdict = '회전수 미상 — 주파수 판정 불가(결함 패턴·대역 축 제외) · 설정에서 RPM을 입력하십시오';
     var acts = this._buildActions(eq, det, dom, cause, evx);
     return {
-      verdict: verdict,
+      // gi: 패턴 축까지 반영한 등급. 화면·리포트가 이걸 써야 판정문과 등급 칩이 어긋나지 않는다
+      verdict: verdict, impulse: impulse, gi: gi, patGi: patGi, gradeSrc: wgA.src,
+      isoOnly: isoOnly, isoGi: isoGi, blOnly: blOnly, bandOnly: bandOnly,
+      /* 진동(주파수 대역)과 베어링(포락선 결함주파수)을 갈라 돌려준다 — 조치가 다르다.
+         실측: 정상 베어링이 vh2 ×3.97(옆 결함이 축으로 전파)로 결함 베어링 ×2.35보다 높았다.
+         포락선만 보면 정상 최대 1.26 / 결함 최소 1.42로 갈린다. */
+      bandAx: _bandJ ? { envR: _bandJ.envR, envKey: _bandJ.envKey, envAlt: _bandJ.envAlt, freqR: _bandJ.freqR, freqKey: _bandJ.freqKey } : null,
+      cov: { n: covN, total: coreAx.length, missing: covMiss, extra: extraOn },
       sub: (eq.alias || eq.name) + ' · ' + (eq.bearing && eq.bearing.n ? '베어링 ' + eq.bearing.model : '베어링 미지정') + ' · ' + eq.rpm + ' RPM'
         + (det.frMeas ? '(실측 ' + Math.round(det.frMeas.rpm) + ')' : '')
-        + ((det.isoRms != null && eq.unit === 'mm/s') ? ' · ISO Zone ' + ['A', 'B', 'C', 'D'][VC.gradeFor(det.isoRms, eq.zones)] : ''),
+        + (det.isoRms != null ? ' · ISO Zone ' + ['A', 'B', 'C', 'D'][VC.gradeFor(det.isoRms, this._isoZones(eq))] : ''),
       color: g.color, soft: g.soft, gradeKo: g.ko,
       evidence: ev,
       actions: acts.map(function (t, i) { return { no: (i + 1) + '.', txt: t }; }),
@@ -2020,8 +2317,9 @@ export class App extends Component {
     var gate = !!(det.quality && det.quality.gate);
     // 계측 게이트 — 진단 전에 계측을 의심하라: 스파이크성 신호면 검증이 1순위
     if (gate) a.push('계측 검증 우선 — 극단 Crest/첨도는 스파이크성 잡음(ESD·케이블·접촉) 시그니처와 구분 불가. 센서 마운팅·케이블·커넥터 점검 후 재측정');
-    var isoOk = det.isoRms != null && eq.unit === 'mm/s';
-    var jg = isoOk ? VC.gradeFor(det.isoRms, eq.zones) : eq.grade;
+    // det.isoRms는 liveDetail이 이미 속도(mm/s)로 변환해 낸 값이라 원본 단위와 무관하게 쓸 수 있다
+    var isoOk = det.isoRms != null;
+    var jg = isoOk ? VC.gradeFor(det.isoRms, this._isoZones(eq)) : eq.grade;
     var jSrc = isoOk ? 'ISO 대역제한 판정' : '심각도 판정 RMS';
     /* 게이트가 켜져 있으면 "기계 상태" 조치를 일절 내지 않는다 — 결함 지목뿐 아니라 존 기반 권고도.
        헤드라인이 "진단 보류"인데 아래에 "다음 정기 점검 시 확인"이 있으면, 정비팀은 조치 목록만 보고
@@ -2055,7 +2353,7 @@ export class App extends Component {
     // 샘플레이트가 결함주파수를 못 따라가면 "포락선 분석하라"가 실행 불가능한 조치가 된다 —
     // 그럴 땐 분석이 아니라 계측 사양부터 올려야 한다.
     if (impulsive) {
-      var _bf = (eq.bearing && eq.bearing.n > 0) ? VC.bearingFreqs(eq.rpm, eq.bearing) : null;
+      var _bf = (eq.bearing && eq.bearing.n > 0 && eq.rpm > 0) ? VC.bearingFreqs(eq.rpm, eq.bearing) : null;
       var _impTxt = '충격성 신호(' + (bk != null ? '밴드 커토시스 ' + bk.toFixed(1) : '커토시스 ' + kurt.toFixed(1)) + '·Crest ' + crest.toFixed(1) + ')';
       if (_bf && !VC.bearingFsOk(eq.fs, _bf)) {
         var _top = Math.max(_bf.BPFO || 0, _bf.BPFI || 0, _bf.BSF || 0);
@@ -2110,13 +2408,23 @@ export class App extends Component {
     this.setState(patch);
     this._scrollTop();
   }
-  // 트렌드 버킷의 실제 시간 범위 텍스트 — 폴백 캡 등으로 요청 기간과 다를 수 있어 실구간을 보여준다
-  // 선택한 조회 기간 전체를 구간으로 표시 (데이터가 그보다 좁은지는 차트의 빈 구간으로 드러난다)
+  /* 트렌드 버킷의 실제 시간 범위 텍스트 — 폴백 캡 등으로 요청 기간과 다를 수 있어 실구간을 보여준다.
+     시작은 차트가 실제로 그리는 곳(첫 표본)에 맞춘다 — 차트 축이 앞쪽 빈 구간을 당기므로(_xFrom0),
+     여기만 고른 기간을 적으면 눈금과 문구가 어긋난다. 끝은 고른 기간 끝 그대로 — 마지막 수집 이후가
+     비어 있다는 것이 무수신을 뜻하므로 그 구간을 문구에서도 지우지 않는다. */
   _rangeText(roll, fallback, win) {
     var E = this.E;
-    if (win && win.fromMs && win.toMs) return E.fmtDT(win.fromMs) + ' ~ ' + E.fmtDT(win.toMs);
+    if (win && win.fromMs && win.toMs) return E.fmtDT(this._xFrom0(roll, win.fromMs)) + ' ~ ' + E.fmtDT(win.toMs);
     if (!roll || !roll.length) return fallback;
     return E.fmtDT(roll[0].ms) + ' ~ ' + E.fmtDT(roll[roll.length - 1].ms);
+  }
+  /* 추세 차트·구간 문구의 축 시작 — 고른 기간의 앞쪽이 통째로 비어 있으면 첫 표본까지 당긴다.
+     앞 여백은 "아직 데이터가 시작되지 않았다"뿐이라 정보가 없는데, 간헐 수집 태그에서는 그 여백이
+     그래프를 반쪽으로 만든다. 끝은 당기지 않는다 — 마지막 수집 이후의 빈 구간은 무수신이라는 정보다.
+     중간 결측도 그대로 빈 채로 둔다(그 시각에 수집이 없었다는 사실). */
+  _xFrom0(roll, fromMs) {
+    var t0 = (roll && roll.length) ? roll[0].ms : 0;
+    return (t0 && fromMs && t0 > fromMs) ? t0 : fromMs;
   }
   // 설비 정보 미설정 여부 — 하나도 지정이 없으면 true(전부 기본값으로 도는 중)
   // 마운팅은 포함하되 구동·날개수는 뺀다: 해당 없는 설비가 많아 전부 넣으면 점이 안 꺼져 잔소리가 된다.
@@ -2237,13 +2545,23 @@ export class App extends Component {
     var bk = det.bandKurt || 0, sk = (det.kurtogram && det.kurtogram.best) ? det.kurtogram.best.sk : 0;
     var crestR = 0; (eq.rollup || []).forEach(function (r) { if (r.crest > crestR) crestR = r.crest; });
     var impulsive = kurtW > 4.5 || bk > 4.5 || sk > 8;
-    // 4) 포락선 ↔ 결함주파수 대조. 매칭(+하모닉 2개) 없이는 베어링 가점 불가 — 미매칭은 반대 증거.
-    var bf = eq.bearing && eq.bearing.n > 0 ? VC.bearingFreqs(eq.rpm, eq.bearing) : null;
-    var bm = det.bearMatch || VC.bearingMatch(det.envQ, bf, fr);
+    /* 4) 포락선 ↔ 결함주파수 대조. 매칭(+하모닉 2개) 없이는 베어링 가점 불가.
+       미매칭은 "반대 증거"가 아니다 — 지배 피크가 결함주파수가 아니었다는 뜻이고, 열화 말기에는
+       결함주파수가 흐려지므로 결함이 확정된 베어링에서도 이 상태가 나온다. */
+    var bf = (eq.bearing && eq.bearing.n > 0 && eq.rpm > 0) ? VC.bearingFreqs(eq.rpm, eq.bearing) : null;
+    var bm = det.bearMatch || VC.bearingMatch(det.envQ, bf, fr, det.envelope && det.envelope.res);
     var envLine = !bm.known ? 'BPFO/BPFI/BSF/FTF 미상 (베어링 품번 미지정 — 대조 자체가 불가. 반복 성분이 있어도 베어링 근거로 쓸 수 없음)'
-      : bm.hit ? '포락선 반복이 ' + bm.hit.key + '(' + bm.hit.freq.toFixed(1) + ' Hz)와 일치 — 오차 ' + bm.hit.relPct.toFixed(1) + '% · 하모닉 ' + bm.hit.harm + '개' + (bm.hit.sbValid ? ' · ' + bm.hit.sbValid : '')
+      : bm.hit ? (bm.hit.via === 'sideband'
+        /* 측대역 채택은 근거의 성격이 다르다 — 중앙 피크가 서지 않아 "일치"라고 쓸 수 없고,
+           빗 전체가 배경 위로 섰다는 뜻이다. 같은 문구로 쓰면 더 강한 근거로 읽힌다. */
+        ? bm.hit.key + '(' + bm.hit.freq.toFixed(1) + ' Hz) 자리의 하모닉·측대역 격자가 배경의 ' + bm.hit.ratio.toFixed(1) + '배 — 선 ' + bm.hit.harm + '개(지배 피크는 서지 않음: 변조된 결함의 전형)'
+          /* 구름체는 부위를 단정하지 않는다 — 실측에서 구름체 적중이 0/9였고 내륜·외륜 7건이 이쪽으로 잘못 왔다.
+             결함 구름체는 레이스도 함께 상하게 하므로 "부위 미상"이 물리적으로도 정직하다. */
+          + (bm.hit.siteUnknown ? ' · 부위 단정 불가(구름체 후보이나 실측 적중이 낮아 레이스 손상 동반 가능)' : '')
+        : '포락선 반복이 ' + bm.hit.key + '(' + bm.hit.freq.toFixed(1) + ' Hz)와 일치 — 오차 ' + bm.hit.relPct.toFixed(1) + '% · 하모닉 ' + bm.hit.harm + '개') + (bm.hit.sbValid ? ' · ' + bm.hit.sbValid : '')
         : bm.weak ? bm.weak.key + '(' + bm.weak.freq.toFixed(1) + ' Hz)에 근접하나 하모닉 ' + bm.weak.harm + '개 — 우연 일치와 구분 불가(가점 없음)'
-          : '결함주파수 전부 미검출: ' + bm.negatives.join('/') + ' — 음성 소견(반대 증거)';
+          : '포락선 지배 성분이 결함주파수와 불일치: ' + bm.negatives.join('/') + ' 미지배 — 근거 없음이지 결함 없음이 아님'
+            + (bm.cage ? ' · 케이지 통과주파수(FTF ' + bm.cage.freq.toFixed(1) + ' Hz)는 관측되나 정상 베어링에서도 도므로 근거가 아님' : '');
     // 5) 결함별 근거 강도 (규칙 기반) — 각 근거의 가점(0~100)을 누적해 투명 점수화. tags=점수를 만든 근거, s=★(0~5)
     var has2x = syncP.some(function (p) { return Math.abs(p.o - 2) < 0.1; });
     var mk = function (f, parts, caveat) { // parts: [[조건, 점수, 태그]…]
@@ -2272,6 +2590,11 @@ export class App extends Component {
     // 차수비 사전 — 좁은 5종으로는 이 데이터의 유력 가설(오일훨·베인패스·종동축 등)을 표현할 수 없다.
     var ordHit = function (lo, hi) { return peaks.some(function (p) { return fr > 0 && p.f / fr >= lo && p.f / fr <= hi; }); };
     var domOil = domO >= 0.38 && domO <= 0.48, anyOil = ordHit(0.38, 0.48);
+    /* 오일훨은 유막(저널) 베어링의 현상이다 — 구름베어링으로 형식이 지정된 설비에서는
+       물리적으로 성립하지 않으므로 후보에서 내린다. 그러면 같은 0.4×대를 두고 경쟁하던
+       케이지(FTF)의 귀속이 닫힌다(FTF를 판정에서 뺀 원래 이유가 그 겹침이었다).
+       형식 미지정이면 알 수 없으므로 그대로 둔다 — 모르는 것을 배제로 바꾸면 없는 근거를 만든다. */
+    var rollingBrg = !!(eq.bearing && eq.bearing.n > 0);
     // 특정 주파수 "자신의" 하모닉 개수 — 벨트/기어 판정은 그 주파수의 하모닉 열이 근거여야 한다(남의 하모닉 차용 금지).
     // 유의 임계는 노이즈 플로어 오검출 방지용으로 max(피크 8%, 중앙값 4배).
     var magMed = (function () { var s = (spec && spec.mags ? spec.mags.slice() : []).sort(function (a, b) { return a - b; }); return s.length ? s[Math.floor(s.length / 2)] : 0; })();
@@ -2316,11 +2639,20 @@ export class App extends Component {
       mk('불평형(Imbalance)', [[domSync && Math.abs(domO - 1) < 0.1, 55, '1× 동기 지배'], [Math.abs(domO - 1) < 0.1 && frac(0) > 0.5, 30, '1× 대역 우세']]),
       mk('정렬불량(Misalignment)', [[has2x, 40, '2× 동기 성분'], [has2x && frac(1) > 0.4, 30, '결함대역 우세']]),
       mk('기계적 풀림(Looseness)', [[domSync && syncP.length >= 3, 55, '정수배 하모닉 다수'], [domSync && syncP.length === 2, 25, '하모닉 일부'], [domSync && subAny, 15, 'subharmonic']], domSync ? '' : '비동기 지배 — 하모닉 근거 약함'),
-      mk('베어링(Bearing)', [[matched, 45, bm.hit ? bm.hit.key + ' 일치(오차 ' + bm.hit.relPct.toFixed(1) + '%)·하모닉 ' + bm.hit.harm + '개' : ''],
+      mk('베어링(Bearing)', [[matched, 45, bm.hit
+        ? (bm.hit.via === 'sideband'
+          ? bm.hit.key + ' 측대역 무리(배경의 ' + bm.hit.ratio.toFixed(1) + '배)·선 ' + bm.hit.harm + '개'
+          : bm.hit.key + ' 일치(오차 ' + bm.hit.relPct.toFixed(1) + '%)·하모닉 ' + bm.hit.harm + '개')
+        : ''],
         [matched && !!(bm.hit && bm.hit.sbValid), 10, bm.hit && bm.hit.sbValid],
         [matched && impScore > 0, Math.min(25, impScore), '임펄스성 보강(매칭 확인 후)']],
+        /* "반대 증거"라고 쓰면 없다는 증거가 있는 것으로 읽힌다. 실제로는 포락선의 지배 피크가
+           결함주파수가 아니었다는 뜻이고, 결함이 없다는 뜻이 아니다 — 열화 말기에는 결함주파수가
+           흐려지고 광대역이 랜덤화되므로 결함이 확정된 베어링에서도 이 상태가 나온다. */
         !bm.known ? '베어링 품번 미지정 — 결함주파수 대조 불가라 원리상 귀속 불가'
-          : (!matched ? '결함주파수 미매칭 — 반대 증거(' + (bm.weak ? bm.weak.key + ' 근접하나 하모닉 부족' : bm.negatives.join('/') + ' 미검출') + ')' : '')),
+          : (!matched ? '포락선 지배 성분이 결함주파수와 불일치(' + (bm.weak ? bm.weak.key + ' 근접하나 하모닉 부족' : bm.negatives.join('/') + ' 미지배')
+            + ') — 근거 없음이지 결함 없음이 아님'
+            + (bm.cage ? ' · 케이지 통과주파수(FTF) 관측 — 정상 베어링에서도 나오므로 근거 아님' : '') : '')),
       // 벨트도 베어링과 같은 규칙을 받는다 — 벨트 제원이 없으면 벨트주파수 대조가 불가하므로 별도 후보로
       // 점수를 주지 않고, 아래 "종동축·인접 회전원"이 그 관측(비동기 기본파+자체 하모닉)을 대표한다.
       // 한쪽만 면제하면 같은 관측에서 두 후보가 1·2위를 차지해 근거 없는 우선순위가 생긴다.
@@ -2336,7 +2668,10 @@ export class App extends Component {
       // FTF=(n/2)(1−(d/D)cosα)이고 구름베어링 d/D는 대부분 0.15~0.25 → FTF는 품번을 몰라도 0.35~0.45×에 갇힌다.
       // 베어링을 통째로 '측정 불가'로 돌리면 품번 없이도 가능한 이 판정까지 버리게 된다.
       mk('케이지 결함(FTF 추정)', [[domO >= 0.35 && domO <= 0.45, 30, '지배 ' + domO.toFixed(2) + '× — FTF 이론 구간(0.35~0.45×, 품번 무관)'], [!(domO >= 0.35 && domO <= 0.45) && ordHit(0.35, 0.45), 12, '0.35~0.45× 성분 관측']], '확정에는 포락선에서 FTF 하모닉 확인 필요 — 가설'),
-      mk('오일 훨(Oil whirl)', [[domOil, 45, '지배 ' + domO.toFixed(2) + '× — 오일훨 정통 구간(0.38~0.48×)'], [!domOil && anyOil, 15, '0.38~0.48× 성분 관측']], '유막 베어링 여부·기동정지 추적 필요 — 가설'),
+      mk('오일 훨(Oil whirl)',
+        rollingBrg ? [] : [[domOil, 45, '지배 ' + domO.toFixed(2) + '× — 오일훨 정통 구간(0.38~0.48×)'], [!domOil && anyOil, 15, '0.38~0.48× 성분 관측']],
+        rollingBrg ? '구름베어링(' + (eq.bearing.model || '형식 지정') + ') — 유막 베어링 현상이라 해당 없음'
+          : '유막 베어링 여부·기동정지 추적 필요 — 가설'),
       // 비동기 기본파 + 자체 하모닉 열 = 다른 회전원(벨트 종동축·인접 기계·기어 종동축)의 1×와 그 하모닉.
       // 페르소나 사전: "비정수 비동기 → 종동축(풀리비·기어비)·인접 기계·유막 — 구동 계통도 한 장이면 대부분 닫힌다"
       mk('독립 회전원(종동축·인접 기계)', [[!domSync && domHarm >= 3, 40, '비동기 기본파 ' + (peaks.length ? peaks[0].f.toFixed(1) : '?') + 'Hz(' + domO.toFixed(2) + '×)의 자체 하모닉 ' + domHarm + '개 — 독립 회전원 시그니처(≈' + (peaks.length ? Math.round(peaks[0].f * 60) : 0) + ' rpm)'],
@@ -2521,7 +2856,11 @@ export class App extends Component {
       return '■ ' + c.f + ' ' + (c.na ? '측정 불가 — 점수 없음(' + (c.caveat || '판별 조건 미충족') + ')' : star(c.s) + ' · 근거점수 ' + c.score + '/100 [' + c.breakdown + ']' + (c.caveat ? ' · ' + c.caveat : ''));
     });
     var unmeasurable = conf.filter(function (c) { return c.na; }).map(function (c) { return c.f; });
+    /* 1순위가 원인 채택 기준에 못 미치면 그 사실을 함께 낸다 — 표는 점수 순 정렬이라
+       약한 후보도 맨 위에 놓이고, 판정문이 원인을 안 짚었는데 표만 지목한 것처럼 읽힌다. */
+    var _scored = conf.filter(function (c) { return !c.na && c.score != null; });
     return { block: B.join('\n'), confLines: confLines.join('\n'), conf: conf, top: conf[0], impulsive: impulsive,
+      weakTop: !(_scored.length && _scored[0].score >= VC.EVID_ADOPT),
       hasBearing: !!bf, domSync: domSync, gate: gate, frMeas: frM,
       // bandDev는 프롬프트뿐 아니라 HTML까지 간다 — 프롬프트에만 넣으면 정비팀이 받는 문서에는 없다
       bandDev: bandDev, mountFmax: det.mountFmax || 0, mount: det.mount || '',
@@ -2538,7 +2877,7 @@ export class App extends Component {
   _opinionPack(eq, det, sat) {
     var self = this, E = this.E, fr = eq.rpm / 60, u = eq.unit, L = [];
     L.push('[설비] ' + (eq.alias || eq.name) + ' (' + eq.name + ') · ' + eq.rpm + ' RPM (1×=' + fr.toFixed(1) + ' Hz, 2×=' + (2 * fr).toFixed(1) + ' Hz) · ISO Class ' + eq.cls + ' · 단위 ' + u);
-    var bf = eq.bearing && eq.bearing.n > 0 ? VC.bearingFreqs(eq.rpm, eq.bearing) : null;
+    var bf = (eq.bearing && eq.bearing.n > 0 && eq.rpm > 0) ? VC.bearingFreqs(eq.rpm, eq.bearing) : null;
     L.push('[베어링] ' + (bf ? eq.bearing.model + ' · BPFO ' + bf.BPFO.toFixed(1) + ' / BPFI ' + bf.BPFI.toFixed(1) + ' / BSF ' + bf.BSF.toFixed(1) + ' / FTF ' + bf.FTF.toFixed(1) + ' Hz' : '미지정 (결함 주파수 대조 불가)'));
     // ISO 규격 판정(10–1000 Hz 대역제한 속도 RMS)과 실시간 감시(광대역 1초 RMS)는 다른 물리량 — 분리 표기
     var isoOk = det.isoRms != null && u === 'mm/s';
@@ -2643,7 +2982,10 @@ export class App extends Component {
     var self = this; this.setState({ dxAiText: '__loading__' });
     var llm = LLM.createLLM(this._llmCfg());
     if (!llm) { setTimeout(function () { self.setState({ dxAiText: '__fallback__' }); }, 300); return; }
-    var det = this._detail(eq), dx = this._dx(eq, det);
+    var det = this._detail(eq);
+    // 소견 프롬프트에 실리는 1차 판정은 화면 문구와 같아야 한다 — 지표를 안 넘기면 LLM만 옛 문구를 본다
+    var _m = VC.sevMetrics(this._rollFor(eq).roll, { zones: eq.zones, fs: eq.fs, gate: !!VC.gateReason(det.quality, null) });
+    var dx = this._dx(eq, det, _m);
     var p = this._opinionPrompt(eq, det, dx, this._kurtSat(eq));
     llm.complete(p).then(function (txt) { self.setState({ dxAiText: txt || '__fallback__' }); })
       .catch(function (e) { console.warn('[vibe] llm opinion failed', e); self.setState({ dxAiText: '__fallback__' }); self._toast('LLM 소견 생성 실패: ' + (e.message || e), 'err'); });
@@ -2664,16 +3006,18 @@ export class App extends Component {
     var xT = roll.map(function (r) { return E.fmtDT(r.ms); });
     var rmsV = roll.map(function (r) { return r.rms; }), p2pV = roll.map(function (r) { return r.p2p; }), crV = roll.map(function (r) { return r.crest; });
     var tMs = roll.map(function (r) { return r.ms; });
-    // 추세 차트 x축 범위: 전체 보기면 선택한 조회 기간 전체(데이터 없는 구간은 빈 채로), 줌 중이면 그 구간
+    /* 추세 차트 x축 범위: 전체 보기면 선택한 조회 기간(앞쪽 빈 구간은 첫 표본까지 당김 — _xFrom0),
+       줌 중이면 그 구간. 아래 kWin도 같은 시작을 써야 롤업 차트와 청크 차트가 한 축에 선다. */
+    var xF0 = this._xFrom0(roll, rf.fromMs);
     var xWin = function (s, e) {
       var full = s === 0 && e >= roll.length;
-      return { xFrom: (full && rf.fromMs) ? rf.fromMs : tMs[s], xTo: (full && rf.toMs) ? rf.toMs : tMs[Math.max(s, e - 1)] };
+      return { xFrom: (full && xF0) ? xF0 : tMs[s], xTo: (full && rf.toMs) ? rf.toMs : tMs[Math.max(s, e - 1)] };
     };
     var C = function (id) { return document.getElementById(id); };
     /* 확대 구간 승계 키 — 태그·기간·기준시각·표시 물리량이 그대로면 다시 그려도 확대를 유지한다.
        상세분석은 캡처한 스냅샷이라 라이브 틱에 데이터가 바뀌지 않는데, 화면 갱신마다 전체 구간으로
        되돌리면 확대해 놓고 들여다볼 수가 없다(몇 초마다 원래 크기로 돌아간다). */
-    var zk = [eq.id, this.state.period, this.state.from, this.state.to, this._detailAnchorMs(eq), this.state.viewUnit || ''].join('|');
+    var zk = [eq.id, this._detailKey()].join('|');
     var wave = C('vc-wave');
     if (wave && det.raw.values.length) {
       var wl = det.raw.times_ms.map(function (m) { return m.toFixed(0); }), wt = det.raw.times_ms.map(function (m) { return m.toFixed(1) + ' ms'; });
@@ -2727,12 +3071,19 @@ export class App extends Component {
     var kTs = (tr && tr.times && tr.times.length) ? tr.times : tMs;
     var kWin = function (s, e) {
       var full = s === 0 && e >= kTs.length;
-      return { xFrom: (full && rf.fromMs) ? rf.fromMs : kTs[s], xTo: (full && rf.toMs) ? rf.toMs : kTs[Math.max(s, e - 1)] };
+      return { xFrom: (full && xF0) ? xF0 : kTs[s], xTo: (full && rf.toMs) ? rf.toMs : kTs[Math.max(s, e - 1)] };
     };
     if (kurtC && tr && tr.kurt && tr.kurt.length) {
       var kV = tr.kurt;
       var dk = function (s, e) { var w = kWin(s, e); var r = E.drawLine(kurtC, { values: kV.slice(s, e), times: kTs.slice(s, e), xFrom: w.xFrom, xTo: w.xTo, xLabels: kxl.slice(s, e), tipLabels: kxt.slice(s, e), color: '#fdb532', height: 220, smooth: true, refLines: [{ val: 3, color: '#8a8d99', label: '정상=3' }, { val: 4.5, color: '#e07b39', label: '충격성 경계' }] }, CC); if (r) E.addTip(kurtC, C('vt-kurt'), null, r.pts); };
       E.zoomDraw(kurtC, kV.length, dk, zk);
+    } else if (kurtC) {
+      /* 그릴 것이 없으면 지운다. 캔버스는 다시 그리기 전까지 옛 픽셀을 그대로 들고 있어서,
+         태그·기간을 바꾼 뒤 값이 없으면 이전 선택의 그래프가 남아 새 구간의 것처럼 보인다
+         (빈 값으로 부르면 drawLine이 지우고 끝낸다). */
+      E.drawLine(kurtC, { values: [], times: [], xLabels: [], height: 220 }, CC);
+      // 툴팁 핸들러는 캔버스에 남아 옛 점을 계속 물고 있다 — 빈 점으로 다시 걸어 지운다
+      E.addTip(kurtC, C('vt-kurt'), null, []);
     }
     var band = bandC;
     // 꺼둔 계열은 그리지도 않는다 — 축 범위도 남은 계열 기준으로 다시 잡혀야 작은 대역이 보인다
@@ -2756,6 +3107,8 @@ export class App extends Component {
       var refs = _norm ? [{ val: 1, color: '#e07b39', label: '알람 기준' }] : null;
       var db = function (s, e) { var w = kWin(s, e); E.drawMultiLine(band, { series: bS.map(function (sr) { return { label: sr.label, color: sr.color, vals: sr.vals.slice(s, e) }; }), times: kTs.slice(s, e), xFrom: w.xFrom, xTo: w.xTo, xLabels: kxl.slice(s, e), height: 220, refLines: refs }, CC); };
       E.zoomDraw(band, kxl.length, db, zk);
+    } else if (band) {
+      E.drawMultiLine(band, { series: [], times: [], xLabels: [], height: 220 }, CC); // 위 첨도와 같은 이유로 지운다
     }
   }
   /* 오류는 읽고 조치해야 하는 정보라 더 오래 둔다 — 사유·발생 위치가 실리면 2.6초로는 다 읽지 못한다.
@@ -2766,8 +3119,6 @@ export class App extends Component {
     clearTimeout(this._tt);
     this._tt = setTimeout(function () { self.setState({ toast: null }); }, kind === 'err' ? 9000 : 2600);
   }
-  // 네이티브 날짜·시각 피커는 바깥을 눌러야 닫힌다 — 포커스를 떼는 것이 유일한 프로그램적 닫기 수단
-  _closePicker() { try { var a = document.activeElement; if (a && a.blur) a.blur(); } catch (e) {} }
   toggleTheme() { var n = this.state.theme === 'light' ? 'dark' : 'light'; try { localStorage.setItem('vibeTheme', n); } catch (e) {} this.setState({ theme: n }); }
   _setEquipBearing(id, v) { var m = Object.assign({}, this.state.equipBearing); m[id] = v; this.setState({ equipBearing: m }); }
   _setEquipRpm(id, v) { var m = Object.assign({}, this.state.equipRpm); m[id] = v; this.setState({ equipRpm: m }); }
@@ -2914,8 +3265,9 @@ export class App extends Component {
      (전대역 값으로 대신 판정하면 고치려던 그 헛알람이 그대로 난다). */
   _isoValue(eq, wide) {
     if (!isFinite(wide)) return { v: wide, pending: false, basis: 'wide' };
-    // 이 샘플레이트에 1 kHz 위가 없으면 전대역이 곧 ISO 대역이다
-    if (!VC.isoNeeded(eq.fs)) return { v: wide, pending: false, basis: 'wide' };   // 1 kHz 위가 없어 전대역이 곧 ISO
+    /* 이 샘플레이트에 1 kHz 위가 없으면 전대역이 곧 ISO 대역이다 — 단 원본이 이미 속도일 때만.
+       가속도·변위는 대역이 맞아도 물리량이 달라 변환이 필요하므로 이 지름길을 쓸 수 없다. */
+    if (!VC.isoNeeded(eq.fs) && eq.unit === 'mm/s') return { v: wide, pending: false, basis: 'wide' };
     // 구간 안 가장 큰 초 버킷도 경계 아래면 어떤 1초 창의 ISO도 그보다 작다 — 계산 없이 양호 확정
     var key = eq.table + ':' + eq.name;
     if (!this._isoCache) this._isoCache = {};
@@ -2958,7 +3310,11 @@ export class App extends Component {
     var end = eq.lastSeen || now;
     rawWindow(eq.table, eq.name, end - ISO_WIN_MS, end, 0)
       .then(function (w) {
-        var v = VC.isoRms(w && w.values, eq.fs);
+        /* ISO 존은 속도(mm/s) 규격이다 — 원본이 가속도·변위면 속도로 변환한 뒤 대역제한한다.
+           계측 게이트·충격성 근거는 아래에서 원본 파형을 그대로 본다(파형 모양을 봐야 하므로). */
+        var _raw = (w && w.values) || [];
+        var _vel = eq.unit === 'mm/s' ? _raw : VC.convertDomain(_raw, eq.fs, eq.unit, 'mm/s', eq.rpm / 60);
+        var v = VC.isoRms(_vel, eq.fs);
         if (v != null) self._isoCache[key] = { v: v, at: Date.now() };
         /* 같은 샘플로 계측 게이트도 본다 — 클리핑·스파이크·첨도는 파형 모양이라 원본이
            있어야 보이고, 원본을 받는 시점이 곧 알람이 날 조건이 선 시점이다. 공짜로 얹는다. */
@@ -3008,6 +3364,14 @@ export class App extends Component {
     }
     var du = VC.zonesFor(eq.unit, eq.cls), ou = S.unitThresh[eq.unit] || [];
     return [num(ou[0], du[0]), num(ou[1], du[1]), num(ou[2], du[2])];
+  }
+  /* ISO 축 전용 존 — 규격은 속도(mm/s) 기준이므로 원본 단위와 무관하게 클래스가 정한다.
+     _effZones는 원본 단위 존이고 카드·정지 판정·ISO 계산 스킵 임계가 그걸 쓴다.
+     둘을 섞으면 가속도 값을 속도 경계에 대는 셈이 되어 다른 양을 비교한다. */
+  _isoZones(eq) {
+    var S = this.state, d = VC.ISO_ZONES[eq.cls] || VC.ISO_ZONES.II, o = S.classThresh[eq.cls] || [];
+    var num = function (v, dd) { var n = parseFloat(v); return isFinite(n) ? n : dd; };
+    return [num(o[0], d[0]), num(o[1], d[1]), num(o[2], d[2])];
   }
   _setEquipCls(id, v) { var m = Object.assign({}, this.state.equipCls); m[id] = v; this.setState({ equipCls: m, dirty: true }); }
   _setEquipUnit(id, v) { var m = Object.assign({}, this.state.equipUnit); if (v) m[id] = v; else delete m[id]; this.setState({ equipUnit: m, dirty: true }); }
@@ -3064,19 +3428,18 @@ export class App extends Component {
     return { spanH: known ? spanH : Infinity, toMs: toMs, minMs: minMs };
   }
   // 기간 프리셋 칩 — 데이터 구간보다 긴 것은 비활성(레이아웃은 고정, 데이터가 쌓이면 버튼이 켜질 뿐).
+  // 직접 입력은 칩이 아니라 옆의 달력 버튼(DateRange)이 맡는다 — 거기서 '적용'하면 period가 custom이 된다.
   // who = 비활성 툴팁에서 어느 태그 기준인지 밝히는 말 · scope = 'report'면 리포트 탭 기간 상태를 쓴다
   _presetChips(eqs, who, scope) {
     var self = this, S = this.state, sp = this._presetSpan(eqs), rep = scope === 'report';
     var cur = rep ? S.genPeriod : S.period;
-    // 프리셋을 고르면 직접 입력 초안은 버린다 — 남겨두면 '직접 입력'으로 돌아왔을 때 옛 편집이 되살아난다
     var put = function (p, fromV, toV) {
-      self.setState(rep ? { genPeriod: p, genFrom: fromV, genTo: toV, genFromD: null, genToD: null }
-        : { period: p, from: fromV, to: toV, fromD: null, toD: null });
+      self.setState(rep ? { genPeriod: p, genFrom: fromV, genTo: toV } : { period: p, from: fromV, to: toV });
     };
     var spanTxt = sp.spanH === Infinity ? '알 수 없음'
       : sp.spanH < 1 ? Math.max(1, Math.round(sp.spanH * 60)) + '분'
         : sp.spanH < 48 ? sp.spanH.toFixed(1) + '시간' : (sp.spanH / 24).toFixed(1) + '일';
-    return [['1h', '1시간'], ['6h', '6시간'], ['24h', '24시간'], ['all', '전체'], ['custom', '직접 입력']].map(function (p) {
+    return [['1h', '1시간'], ['6h', '6시간'], ['24h', '24시간'], ['all', '전체']].map(function (p) {
       var a = cur === p[0];
       var need = PERIOD_H[p[0]];
       var dis = need != null && sp.spanH < need; // 데이터가 그 길이에 못 미치면 선택 불가
@@ -3085,14 +3448,11 @@ export class App extends Component {
         title: dis ? who + '의 데이터는 ' + spanTxt + '뿐이라 선택할 수 없습니다' : '',
         onClick: function () {
           if (dis) { self._toast('데이터가 부족합니다', 'warn'); return; }
-          if (p[0] === 'custom' && cur === 'custom') return; // 이미 직접 입력 — 사용자가 넣은 값 보존
           var s2 = self._presetSpan(eqs); // 클릭 시점 기준으로 다시 (라이브로 lastSeen이 전진한다)
           var toMs = s2.toMs || self.data.now;
-          // 직접 입력으로 들어갈 땐 직전 프리셋이 뜻하던 구간을 그대로 구체화해 채운다
-          var len = p[0] === 'custom' ? cur : p[0];
-          var fromMs = (PERIOD_H[len] == null)
+          var fromMs = (PERIOD_H[p[0]] == null)
             ? (s2.minMs || toMs - PERIOD_H['24h'] * 3600000) // all
-            : toMs - PERIOD_H[len] * 3600000;
+            : toMs - PERIOD_H[p[0]] * 3600000;
           put(p[0], self._dtVal(fromMs), self._dtVal(toMs));
         },
         style: 'padding: 6px 13px; background: ' + (a ? 'var(--primary-base)' : 'transparent') + '; color: ' + (a ? '#fff' : 'var(--text-secondary)') + '; border: none; border-right: 1px solid var(--border-default); font-size: 12px; font-weight: ' + (a ? '600' : '500') + ';' + (dis ? ' opacity: .35; cursor: default;' : ' cursor: pointer;')
@@ -3104,7 +3464,7 @@ export class App extends Component {
   _setGenTags(ids) {
     var self = this, S = this.state;
     var eqs = (ids || []).map(function (id) { return self._eq(id); }).filter(Boolean);
-    if (!eqs.length) { this.setState({ genTags: ids || [], genPeriod: '', genFrom: '', genTo: '', genFromD: null, genToD: null }); return; }
+    if (!eqs.length) { this.setState({ genTags: ids || [], genPeriod: '', genFrom: '', genTo: '' }); return; }
     if (S.genPeriod === 'custom') { this.setState({ genTags: ids }); return; } // 직접 입력 값은 사용자 것
     var sp = this._presetSpan(eqs);
     var want = S.genPeriod || '1h';
@@ -3112,7 +3472,7 @@ export class App extends Component {
     if (need != null && sp.spanH < need) want = 'all'; // 데이터보다 긴 프리셋이 선택돼 있던 모순 상태 방지
     var toMs = sp.toMs || this.data.now;
     var fromMs = (PERIOD_H[want] == null) ? (sp.minMs || toMs - PERIOD_H['24h'] * 3600000) : toMs - PERIOD_H[want] * 3600000;
-    this.setState({ genTags: ids, genPeriod: want, genFrom: this._dtVal(fromMs), genTo: this._dtVal(toMs), genFromD: null, genToD: null });
+    this.setState({ genTags: ids, genPeriod: want, genFrom: this._dtVal(fromMs), genTo: this._dtVal(toMs) });
   }
   _toggleGenTag(id) { var g = this.state.genTags.slice(), i = g.indexOf(id); if (i >= 0) g.splice(i, 1); else g.push(id); this._setGenTags(g); }
   // 리포트 생성 — 선택 태그별로: 데이터 조회(0) → 지표 계산(1) → 소견 생성(2, 옵션) → 저장(3)
@@ -3131,13 +3491,20 @@ export class App extends Component {
     var self = this, S = this.state;
     if (!S.genTags.length) { this._toast('태그를 1개 이상 선택하세요', 'warn'); return; }
     if (S.genRunning) return;
+    /* 데이터가 없는 구간은 만들지 않는다 — 빈 리포트도 문서번호·판정등급을 달고 보관함에 남아
+       "그날 분석했고 이상 없었다"는 기록이 된다. 일부만 비면 그 태그만 빼고 나머지는 만든다. */
+    var gap = this._genGapIds || [];
+    var ids0 = S.genTags.filter(function (id) { return gap.indexOf(id) < 0; });
+    if (!ids0.length) { this._toast('선택한 기간에 데이터가 없습니다 — 기간을 데이터가 있는 구간으로 바꾸세요', 'warn'); return; }
+    if (ids0.length < S.genTags.length) this._toast((S.genTags.length - ids0.length) + '개 태그는 이 기간에 데이터가 없어 제외합니다', 'warn');
     var run = this._genRun = (this._genRun || 0) + 1;
     this._genSaved = 0;
     this._genLlmErr = null;
     this._genFails = [];
+    this._genSkips = [];
     this._genAC = (typeof AbortController !== 'undefined') ? new AbortController() : null;
     this.setState({ genRunning: true, genStep: 0 });
-    var ids = S.genTags.slice();
+    var ids = ids0; // 데이터가 없는 태그는 위에서 이미 뺐다
     ensureDir(REPORT_DIR)
       .then(function () {
         return ids.reduce(function (chain, id) {
@@ -3151,6 +3518,8 @@ export class App extends Component {
                  (예: "Cannot read properties of undefined") 어느 설비의 어떤 데이터가 원인인지 알 수 없다. */
               .catch(function (e) {
                 if (e && e.__abort) throw e; // 중단은 실패가 아니다 — 바깥에서 처리한다
+                // 데이터가 없어 건너뛴 것도 실패가 아니다 — 고장으로 읽히면 원인을 엉뚱한 데서 찾는다
+                if (e && e.__nodata) { self._genSkips.push(eq.alias || eq.name); return null; }
                 console.error('[vibe] report failed · tag=' + eq.name + ' table=' + eq.table, e);
                 /* 발생 위치를 화면에도 싣는다 — 콘솔을 열 수 없는 환경(현장 PC·태블릿)에서는
                    "Cannot read properties of undefined" 같은 메시지만으로는 어디인지 알 수 없다.
@@ -3168,8 +3537,11 @@ export class App extends Component {
         if (self._genRun !== run) return; // 중단 처리는 _cancelGen이 이미 끝냈다
         self._genAC = null;
         self.setState({ genRunning: false, genStep: 0 });
-        var _f = self._genFails;
-        if (_f.length) {
+        var _f = self._genFails, _sk = self._genSkips;
+        if (!_f.length && _sk.length) {
+          self._toast('리포트 ' + self._genSaved + '건 저장 · ' + _sk.length + '건 건너뜀 — ' + _sk.join(', ')
+            + ': 선택 기간에 표본이 없습니다', 'warn');
+        } else if (_f.length) {
           self._toast('리포트 ' + self._genSaved + '건 저장 · ' + _f.length + '건 실패 — ' + _f[0].tag + ': ' + _f[0].msg
             + (_f[0].at ? '  [' + _f[0].at + ']' : '') + (_f.length > 1 ? ' 외 ' + (_f.length - 1) + '건' : ''), 'err');
         } else if (self._genLlmErr) self._toast('리포트 ' + self._genSaved + '건 저장 — LLM 소견 실패로 지표만 저장됨 · ' + self._genLlmErr, 'err');
@@ -3384,18 +3756,22 @@ export class App extends Component {
     base.purgePickTitle = pick === 'band' ? '대역 에너지 추이 삭제' : '이벤트 이력 삭제';
     var _sp = pick === 'band' ? (u && u.band.span) : (u && u.events.span);
     var _hasSpan = !!(_sp && _sp.from > 0 && _sp.to > 0);
-    base.purgeFrom = S.purgeFrom || (_hasSpan ? this._dtVal(_sp.from).slice(0, 10) : '');
-    base.purgeTo = S.purgeTo || (_hasSpan ? this._dtVal(_sp.to).slice(0, 10) : '');
-    base.purgePickReady = !!(base.purgeFrom && base.purgeTo);
+    var _pgFrom = S.purgeFrom || (_hasSpan ? this._dtVal(_sp.from).slice(0, 10) : '');
+    var _pgTo = S.purgeTo || (_hasSpan ? this._dtVal(_sp.to).slice(0, 10) : '');
+    base.purgePickReady = !!(_pgFrom && _pgTo);
     base.purgeHaveText = _sp && _sp.from > 0
       ? '보관 중: ' + E.fmtDT(_sp.from).slice(0, 10) + ' ~ ' + E.fmtDT(_sp.to).slice(0, 10) : '';
-    base.onPurgeFrom = function (ev) { self.setState({ purgeFrom: ev.target.value }); };
-    base.onPurgeTo = function (ev) { self.setState({ purgeTo: ev.target.value }); };
+    base.purgeRange = {
+      from: _pgFrom, to: _pgTo, mode: 'date', full: true,
+      minMs: _hasSpan ? _sp.from : 0, maxMs: _hasSpan ? _sp.to : 0,
+      placeholder: '지울 기간 선택', title: '지울 기간을 고릅니다',
+      onApply: function (f, t) { self.setState({ purgeFrom: f, purgeTo: t }); },
+    };
     base.onPurgePickCancel = function () { self.setState({ purgePick: null, purgeFrom: null, purgeTo: null }); };
     base.onPurgePickNext = function () {
       if (!base.purgePickReady) { self._toast('시작·종료 날짜를 모두 고르세요', 'warn'); return; }
       // 종료일은 그날 23:59:59.999까지 포함 — 사용자는 "그날까지"로 읽는다
-      var a = Date.parse(base.purgeFrom + 'T00:00:00'), b = Date.parse(base.purgeTo + 'T23:59:59.999');
+      var a = Date.parse(_pgFrom + 'T00:00:00'), b = Date.parse(_pgTo + 'T23:59:59.999');
       if (!isFinite(a) || !isFinite(b)) { self._toast('날짜를 확인하세요', 'warn'); return; }
       if (a > b) { self._toast('기간이 올바르지 않습니다 (시작 ≤ 종료)', 'warn'); return; }
       self.setState({ purgePick: null });
@@ -3441,32 +3817,79 @@ export class App extends Component {
       base.onPurgeConfirm = function () { if (base.purgeReady) self._runPurge(); };
     }
   }
+  /* 통계 요약 한 줄 — 문장으로 읽어야 하는 근거(등급을 올린 축·이탈 대역·지속 최악)를 모아 한 줄로 만든다.
+     타일은 한 칸 한 줄이라 문장을 넣으면 값이 말줄임으로 잘린다. 화면과 리포트가 같은 문구를 쓰도록
+     여기서만 만든다 — 두 곳에서 따로 조립하면 같은 설비의 근거가 화면과 문서에서 갈린다. */
+  _statSummary(eq, det, dx, roll, gi) {
+    var E = this.E, S = this.state;
+    var g = gi != null ? gi : (dx.gi != null ? dx.gi : (eq.grade || 0));
+    var srcKo = { iso: 'ISO 존', baseline: '베이스라인', band: '대역·포락선', pattern: '결함 패턴' };
+    var bandKo = { sub: '서브동기', one: '1× 대역', fault: '결함 대역', high: '고주파',
+      vh1: '1~2 kHz', vh2: '2~4 kHz', vh3: '4~8 kHz', vh4: '8 kHz+',
+      envBPFO: 'BPFO(외륜)', envBPFI: 'BPFI(내륜)', envBSF: 'BSF(볼·롤러)' };
+    var ax = dx.bandAx, axTxt = [];
+    if (ax && ax.freqR > 0) axTxt.push('진동 ×' + ax.freqR.toFixed(2) + ' (' + (bandKo[ax.freqKey] || ax.freqKey) + ')');
+    if (ax && ax.envR > 0) {
+      var ek = (bandKo[ax.envKey] || ax.envKey)
+        + (ax.envAlt ? ' / ' + (bandKo[ax.envAlt] || ax.envAlt) + ' — 구분 불충분' : '');
+      axTxt.push('베어링 ×' + ax.envR.toFixed(2) + ' (' + ek + ')');
+    }
+    /* 기간 내 "지속된 최악" — 헤드라인은 앵커(기간 끝) 시점이라, 기간 가운데가 더 나빴으면
+       그 사실이 화면에 안 남는다. 백분위가 아니라 시간 기준(dwell)으로 잡아야 기간 길이에
+       따라 뜻이 바뀌지 않는다. 광대역 원본 단위라 등급은 매기지 않고 사실만 적는다. */
+    var acRms = (det.raw && det.raw.values.length) ? (function (a) {
+      var m = 0, i; for (i = 0; i < a.length; i++) m += a[i]; m /= a.length;
+      var ss = 0; for (i = 0; i < a.length; i++) { var d2 = a[i] - m; ss += d2 * d2; }
+      return Math.sqrt(ss / a.length);
+    })(det.raw.values) : null;
+    var dw = VC.dwellWorst(roll, Number(S.escHold) * 1000 || 60000, VC.DWELL_MIN_N);
+    var dwTxt = dw
+      ? E.fmt(dw.v) + ' ' + eq.unit + ' 이상이 ' + Math.round(dw.durMs / 60000) + '분 지속 (끝 ' + E.fmtDT(dw.ms) + ')'
+        + (acRms != null && dw.v > acRms * 1.5 ? ' — 앵커 시점보다 나쁨, 그 구간을 보려면 기간을 좁히십시오' : '')
+      : '표본 부족(연속 ' + VC.DWELL_MIN_N + '개 이상 필요)';
+    return [
+      '등급을 올린 축 ' + (g > 0 ? (srcKo[dx.gradeSrc] || dx.gradeSrc) : '없음(네 축 모두 정상)'),
+      '진동/베어링 ' + (axTxt.join('  ·  ') || '대역 이탈 없음(또는 학습 전)'),
+      '지속 최악 ' + dwTxt,
+    ].join('  ·  ');
+  }
   /* 기간 지표 카드 4장 — 상세분석과 리포트가 같은 문구·같은 배지를 쓰도록 여기서 조립한다.
      값·등급은 VC.sevMetrics가 정하고, 여기는 서식과 각주만 붙인다.
      반환은 중립 모양이라 화면(색 입힘)과 리포트(HTML)가 각자 자기 필드로 옮겨 쓴다. */
-  _sevCards(m, unit, held) {
+  // stepSec: 실제 롤업 단위. 라벨에 "1초 롤업"을 박아 두면 기간에 따라 분·시간으로 바뀌는데도
+  // 화면은 계속 1초라고 말한다 — 임계 √(2·ln N)는 N을 따라가므로 판정은 맞고 라벨만 틀린다.
+  _sevCards(m, unit, held, stepSec) {
     var E = this.E, n = m.n;
+    var _rollTxt = (function (s) {
+      s = Math.round(s || 1);
+      return s >= 86400 ? (s / 86400) + '일' : s >= 3600 ? (s / 3600) + '시간' : s >= 60 ? (s / 60) + '분' : s + '초';
+    })(stepSec);
+    /* 넷 다 등급이 없으므로 배지를 넷에 다 달면 "참고" 네 개가 항상 붙어 아무 신호도 아니게 된다.
+       평소엔 비우고 행 머리말이 한 번만 말한다 — 배지가 보이는 순간이 곧 예외다
+       (계측 게이트 '잠정', 관측 사실 '충격성 강함'). 화살표도 같이 지운다: 빨간 ▲는
+       등급이 없는데도 알람으로 읽힌다. */
     var mk = function (label, d, u, prefix) {
-      var over = d.value > d.thr;
-      return { label: label, grade: d.grade, badgeKo: d.badge || E.STATUS[d.grade].ko, override: !!d.badge,
+      var noGrade = d.graded === false, over = !noGrade && d.value > d.thr;
+      return { label: label, grade: d.grade, note: !!d.note,
+        badgeKo: d.badge || (noGrade ? '' : E.STATUS[d.grade].ko), override: !!d.badge || noGrade,
         valueText: (prefix || '') + E.fmt(d.value), unit: u || '',
         thrText: '기준 < ' + (prefix || '') + E.fmt(d.thr),
-        over: over, arrow: over ? '▲' : '▼', deltaText: E.fmt(Math.abs(d.value - d.thr)), foot2: '' };
+        over: over, arrow: noGrade ? '' : (over ? '▲' : '▼'),
+        deltaText: noGrade ? '' : E.fmt(Math.abs(d.value - d.thr)), foot2: '' };
     };
     var c = [
-      mk('평균 RMS · 1초 롤업(광대역)', m.avg, unit),
-      mk('P95 RMS · 1초 롤업(광대역)', m.p95, unit),
-      mk('Crest P95 · 롤업', m.crest, ''),
+      mk('평균 RMS · ' + _rollTxt + ' 롤업(광대역)', m.avg, unit),
+      mk('P95 RMS · ' + _rollTxt + ' 롤업(광대역)', m.p95, unit),
+      mk('Crest P95 · ' + _rollTxt + ' 롤업', m.crest, ''),
       mk('변화율 (최근 1/4 ÷ 직전 1/4)', m.trend, '', '×'),
     ];
-    c[0].foot2 = 'ISO 판정은 별도(10–1000 Hz 대역제한 평균) — 이 값은 광대역 감시용';
+    c[0].foot2 = 'ISO 판정은 별도(10–1000 Hz 대역제한) — 이 값은 광대역 감시용 · 평균은 조용한 구간이 고진동을 희석하므로 등급 없음';
     // 최댓값은 등급 없이 사실만 — 최댓값을 쓸 때는 발생 횟수를 함께 적는다
-    c[1].foot2 = '최댓값 ' + E.fmt(n.wMax) + ' ' + unit + '(등급 없음) · B/C 초과 ' + n.overBC + '/' + n.buckets + '버킷';
-    c[2].foot2 = '기준 = √(2·ln N) = ' + n.cExp.toFixed(1) + ' (N=버킷당 ' + this._num(n.perBucket) + '샘플) · 최댓값 ' + n.wCrest.toFixed(1);
-    if (!m.trend.graded) {
-      c[3].thrText = '관측 ' + Math.round(n.durMin) + '분 — 등급 없음(정상상태·동일 계측조건 전제 미충족)';
-      c[3].over = false; c[3].arrow = ''; c[3].deltaText = '';
-    }
+    c[1].foot2 = '최댓값 ' + E.fmt(n.wMax) + ' ' + unit + '(등급 없음) · 광대역 B/C 초과 ' + n.overBC + '/' + n.buckets + '버킷';
+    var _cArt = m.crest.artifact || 15;
+    c[2].foot2 = '기준 = √(2·ln N) = ' + n.cExp.toFixed(1) + ' (N=버킷당 ' + this._num(n.perBucket) + '샘플) · 최댓값 ' + n.wCrest.toFixed(1)
+      + (n.wCrest > _cArt && m.crest.value <= _cArt ? ' — 최댓값은 아티팩트 경계(' + _cArt + ') 초과 · 단발 계측 잡음 가능' : '');
+    if (!m.trend.graded) c[3].thrText = '관측 ' + Math.round(n.durMin) + '분 — 기준선 없음(정상상태·동일 계측조건 전제 미충족)';
     /* 계측 사유가 값을 어느 방향으로 틀었는지 그 카드에 적는다 — 방향을 모르면 낮은 값이
        "조용하다"로 읽힌다. 클리핑은 꼭대기를 잘라 Crest와 진폭을 함께 낮춘다. */
     if (held && held.key === 'clip') {
@@ -3485,10 +3908,19 @@ export class App extends Component {
     return this._rollForAsync(eq, 'report').then(function (rf) {
     live();
     var roll = rf.roll;
+    /* 표본이 하나도 없으면 만들지 않는다. 기간 선택 단계의 차단은 태그의 전체 데이터 범위와 겹치는지만
+       보므로, 데이터 구간 한가운데 공백이 있고 그 안을 고르면 통과한다 — 실제로 조회해 봐야 아는 경우다.
+       빈 문서에도 문서번호·판정등급이 찍혀 보관함에 남으므로 여기서 건너뛴다(실패가 아니라 건너뜀). */
+    if (!roll.length) { var e0 = new Error('선택 기간에 표본이 없습니다'); e0.__nodata = true; throw e0; }
     var anchor = rf.toMs || eq.lastSeen; // 리포트 스펙트럼도 리포트 기간의 끝에 맞춘다
     var vu = self.state.viewUnit || null; // 리포트도 현재 표시 물리량(가속도/속도/변위)으로 생성
     var c = self._detailCache[eq.id];
-    var detP = (c && c.state === 'ready' && c.anchor === anchor && c.viewUnit === vu) ? Promise.resolve(c.det) : liveDetail(E, eq, anchor, vu);
+    var _pick = c && c.pick;   // 캐시를 쓰면 화면이 고른 앵커를 그대로 승계한다
+    /* 캐시 히트 판정을 "요청한 창"으로 한다 — 앵커로 비교하면 스윕이 앵커를 옮긴 순간 항상 빗나가
+       리포트가 스윕 없는 창의 끝으로 다시 조회한다(화면은 기간 최악, 리포트는 마지막 순간). */
+    var detP = (c && c.state === 'ready' && c.reqFrom === rf.fromMs && c.reqTo === anchor && c.viewUnit === vu)
+      ? Promise.resolve(c.det)
+      : self._detailAt(eq, rf.fromMs, anchor, vu, true).then(function (r) { _pick = r.pick; return r.det; });
     // 이 태그에 실제로 적용된 구간 — 프리셋은 태그마다 창을 다시 잡으므로 리포트 탭의 genFrom/genTo(앵커 값)를 그대로 쓰면 안 된다
     var winFrom = rf.fromMs ? E.fmtDT(rf.fromMs) : S.genFrom;
     var winTo = rf.toMs ? E.fmtDT(rf.toMs) : S.genTo;
@@ -3501,31 +3933,42 @@ export class App extends Component {
         self._detailCache[eq.id] || { eqSnap: Object.assign({}, eq), snapNow: (self.data && self.data.now) || Date.now() },
         { state: 'ready', det: det, anchor: anchor, viewUnit: vu });
       self.setState({ genStep: 1 });
-      var dx = self._dx(eq, det);   // 리포트 앵커로 만든 det를 그대로 — 재조회하면 캐시가 버려진다
-
       // 기간 지표 — 상세분석 화면과 같은 함수(VC.sevMetrics). 등급·임계 규칙은 calc가 단독으로 갖는다.
+      // 판정보다 먼저 낸다 — 판정 문구가 Crest를 인용하므로 화면과 같은 지표를 넘겨야 문구가 갈리지 않는다.
       var _held = VC.gateReason(det.quality, null);   // 리포트는 분석 창만 본다(감시 상태는 별도 행에 싣는다)
       var _gate = !!_held;
       var m = VC.sevMetrics(roll, { zones: eq.zones, fs: eq.fs, gate: _gate });
+      var dx = self._dx(eq, det, m);   // 리포트 앵커로 만든 det를 그대로 — 재조회하면 캐시가 버려진다
       var n = m.n, wAvg = n.wAvg, wMax = n.wMax, wMin = n.wMin, wTrend = n.wTrend, cnt = n.cnt;
       var rP95 = m.p95.value, cP95 = m.crest.value, cExp = n.cExp;
       // 차트 계열용 원시 배열 — 지표(m)와 달리 버킷을 그대로 싣는다
       var rms = roll.map(function (r) { return r.rms; });
       var p2pV = roll.map(function (r) { return r.p2p; });
       var crestA = roll.map(function (r) { return r.crest; });
-      var sevCards = self._sevCards(m, eq.unit, _held).map(function (c) {
+      var sevCards = self._sevCards(m, eq.unit, _held, rf.stepSec).map(function (c) {
         return { label: c.label, badgeKo: c.badgeKo, value: c.valueText, unit: c.unit,
           thr: c.thrText, over: c.over, arrow: c.arrow, delta: c.deltaText, foot2: c.foot2 };
       });
       // 통계 요약은 "진단에 쓰이는 값"만 — COUNT/AVG/MIN/MAX는 스펙 패널과 중복이고 MIN은 정지 구간이 섞이면 의미가 없다.
       // 표준편차는 Crest가 큰 신호에서 스파이크 하나에 지배되므로 넣지 않는다(계측 문제를 기계 상태로 읽게 됨).
+      /* 등급을 정하는 값은 ISO 판정값(속도)인데 통계는 전부 원본 단위 광대역이다 —
+         그 숫자가 없으면 리포트를 받은 사람이 등급의 근거를 확인할 수 없다. 화면과 같은 행을 싣는다. */
+      var _rzIso = self._isoZones(eq);
+      /* 화면과 같은 규칙 — 한 칸에는 값만 넣고(칸은 한 줄이라 문장이 들어가면 잘린다),
+         문장으로 읽는 근거는 제목 아래 한 줄 요약(statSummary)으로 뺀다. */
+      var _isoRpt = det.isoRms != null
+        ? E.fmt(det.isoRms) + ' mm/s · Class ' + eq.cls + ' ' + ['A 양호', 'B 주의', 'C 위험', 'D 심각'][VC.gradeFor(det.isoRms, _rzIso)]
+        : '계산 불가';
+      var statSummary = self._statSummary(eq, det, dx, roll)
+        + (det.isoRms != null && det.isoBlocks > 1 ? '  ·  ISO 판정값 ' + det.isoBlocks + '블록 평균' : '')
+        + (det.isoRms == null ? '  ·  ISO 판정값 계산 불가 — 원시 파형 없음' : '');
       var stats = [
-        { k: '중앙값 RMS', v: E.fmt(n.rMed) + ' ' + eq.unit },
-        { k: 'P95 RMS', v: E.fmt(rP95) + ' ' + eq.unit },
-        { k: 'B/C 초과 버킷', v: n.overBC + '/' + n.buckets + ' (' + (n.buckets ? (n.overBC / n.buckets * 100).toFixed(1) : '0') + '%)' },
+        { k: 'ISO 판정값 (등급 근거)', v: _isoRpt },
+        { k: '광대역 RMS (등급 없음)', v: '중앙 ' + E.fmt(n.rMed) + ' · P95 ' + E.fmt(rP95) + ' ' + eq.unit },
         { k: 'Crest P95', v: cP95.toFixed(2) + ' (기준 ' + cExp.toFixed(1) + ')' },
         { k: '변화율', v: '×' + wTrend.toFixed(2) + (m.trend.graded ? '' : ' · 등급 없음') },
         { k: '관측 창', v: Math.round(n.durMin) + '분 · ' + n.buckets + '버킷' },
+        { k: '광대역 B/C 초과', v: n.overBC + ' (' + (n.buckets ? (n.overBC / n.buckets * 100).toFixed(1) : '0') + '%) · 기준 ' + E.fmt(eq.zones[1]) + ' ' + eq.unit },
       ];
       var specs = [
         { k: '데이터 건수', v: self._num(cnt), unit: '건' },
@@ -3573,8 +4016,18 @@ export class App extends Component {
           generatedText: E.fmtDT(genMs), logoDataURL: logo,
           specs: specs, sevMachine: eq.name + ' · Class ' + eq.cls + ' · ' + eq.rpm + ' RPM' + (det.frMeas ? ' (실측 ' + Math.round(det.frMeas.rpm) + ')' : ''),
           gradeKo: dx.gradeKo, gradeColor: dx.color,
-          zones: [E.fmt(eq.zones[0]), E.fmt(eq.zones[1]), E.fmt(eq.zones[2])], zonesUnit: eq.unit, gradeIdx: eq.grade,
-          verdict: dx.verdict, verdictSub: dx.sub, sevCards: sevCards, stats: stats,
+          zones: [E.fmt(_rzIso[0]), E.fmt(_rzIso[1]), E.fmt(_rzIso[2])], zonesUnit: 'mm/s', gradeIdx: (dx.gi != null ? dx.gi : eq.grade),
+          isoOnly: dx.isoOnly || 0,   // 등급보다 위에 있는 진동 수준 — 리포트도 그 사실을 밝혀야 한다
+          /* 커버리지를 리포트에도 싣는다 — 정비팀이 받는 문서에서 "양호"가 근거보다 강한
+             주장이 되면 안 된다. 학습을 강제하지 않는 대신 한계를 문서에 남긴다. */
+          verdict: dx.verdict,
+          /* 리포트를 받은 사람은 기간만 보고 "이 스펙트럼이 34일 중 언제 것인가"를 알 수 없다.
+             화면이 밝히는 문장을 문서에도 그대로 싣는다 — 두 곳이 다른 말을 하면 근거가 흔들린다. */
+          anchorNote: self._anchorNote({ anchor: (_pick && _pick.at) || anchor, pick: _pick }),
+          verdictSub: dx.sub + (dx.cov && dx.cov.n < dx.cov.total
+            ? ' · 판정 기준 ' + dx.cov.n + '/' + dx.cov.total + '(' + dx.cov.missing.join('·') + ' 미적용)'
+            : (dx.cov && dx.cov.extra && dx.cov.extra.length ? ' · 평소 대비 판정 적용(' + dx.cov.extra.join('·') + ')' : '')),
+          sevCards: sevCards, stats: stats, statSummary: statSummary,
           indics: det.indics,
           opinion: opinion, opinionModel: opinion ? ((S.llmModels || {})[S.llmProvider] || S.llmProvider) : null,
           actions: dx.actions,
@@ -3646,7 +4099,7 @@ export class App extends Component {
       quality: (det.quality && !det.quality.ok) ? det.quality : null,
       kurtWarn: rptSat && rptSat.flag ? rptSat.msg : null,
       levels: det.levels, isoUnit: eq.unit, isoZoneBC: E.fmt(eq.zones[1]),
-      evidence: ev.conf, negatives: ev.negatives, unexplained: ev.unexplained, missing: ev.missing, acq: ev.acq,
+      evidence: ev.conf, evidWeak: !!ev.weakTop, negatives: ev.negatives, unexplained: ev.unexplained, missing: ev.missing, acq: ev.acq,
       /* 대역 이탈은 감시가 아는 관측이라 리포트 본문까지 실어야 한다 — 위 대역 분배는 ISO 방법이라
          1 kHz까지이고, 마운팅 상한 위 대역은 결함 대역 탐색에서도 빠져 어디에도 안 남는다. */
       bandDev: (ev.bandDev && ev.bandDev.length)
@@ -3723,7 +4176,7 @@ export class App extends Component {
         };
       })(),
       // ISO 규격 판정(10–1000 Hz 대역제한)과 실시간 감시 등급(광대역)을 분리해 헤드라인 정합성 확보
-      iso: (det.isoRms != null && eq.unit === 'mm/s') ? (function () { var g = VC.gradeFor(det.isoRms, eq.zones); return { rms: E.fmt(det.isoRms), gradeIdx: g, gradeKo: E.STATUS[g].ko, color: E.STATUS[g].color, anaSec: det.anaSec ? det.anaSec.toFixed(1) : '',
+      iso: (det.isoRms != null) ? (function () { var g = VC.gradeFor(det.isoRms, self._isoZones(eq)); return { rms: E.fmt(det.isoRms), gradeIdx: g, gradeKo: E.STATUS[g].ko, color: E.STATUS[g].color, anaSec: det.anaSec ? det.anaSec.toFixed(1) : '',
         blocks: det.isoBlocks || 0, spread: det.isoSpread ? det.isoSpread.toFixed(2) : '', spreadWarn: Math.round((det.isoSpread || 1) * 100) / 100 >= 1.5 }; })() : null,
       levelsOk: det.levelsOk !== false, accelFeff: det.accelFeff || 0, accelNyqFrac: det.accelNyqFrac || 0,
       hfFrac: det.hfEnergyFrac || 0, velExHigh: det.velExHigh ? E.fmt(det.velExHigh) : '',
@@ -3961,7 +4414,11 @@ export class App extends Component {
     base.indicsTitle = this.live ? '진단 지표 (시간영역)' : '스펙트럴 진단 지표';
     base.indicsDesc = this.live ? '원시 파형 구간에서 직접 산출한 충격·에너지 특성 지표' : '스펙트럼에서 직접 산출된 충격·에너지 특성 지표';
     if (!S.ready || !this.data) return base;
-    this.data.equipment.forEach(function (e) { e.cls = S.equipCls[e.id] || e.baseCls || e.cls; e.zones = self._effZones(e); e.grade = VC.gradeFor(e.rms, e.zones); });
+    /* 등급은 판정이 만든 것(_severityOf = 세 축 최댓값)을 그대로 쓴다.
+       여기서 gradeFor(e.rms, …)로 다시 매기면 최신 1초·광대역·단일 축이 되어,
+       같은 설비가 모니터링(_severityOf)과 상세분석(e.grade)에서 다른 등급으로 보인다.
+       클래스·단위를 바꾼 직후에는 판정이 아직 안 돌았을 수 있어 _severityOf가 그 경우만 폴백한다. */
+    this.data.equipment.forEach(function (e) { e.cls = S.equipCls[e.id] || e.baseCls || e.cls; e.zones = self._effZones(e); e.grade = self._severityOf(e); });
     var eqsAll = this._activeEqs(), counts = [0, 0, 0, 0];
     /* 테이블 필터 — 모니터링 화면에서만 모집단을 좁힌다(판정 대상은 그대로다).
 
@@ -4212,6 +4669,10 @@ export class App extends Component {
          '베이스라인 — 대역 —'이 되어 잡음이 된다. "왜 이 등급인가"는 등급 칩의 원인 표시로
          답이 되고, "얼마나"는 상세분석의 몫이다. 값은 버리지 않고 호버로 내린다. */
       var _ax = [];
+      /* 결함 패턴이 맨 위 — 등급을 켜는 축이라 "왜 이 등급인가"의 답이 여기 있다.
+         못 잰 경우를 빈칸으로 두면 "정상"으로 읽히므로 사유를 적는다. */
+      if (_gs.patOk) _ax.push('결함 패턴 ' + (_gs.patOn ? '검출' : '없음') + (_gs.patR != null ? ' (격자 ' + _gs.patR.toFixed(1) + ')' : ''));
+      else if (_gs.patOk === false) _ax.push('결함 패턴 — 판정 못 함(회전수·기하·샘플레이트 확인)');
       if (_gs.blR != null && isFinite(_gs.blR)) _ax.push('베이스라인 한계 대비 ×' + _gs.blR.toFixed(1));
       if (_gs.bandR != null && isFinite(_gs.bandR)) _ax.push('대역 최대 ×' + _gs.bandR.toFixed(1));
       var valTip = '';
@@ -4289,37 +4750,26 @@ export class App extends Component {
       self.setState(patch);
     };
     // 상세분석 기간 — 앵커는 선택 태그 1개
-    base.periodPresets = this._presetChips([this._activeEq(S.selTag)], '이 태그', 'detail');
-    var custom = S.period === 'custom';
+    var _pEq = this._activeEq(S.selTag);
+    base.periodPresets = this._presetChips([_pEq], '이 태그', 'detail');
     var _dtTxt = function (s) { return String(s || '').replace('T', ' '); }; // 표시용(입력값의 T 제거)
-    /* 직접 입력은 초안 → '적용' 두 단계로 받는다. 네이티브 피커에는 확인 단추가 없어서 날짜·시·분을
-       고르는 사이 값이 서너 번 바뀌는데, 바뀔 때마다 커밋하면 중간 구간으로 조회가 나가고
-       사용자는 무엇이 반영됐는지 알 수 없다. 적용 단추가 곧 피커를 닫는 수단이기도 하다. */
-    var pFrom = S.fromD != null ? S.fromD : S.from;
-    var pTo = S.toD != null ? S.toD : S.to;
-    base.periodFrom = pFrom; base.periodTo = pTo;
-    var _fD = Date.parse(pFrom), _tD = Date.parse(pTo);
-    var dateInvalid = custom && !isNaN(_fD) && !isNaN(_tD) && _tD < _fD;
-    base.dateStyle = 'height: 34px; padding: 0 10px; border-radius: 6px; border: 1px solid ' + (dateInvalid ? '#e5484d' : 'var(--border-medium)') + '; background: var(--bg-elevated); color: var(--text-primary); font-size: 12px; font-family: var(--font-mono);' + (custom ? '' : ' opacity: .5; pointer-events: none;');
-    var pDirty = custom && ((S.fromD != null && S.fromD !== S.from) || (S.toD != null && S.toD !== S.to));
-    base.periodApplyShow = custom;
-    base.periodApplyOff = !pDirty || dateInvalid;
-    base.periodBad = dateInvalid ? '시작이 종료보다 늦습니다' : '';
-    base.periodApplyStyle = 'height: 34px; padding: 0 14px; border-radius: 6px; font-size: 12px; font-weight: 600; cursor: ' + (base.periodApplyOff ? 'default' : 'pointer')
-      + '; border: 1px solid ' + (base.periodApplyOff ? 'var(--border-default)' : 'var(--primary-base)')
-      + '; background: ' + (base.periodApplyOff ? 'var(--bg-elevated)' : 'var(--primary-base)')
-      + '; color: ' + (base.periodApplyOff ? 'var(--text-muted)' : '#fff') + ';';
-    base.onFromChange = function (ev) { if (S.period !== 'custom') return; self.setState({ fromD: ev.target.value }); };
-    base.onToChange = function (ev) { if (S.period !== 'custom') return; self.setState({ toD: ev.target.value }); };
-    base.onPeriodApply = function () {
-      if (dateInvalid) { self._toast('시작 시각이 종료보다 늦습니다', 'warn'); return; }
-      if (!pDirty) return;
-      self._closePicker();
-      self.setState({ from: pFrom, to: pTo, fromD: null, toD: null });
-      self._toast('조회 기간 적용됨 · ' + _dtTxt(pFrom) + ' ~ ' + _dtTxt(pTo));
+    /* 달력 버튼에 적는 구간. 프리셋은 지금 시각에 붙어 있고 조회도 그렇게 계산하므로(_rollWindow)
+       저장된 from/to 대신 매번 다시 잡는다 — 안 그러면 프리셋을 고른 순간의 옛 구간이 적힌다. */
+    var _pSpan = this._presetSpan([_pEq]);
+    var _pNow = this.data ? this.data.now : Date.now();
+    var pFrom = S.from, pTo = S.to;
+    if (PERIOD_H[S.period]) { pFrom = this._dtVal(_pNow - PERIOD_H[S.period] * 3600000); pTo = this._dtVal(_pNow); }
+    /* 고른 구간은 팝오버 안 '적용'을 눌러야 여기로 온다 — 날짜와 시각을 맞추는 사이에
+       중간 구간으로 조회가 나가지 않게 하려는 것이고, 이때 period도 custom으로 바뀐다. */
+    base.periodRange = {
+      from: pFrom, to: pTo, active: S.period === 'custom', showTime: false,
+      minMs: _pSpan.minMs || 0, maxMs: _pSpan.toMs || 0,
+      title: '달력에서 조회 기간을 직접 고릅니다',
+      onApply: function (f, t) {
+        self.setState({ period: 'custom', from: f, to: t });
+        self._toast('조회 기간 적용됨 · ' + _dtTxt(f) + ' ~ ' + _dtTxt(t));
+      },
     };
-    // Enter로도 확정 — 피커를 열어둔 채 키보드로 끝내는 흐름
-    base.onPeriodKey = function (ev) { if (ev.key === 'Enter') { ev.preventDefault(); base.onPeriodApply(); } };
     base.onRefresh = function () { var eq2 = self._activeEq(self.state.selTag); if (eq2) { delete self._detailCache[eq2.id]; } self._rfCache = {}; self._trCacheL = {}; self._toast('새로고침 완료 · ' + E.fmtClock(Date.now())); self.setState({ dxOpen: false, dxAiText: null }); };
     var eq = this._activeEq(S.selTag);
     if (eq) {
@@ -4339,17 +4789,39 @@ export class App extends Component {
         : '';
     /* 계측 보류 — 감시가 본 사유를 우선한다. 감시는 1초 창(+롤업 버킷), 상세는 분석 창이라
        같은 순간에도 한쪽만 걸릴 수 있는데, 화면에 붙는 문구는 판정이 실제로 멈춘 이유여야 한다.
-       둘 다 걸리지 않았을 때만 보류가 아니다(OR) — 한쪽만 보면 카드와 상세가 또 갈린다. */
-    var _held = VC.gateReason(det.quality, ((this._runState || {})[eq.table + ':' + eq.name] || {}).gate);
+       둘 다 걸리지 않았을 때만 보류가 아니다(OR) — 한쪽만 보면 카드와 상세가 또 갈린다.
+       감시 쪽 사유는 캡처 시점 값(_dc.gate)을 쓴다 — 라이브로 읽으면 스냅샷 위에서 판정만 움직인다.
+       그 사이 감시가 본 상태가 달라졌으면 화면을 바꾸는 대신 배너로 알린다(아래 detStale). */
+    var _gSnap = (_dc && 'gate' in _dc) ? _dc.gate : this._gateOf(eq);
+    var _held = VC.gateReason(det.quality, _gSnap);
+    var _gLive = this._gateOf(eq);
+    base.detStale = (_dc && _dc.state === 'ready' && (_gSnap && _gSnap.label) !== (_gLive && _gLive.label))
+      ? ('감시가 본 계측 상태가 이 스냅샷 이후 달라졌습니다 — 지금: ' + (_gLive ? _gLive.label : '이상 없음')
+        + ' / 이 화면: ' + (_gSnap ? _gSnap.label : '이상 없음') + '. 아래 판정은 캡처 시점 기준이며, 새로고침하면 반영됩니다.')
+      : '';
     // 기간 지표 — 리포트와 같은 함수(VC.sevMetrics). 화면이 따로 계산하면 같은 설비가 두 등급으로 보인다.
     var _rf = this._rollFor(eq), _roll = _rf.roll;
     var _m = VC.sevMetrics(_roll, { zones: eq.zones, fs: eq.fs, gate: !!_held });
+    /* 판정을 게이지보다 먼저 낸다 — 판정이 결함 패턴 축까지 반영한 등급(dx.gi)을 내고
+       게이지·존 막대·권고가 그걸 써야 "판정문은 결함을 지목하는데 칩은 양호"가 안 생긴다. */
+    var dx = this._dx(eq, det, _m);
+    var _gi = dx.gi != null ? dx.gi : (eq.grade || 0);
     var _n = _m.n;   // 통계 요약이 중앙값·P95로 바뀌며 평균·최소·최대 지역변수는 쓰이지 않는다
     // 버킷 cnt가 비어 있으면(폴백 집계) 롤업 단위 초를 건수로 갈음한다 — 스펙 패널의 '데이터 건수'용
     var _wCount = _n.cnt || _roll.length * _rf.stepSec;
     // 첨도 포화 경고 — 첨도 추이가 고점 대비 하락하나 RMS는 유지/상승이면 "회복 아님(말기)" 주의
     var _sat = this._kurtSat(eq);
     base.kurtWarnShow = !!_sat.flag; base.kurtWarn = _sat.msg || '';
+    /* 두 추이 차트는 원시 청크를 다시 읽어 계산하므로 롤업 차트보다 늦고, 표본이 모자라면 아예 못 낸다.
+       빈 상자만 두면 "설비가 조용하다"로 읽히므로 진행 중인지·왜 못 내는지를 카드 안에 적는다. */
+    var _tr = this._trends(eq, _roll);
+    var _trBusy = _tr && _tr.state === 'loading';
+    // 조회가 깨진 것을 "표본 부족"으로 적으면 있지도 않은 데이터 문제를 찾게 된다 — 상태를 구분한다
+    var _trErr = _tr && _tr.state === 'error';
+    var _trEmpty = function (note) { return _trBusy ? '계산 중…' : _trErr ? '계산에 실패했습니다 — 새로고침으로 다시 시도하세요' : (note || ''); };
+    base.kurtNote = (_tr && (_tr.kurt || []).length) ? '' : _trEmpty(_tr && _tr.kurtNote);
+    var _bandHas = _tr && (_tr.bands || []).some(function (s) { return (s.vals || []).some(function (v) { return v != null; }); });
+    base.bandNote = _bandHas ? '' : _trEmpty(_tr && _tr.bandNote);
     base.detTitle = eq.alias || eq.name; base.detName = eq.name; base.detUnit = eq.unit;
     base.detSpec = [
       { k: '데이터 건수', v: this._num(_wCount) + ' 건' },
@@ -4357,7 +4829,7 @@ export class App extends Component {
       { k: '샘플레이트', v: (det.raw.fs / 1000).toFixed(2) + ' kHz' },
       { k: '롤업 단위', v: _rf.label }
     ];
-    var g = E.STATUS[eq.grade];
+    var g = E.STATUS[_gi];
     /* 보류 중에는 등급어를 지우지 않고 색만 내린다 — 정비에는 "모른다"보다 "마지막으로 무엇이었나"가
        쓸모 있다. 대신 색과 게이지가 그 등급을 현재 상태로 주장하지 않게 한다. */
     base.sevHold = !!_held;
@@ -4371,33 +4843,73 @@ export class App extends Component {
     base.sevGradeKo = g.ko;
     base.sevColor = _held ? '#8a8f99' : g.color;
     base.sevSoft = _held ? 'rgba(138,143,153,0.16)' : g.soft;
+    /* 판정 문구가 충격성을 지적하면 권고도 따라가야 한다 — "계측 확인 후 재평가" 옆에
+       "정상 운전 유지"가 붙으면 읽는 사람은 둘 중 무엇을 하라는 건지 알 수 없다.
+       Crest만으로는 결함·계측이 안 갈리므로, 그 둘을 가르는 행동을 적는다. */
+    var _imp = !_held && _gi === 0 && !!(_m.crest && _m.crest.grade > 0);
     base.sevReco = _held ? '센서·케이블·마운팅 점검 후 재측정'
-      : { 0: '정상 운전 유지 · 예방관리 지속', 1: '모니터링 강화 권고', 2: '조기 점검 권고 · 측정 주기 단축', 3: '긴급 점검 · 중요도 따라 정지 검토' }[eq.grade];
+      : _imp ? '포락선에서 베어링 결함 주파수 대조 · 센서·케이블·마운팅 점검'
+      : { 0: '정상 운전 유지 · 예방관리 지속', 1: '모니터링 강화 권고', 2: '조기 점검 권고 · 측정 주기 단축', 3: '긴급 점검 · 중요도 따라 정지 검토' }[_gi];
+    /* 필수 축이 비면 그 사실을 등급 옆에 적는다 — 등급이 조용히 낮아진 것을 감추면
+       "양호"가 근거보다 강한 주장이 된다. 보강 축(학습 필요)은 반대로 "더해진 것"으로 적는다:
+       없다고 경고하면 학습이 분석의 전제인 것처럼 읽힌다. */
+    if (!_held && dx.cov) {
+      if (dx.cov.n < dx.cov.total) {
+        base.sevReco = '판정 기준 ' + dx.cov.n + '/' + dx.cov.total
+          + '(' + dx.cov.missing.join('·') + ' 미적용) · ' + base.sevReco;
+      } else if (dx.cov.extra && dx.cov.extra.length) {
+        base.sevReco = '평소 대비 판정 적용(' + dx.cov.extra.join('·') + ') · ' + base.sevReco;
+      }
+    }
     base.sevMachine = eq.name + ' · Class ' + eq.cls + ' · ' + eq.rpm + ' RPM';
+    /* 존 막대는 ISO 속도(mm/s) 눈금이다 — 원본 단위(g·μm)를 걸면 카드 값과는 맞아 보여도 규격과 어긋난다.
+       채운 칸은 **종합 등급**이고, ISO 실측값이 그보다 위 칸에 있으면 그 칸에 테두리로 따로 표시한다:
+       결함 패턴이 게이트가 된 뒤로 둘이 갈릴 수 있어서다(베어링은 멀쩡한데 진동만 높은 경우).
+       한 칸만 채우고 끝내면 "진동 8.9 mm/s인데 양호"가 화면에서 설명 없이 남는다. */
+    var _isoZ = this._isoZones(eq);
+    base.sevZoneUnit = 'mm/s';
+    /* 갈렸을 때만 설명한다 — 늘 붙이면 배경이 되어 정작 갈린 순간에 안 읽힌다. */
+    base.sevZoneNote = (dx.isoOnly > 0)
+      ? '채운 칸 = 종합 등급(베어링 결함 근거 기준) · 테두리 칸 = 진동 수준 실측 위치. '
+        + 'ISO 값이 높아도 베어링 결함 근거가 없으면 등급을 올리지 않습니다 — 원인이 베어링 밖일 수 있습니다'
+      : '';
     base.sevZones = [
-      { ko: '양호', color: '#3aa76d', range: '< ' + E.fmt(eq.zones[0]) },
-      { ko: '주의', color: '#d99a2b', range: E.fmt(eq.zones[0]) + '–' + E.fmt(eq.zones[1]) },
-      { ko: '위험', color: '#e07b39', range: E.fmt(eq.zones[1]) + '–' + E.fmt(eq.zones[2]) },
-      { ko: '심각', color: '#e5484d', range: '> ' + E.fmt(eq.zones[2]) }
+      { ko: '양호', color: '#3aa76d', range: '< ' + E.fmt(_isoZ[0]) },
+      { ko: '주의', color: '#d99a2b', range: E.fmt(_isoZ[0]) + '–' + E.fmt(_isoZ[1]) },
+      { ko: '위험', color: '#e07b39', range: E.fmt(_isoZ[1]) + '–' + E.fmt(_isoZ[2]) },
+      // 카드 값은 원본 단위(g·μm)라 존 눈금에 단위를 적지 않으면 같은 축으로 읽힌다
+      { ko: '심각', color: '#e5484d', range: '> ' + E.fmt(_isoZ[2]) + ' mm/s' }
     /* 보류 중이면 해당 칸을 채우지 않고 테두리만 남긴다 — 채운 칸은 "지금 여기"로 읽히는데,
        그 등급은 계측이 멈추기 직전 값이다. */
     ].map(function (z, i) {
-      var a = i === eq.grade, hold = a && base.sevHold;
-      return { ko: z.ko, range: z.range,
+      var a = i === _gi, hold = a && base.sevHold;
+      var isoHere = !a && i === (dx.isoOnly || -1);   // 등급보다 위에 있는 ISO 실측 위치
+      return { ko: z.ko, range: z.range, isoMark: isoHere,
         cellStyle: 'flex: 1; display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 600; box-sizing: border-box; color: '
-          + (hold ? '#8a8f99' : a ? '#fff' : 'var(--text-muted)')
+          + (hold ? '#8a8f99' : a ? '#fff' : isoHere ? z.color : 'var(--text-muted)')
           + '; background: ' + (a && !hold ? z.color : 'var(--bg-elevated)')
-          + '; border-right: 1px solid var(--border-light);' + (hold ? ' box-shadow: inset 0 0 0 1.5px #8a8f99;' : ''),
-        labStyle: 'flex: 1; text-align: center; font-size: 10px; color: var(--text-muted);' };
+          + '; border-right: 1px solid var(--border-light);'
+          + (hold ? ' box-shadow: inset 0 0 0 1.5px #8a8f99;' : isoHere ? ' box-shadow: inset 0 0 0 1.5px ' + z.color + ';' : ''),
+        labStyle: 'flex: 1; text-align: center; font-size: 10px; color: ' + (isoHere ? z.color : 'var(--text-muted)') + ';' };
     });
-    base.sevCards = this._sevCards(_m, eq.unit, _held).map(function (c) {
+    base.sevCards = this._sevCards(_m, eq.unit, _held, _rf.stepSec).map(function (c) {
       var gg = E.STATUS[c.grade];
       // 등급어가 아닌 배지(잠정·참고·계측 아티팩트)에 등급 색을 입히면 색이 등급을 주장하게 된다
+      /* 배지는 세 부류다. 등급어는 등급 색, "판정에 쓰지 마라"(잠정·참고·아티팩트)는 회색,
+         관측 사실(note — 충격성 강함)은 앰버. 관측 사실을 회색으로 두면 "무시해도 됨"으로
+         읽히는데 뜻이 정반대다 — 실제로 강한 충격이 있으니 보라는 것이다. */
+      var _bc = c.note ? '#d99a2b' : c.override ? '#8a8f99' : gg.color;
+      /* 등급 없는 카드(참고·잠정)는 색 막대를 달지 않고 배지도 채우지 않는다 — 회색으로 칠하면
+         칸이 꺼진 것처럼 읽히고, 등급이 있는 카드와의 차이도 "회색이냐 색이냐"로 흐려진다.
+         막대와 채움을 등급 있는 카드에만 남기면 둘의 구분이 색이 아니라 구조로 읽힌다.
+         관측 사실(note — 충격성 강함)은 등급이 아니어도 보라는 표시라 앰버를 그대로 채운다. */
+      var _plain = !!c.override && !c.note;
       return Object.assign({}, c, {
-        badgeColor: c.override ? '#8a8f99' : gg.color,
-        badgeSoft: c.override ? 'rgba(138,143,153,0.15)' : gg.soft,
+        badgeColor: _plain ? 'var(--text-muted)' : _bc,
+        badgeSoft: _plain ? 'transparent' : (c.note ? 'rgba(217,154,43,0.16)' : gg.soft),
+        badgeBorder: _plain ? 'var(--border-medium)' : 'transparent',
         arrowColor: c.over ? '#e5484d' : '#3aa76d',
-        style: 'border-left: 3px solid ' + (c.override ? '#8a8f99' : gg.color) + ';' });
+        style: _plain ? '' : 'border-left: 3px solid ' + _bc + ';' });
     });
     /* 통계 요약 — 리포트와 같은 지표를 쓴다. COUNT/AVG/MIN/MAX는 진동 데이터에서 오해를 만든다:
         · MIN은 정지 구간이 섞이면 그 구간의 값이라 설비 상태와 무관하다
@@ -4406,13 +4918,29 @@ export class App extends Component {
        그래서 중앙값·P95로 대표값을 잡고, 최댓값은 "몇 개 버킷이 넘었나"로 바꿔 빈도를 같이 적는다.
        Crest는 창 크기에 따라 기대치가 달라지므로 √(2·ln N) 기준을 함께 보여준다. */
     var _rP95 = _m.p95.value, _cP95 = _m.crest.value;
+    /* 등급을 정하는 값은 ISO 판정값(속도·10~1000 Hz)인데 카드는 전부 원본 단위 광대역이다.
+       그 숫자를 어디에도 안 적으면 "왜 이 등급인지"를 화면에서 확인할 수 없다.
+       B/C 초과 버킷은 원본 단위 존으로 세므로 그 기준을 이름에 밝힌다 — 존 막대의 B/C(mm/s)와 다르다. */
+    /* 칸(v)에는 값만 넣고 산출 조건·안내는 꼬리말(_full)로 뺀다 — 한 칸 한 줄이 규칙이라
+       꼬리말까지 넣으면 값이 말줄임으로 잘린다. 꼬리말은 hover 툴팁으로 남는다. */
+    var _isoTxt = det.isoRms != null
+      ? E.fmt(det.isoRms) + ' mm/s · Class ' + eq.cls + ' ' + ['A 양호', 'B 주의', 'C 위험', 'D 심각'][VC.gradeFor(det.isoRms, _isoZ)]
+      : '계산 전';
+    var _isoFull = det.isoRms != null
+      ? _isoTxt + (det.isoBlocks > 1 ? ' (' + det.isoBlocks + '블록 평균)' : '')
+      : '계산 전 — 원시 파형 조회 후 확정';
+    /* 문장으로 읽어야 하는 근거(등급 근거·이탈 축·지속 최악)와 훑어보는 숫자는 폭이 한 자릿수 배로
+       차이 난다 — 한 격자에 섞으면 숫자 칸이 문장 폭에 끌려가 잘린다. 문장은 제목 아래 한 줄 요약으로
+       빼고, 타일에는 값만 남긴다(여섯 칸 — 더 늘면 훑어보는 카드가 아니라 읽어야 하는 표가 된다). */
+    var _bcPct = _n.buckets ? (_n.overBC / _n.buckets * 100).toFixed(1) : '0';
+    base.statSummary = this._statSummary(eq, det, dx, _roll, _gi);
     base.statRows = [
-      { k: '중앙값 RMS', v: E.fmt(_n.rMed) + ' ' + eq.unit },
-      { k: 'P95 RMS', v: E.fmt(_rP95) + ' ' + eq.unit },
-      { k: 'B/C 초과 버킷', v: _n.overBC + '/' + _n.buckets + ' (' + (_n.buckets ? (_n.overBC / _n.buckets * 100).toFixed(1) : '0') + '%)' },
+      { k: 'ISO 판정값 (등급 근거)', v: _isoTxt, t: _isoFull },
+      { k: '광대역 RMS (등급 없음)', v: '중앙 ' + E.fmt(_n.rMed) + ' · P95 ' + E.fmt(_rP95) + ' ' + eq.unit },
       { k: 'Crest P95', v: _cP95.toFixed(2) + ' (기준 ' + _n.cExp.toFixed(1) + ')' },
       { k: '변화율', v: '×' + _n.wTrend.toFixed(2) + (_m.trend && _m.trend.graded ? '' : ' · 등급 없음') },
       { k: '관측 창', v: Math.round(_n.durMin) + '분 · ' + _n.buckets + '버킷' },
+      { k: '광대역 B/C 초과', v: _n.overBC + ' (' + _bcPct + '%) · 기준 ' + E.fmt(eq.zones[1]) + ' ' + eq.unit },
     ];
     base.fftMarkers = det.fft.markers.filter(function (m) { return m.kind !== 'h'; }).map(function (m) { return { label: m.label, freq: m.freq.toFixed(1) + ' Hz', color: m.kind === 'f' ? '#e5646a' : (m.kind === 'x' ? 'var(--text-tertiary)' : 'var(--text-muted)') }; });
     // FFT·스펙트로그램 주파수 범위 토글 (연동) — 전대역으로 펼칠 여지가 있을 때만 노출
@@ -4435,7 +4963,10 @@ export class App extends Component {
     if (det.kurtogram && det.kurtogram.best) {
       var _khz = function (h) { return h >= 1000 ? (h / 1000).toFixed(1) + 'kHz' : Math.round(h) + 'Hz'; };
       var _kb = det.kurtogram.best;
-      base.kurtogramHint = '가장 충격성이 강한 대역 ' + _khz(_kb.loHz) + '–' + _khz(_kb.hiHz) + ' · SK ' + _kb.sk.toFixed(1) + ' → 포락선을 이 대역으로 복조 (SK 클수록 결함 충격성↑)';
+      /* 복조 대역으로는 쓰지 않는다 — 첨도 최대화가 베어링과 무관한 대역(안티에일리어싱 잡음·
+         인버터 스위칭)에 붙잡히기 때문이다. 어느 대역이 충격적인지는 그 자체로 진단 정보라 표시만 한다. */
+      base.kurtogramHint = '가장 충격성이 강한 대역 ' + _khz(_kb.loHz) + '–' + _khz(_kb.hiHz) + ' · SK ' + _kb.sk.toFixed(1)
+        + ' · 이 대역은 복조에 쓰지 않습니다 — 첨도 최대화가 고주파 잡음 대역으로 끌려 검출이 57%→6%로 떨어집니다';
     } else base.kurtogramHint = '';
     // 표시 물리량 토글 — 가속도(g)/속도(mm/s)/변위(μm). 센서 원단위가 기본, 나머지는 적분/미분 변환.
     var _natU = det.natUnit || (this._activeEq(S.selTag) || {}).unit || 'mm/s';
@@ -4460,7 +4991,6 @@ export class App extends Component {
     base.envHint = det.envelope.hint; base.envFault = det.envelope.fault;
     base.envMarkers = det.envelope.markers.map(function (m) { return { label: m.label, freq: m.freq.toFixed(1) + ' Hz', color: m.kind === 'f' ? '#e5646a' : 'var(--text-muted)' }; });
     base.cepNote = det.cepstrum.note;
-    var dx = this._dx(eq, det);
     base.dxVerdict = dx.verdict; base.dxSub = dx.sub; base.dxGradeKo = dx.gradeKo; base.dxColor = dx.color; base.dxSoft = dx.soft;
     /* 계산 전 판정은 빈 스펙트럼 위에서 나온 것이라 "정상"으로 보인다 — 결론 자리에 결론 대신
        진행 중임을 적는다. 등급 뱃지는 RMS 실측이라 그대로 둔다(계산과 무관하게 이미 확정된 값). */
@@ -4516,9 +5046,13 @@ export class App extends Component {
       : S.evtScope === '7d' ? '최근 7일간 발생한 알람이 없습니다' : '기록된 알람이 없습니다';
     // 이벤트 내보내기(저장) 모달
     base.onOpenDownload = function () { self._openDownload(); };
-    base.dlOpen = S.dlOpen; base.csvFrom = S.csvFrom; base.csvTo = S.csvTo; base.dlFmt = S.dlFmt;
-    base.onCsvFrom = function (ev) { self.setState({ csvFrom: ev.target.value }); };
-    base.onCsvTo = function (ev) { self.setState({ csvTo: ev.target.value }); };
+    base.dlOpen = S.dlOpen; base.dlFmt = S.dlFmt;
+    // 이벤트는 날짜 단위로 내보낸다 — 종료일은 그날 23:59:59.999까지 포함(_exportEvents)
+    base.csvRange = {
+      from: S.csvFrom, to: S.csvTo, mode: 'date', full: true,
+      title: '내보낼 기간을 고릅니다',
+      onApply: function (f, t) { self.setState({ csvFrom: f, csvTo: t }); },
+    };
     base.onDlFmt = function (ev) { self.setState({ dlFmt: ev.target.value }); };
     base.onCloseDownload = function () { self.setState({ dlOpen: false }); };
     base.onDoDownload = function () { self._exportEvents(); };
@@ -4534,6 +5068,10 @@ export class App extends Component {
     base.dxOpen = !!S.dxOpen;
     var _snap = this._detailCache[S.selTag];
     base.dxStamp = this.live ? (E.fmtDT((_snap && _snap.anchor) || (_snap && _snap.snapNow) || this.data.now) + ' 시점 스냅샷 · 새로고침 시 갱신') : (E.fmtDT(this.data.now).slice(0, 10) + ' 측정 스냅샷 (0.4 s 캡처) 기준 자동 판정');
+    /* 등급이 기간 어느 시점의 것인지 화면이 스스로 밝힌다 — 이걸 안 적으면 "기간은 34일인데
+       등급은 왜 이 값이냐"를 화면만 보고는 알 수 없다. 기간 통계 카드와 등급의 범위가 다르다는
+       사실이 여기서 한 번 드러나야 한다. */
+    base.anchorNote = this._anchorNote(_snap);
     base.dxToggleLabel = S.dxOpen ? '종합 분석 접기' : '종합 분석 펼치기';
     base.onToggleDx = function () { self.setState({ dxOpen: !self.state.dxOpen }); };
     base.evtRows = fEvs.map(function (e) {
@@ -4582,37 +5120,47 @@ export class App extends Component {
     base.genPeriodNone = !_genEqs.length;
     base.genPeriodShow = !!_genEqs.length;
     base.genPeriodCustomShow = !!_genEqs.length && _genCustom;
-    base.genPeriodPresetShow = !!_genEqs.length && !_genCustom;
     base.genPeriodPresets = this._presetChips(_genEqs, '대상 태그', 'report');
     // 프리셋은 태그마다 그 태그의 최신 데이터 기준으로 창을 다시 잡으므로(_rollForAsync) 절대 시각 대신 상대 표현으로 쓴다
     base.genPeriodSummary = S.genPeriod === 'all' ? '각 태그의 데이터 전체 구간'
       : PERIOD_H[S.genPeriod] ? '각 태그의 최신 데이터 기준 · 최근 ' + ({ '1h': '1시간', '6h': '6시간', '24h': '24시간' }[S.genPeriod] || S.genPeriod)
         : '기간을 선택하세요';
-    // 상세분석과 같은 초안 → '적용' 흐름 (위 periodApply 주석 참조)
-    var gFrom = S.genFromD != null ? S.genFromD : S.genFrom;
-    var gTo = S.genToD != null ? S.genToD : S.genTo;
-    base.genPeriodFrom = gFrom; base.genPeriodTo = gTo;
+    var gFrom = S.genFrom, gTo = S.genTo;
     var _gfD = Date.parse(gFrom), _gtD = Date.parse(gTo);
-    var genDateInvalid = _genCustom && !isNaN(_gfD) && !isNaN(_gtD) && _gtD < _gfD;
-    // 좁은 사이드 칼럼용 — datetime-local은 내재 최소폭이 커서 그냥 두면 카드를 넘친다
-    base.genDateStyle = 'height: 34px; padding: 0 10px; border-radius: 6px; border: 1px solid ' + (genDateInvalid ? '#e5484d' : 'var(--border-medium)') + '; background: var(--bg-elevated); color: var(--text-primary); font-size: 12px; font-family: var(--font-mono); width: 100%; min-width: 0; box-sizing: border-box;';
-    var gDirty = _genCustom && ((S.genFromD != null && S.genFromD !== S.genFrom) || (S.genToD != null && S.genToD !== S.genTo));
-    base.genApplyOff = !gDirty || genDateInvalid;
-    base.genPeriodBad = genDateInvalid ? '시작이 종료보다 늦습니다' : '';
-    base.genApplyStyle = 'height: 32px; padding: 0 14px; border-radius: 6px; font-size: 12px; font-weight: 600; cursor: ' + (base.genApplyOff ? 'default' : 'pointer')
-      + '; border: 1px solid ' + (base.genApplyOff ? 'var(--border-default)' : 'var(--primary-base)')
-      + '; background: ' + (base.genApplyOff ? 'var(--bg-elevated)' : 'var(--primary-base)')
-      + '; color: ' + (base.genApplyOff ? 'var(--text-muted)' : '#fff') + ';';
-    base.onGenFromChange = function (ev) { self.setState({ genFromD: ev.target.value }); };
-    base.onGenToChange = function (ev) { self.setState({ genToD: ev.target.value }); };
-    base.onGenPeriodApply = function () {
-      if (genDateInvalid) { self._toast('시작 시각이 종료보다 늦습니다', 'warn'); return; }
-      if (!gDirty) return;
-      self._closePicker();
-      self.setState({ genFrom: gFrom, genTo: gTo, genFromD: null, genToD: null });
-      self._toast('리포트 기간 적용됨 · ' + _dtTxt(gFrom) + ' ~ ' + _dtTxt(gTo));
+    /* 데이터가 없는 구간으로는 리포트를 만들지 않는다. 리포트는 화면과 달리 남는 기록물이라,
+       빈 문서에 문서번호·판정등급이 찍히면 "그날 분석했고 이상 없었다"는 잘못된 기록이 된다.
+       판정은 직접 입력에만 필요하다 — 프리셋은 태그별 최신 데이터에 앵커되므로(_rollForAsync) 비지 않는다. */
+    var _genGaps = (_genCustom && !isNaN(_gfD) && !isNaN(_gtD))
+      ? _genEqs.filter(function (e) {
+        var st = e.stat;
+        if (!st || !(st.maxMs > 0)) return false; // 통계를 모르면 막지 않는다
+        return st.maxMs < _gfD || st.minMs > _gtD; // 구간과 데이터가 전혀 겹치지 않음
+      }) : [];
+    base.genNoDataAll = _genGaps.length > 0 && _genGaps.length === _genEqs.length;
+    base.genNoDataShow = _genGaps.length > 0;
+    if (base.genNoDataShow) {
+      var _g0 = _genGaps[0], _gs = _g0.stat;
+      base.genNoDataText = (base.genNoDataAll ? '선택한 기간에 데이터가 없습니다' : _genGaps.length + '개 태그는 이 기간에 데이터가 없어 제외됩니다')
+        + ' — ' + _genGaps.map(function (e) { return e.alias || e.name; }).join(', ')
+        + '. ' + (_g0.alias || _g0.name) + ' 데이터는 ' + E.fmtDT(_gs.minMs) + ' ~ ' + E.fmtDT(_gs.maxMs) + ' 구간에 있습니다.'
+        + (base.genNoDataAll ? " '전체' 프리셋을 고르면 각 태그의 데이터 구간에 맞춰집니다." : '');
+    }
+    this._genGapIds = _genGaps.map(function (e) { return e.id; });
+    /* 프리셋일 때 버튼에 절대 시각을 적지 않는 이유 — 프리셋은 태그마다 그 태그의 최신 데이터에
+       앵커되므로(_rollForAsync) 한 구간으로 적으면 다른 태그에는 거짓말이 된다. 직접 고른 구간만
+       구체적으로 적고, 프리셋일 때는 무엇을 하는 버튼인지만 밝힌다. */
+    var _gSpan = this._presetSpan(_genEqs);
+    base.genRange = {
+      from: gFrom, to: gTo, active: _genCustom, full: true, showTime: false,
+      label: _genCustom ? '' : '달력으로 직접 고르기',
+      minMs: _gSpan.minMs || 0, maxMs: _gSpan.toMs || 0,
+      title: '달력에서 리포트 기간을 직접 고릅니다',
+      onApply: function (f, t) {
+        self.setState({ genPeriod: 'custom', genFrom: f, genTo: t });
+        self._toast('리포트 기간 적용됨 · ' + _dtTxt(f) + ' ~ ' + _dtTxt(t));
+      },
     };
-    base.onGenPeriodKey = function (ev) { if (ev.key === 'Enter') { ev.preventDefault(); base.onGenPeriodApply(); } };
+    base.genPeriodNote = _genCustom ? '선택한 태그 전부에 이 구간이 그대로 적용됩니다' : base.genPeriodSummary;
     // LLM 기능 게이트 = "설정 존재"(ollama 또는 API 키) — 연결 테스트는 검증용일 뿐 게이트 아님
     // (테스트 성공 여부는 세션 한정이라 새로고침 후 토글이 잠기는 문제가 있었다)
     var llmReady = !!LLM.createLLM(this._llmCfg());
@@ -4637,7 +5185,8 @@ export class App extends Component {
     base.genCancelLabel = '생성 중단';
     base.genCancelStyle = 'width: 100%; height: 34px; margin-top: 14px; border-radius: 6px; border: 1px solid var(--border-medium); background: transparent; color: var(--text-secondary); font-size: 12px; font-weight: 600; cursor: pointer;';
     base.onCancelGen = function () { self._cancelGen(); };
-    base.genBtnStyle = 'width: 100%; height: 40px; border-radius: 6px; border: none; font-size: 13px; font-weight: 600; color: #fff; background: var(--primary-base); cursor: ' + ((S.genTags.length === 0 || S.genRunning) ? 'not-allowed' : 'pointer') + '; opacity: ' + ((S.genTags.length === 0 || S.genRunning) ? '.5' : '1') + ';';
+    var _genOff = S.genTags.length === 0 || S.genRunning || base.genNoDataAll;
+    base.genBtnStyle = 'width: 100%; height: 40px; border-radius: 6px; border: none; font-size: 13px; font-weight: 600; color: #fff; background: var(--primary-base); cursor: ' + (_genOff ? 'not-allowed' : 'pointer') + '; opacity: ' + (_genOff ? '.5' : '1') + ';';
     var RPP = 10, rpTotal = Math.max(1, Math.ceil(S.reports.length / RPP)), rpPg = Math.min(S.rpPage || 0, rpTotal - 1);
     base.rpPagerShow = S.reports.length > RPP;
     base.rpPageText = (rpPg + 1) + ' / ' + rpTotal;

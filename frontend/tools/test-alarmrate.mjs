@@ -39,6 +39,9 @@ function run(vals, { escHold = 0, recHold = 300000, winMs = 0 } = {}) {
     const v = evalAt(vals, i, winMs);
     const r = judgeTick(prev, VC.gradeFor(v, ZONES), v > LIM, t, cfg, null);
     r.events.forEach((e) => { out[e.etype] = (out[e.etype] || 0) + 1; });
+    /* 베이스라인은 이벤트를 내지 않으므로(이벤트는 10분 패턴 축 전용) 상태 온셋을 센다 —
+       재무장 히스테리시스는 그대로 살아 있고, 근거표·카드가 그 상태를 읽는다. */
+    if (r.next.b && !(prev && prev.b)) out.baseline = (out.baseline || 0) + 1;
     prev = r.next;
   }
   return out;
@@ -55,7 +58,7 @@ const real = Array.from({ length: H }, (_, i) => (i < 600 ? 2.38 : 2.95));
 // ④ 단조 상승 — 존을 하나씩 밟고 올라간다. 존마다 1건씩만
 const ramp = Array.from({ length: H }, (_, i) => 0.9 + (i / H) * 7.0);
 
-console.log('\n■ 현재 규칙(escHold 0 · baseline 홀드 없음 · 판정값 1초)');
+console.log('\n■ 현재 규칙(escHold 0 · 판정값 1초) — baseline은 이벤트가 아닌 상태 온셋 집계');
 const cur = {
   '① 짧은 스파이크(경계 위 25%)': run(spikes),
   '② 베이스라인 한계 근처 진동': run(hover),
@@ -72,10 +75,10 @@ chk((cur['① 짧은 스파이크(경계 위 25%)'].threshold || 0) === 1,
 chk((run(spikes, { recHold: 30000 }).threshold || 0) > 50,
   '① recHold를 30초로 내리면 폭주 — recHold가 유일한 방어선', 'threshold ' + run(spikes, { recHold: 30000 }).threshold);
 chk((cur['② 베이스라인 한계 근처 진동'].baseline || 0) <= 2,
-  '② 베이스라인도 재무장에 recHold를 요구 — 한계 근처 진동에 1건', 'baseline ' + cur['② 베이스라인 한계 근처 진동'].baseline);
+  '② 베이스라인도 재무장에 recHold를 요구 — 한계 근처 진동에 1건(온셋)', 'baseline ' + cur['② 베이스라인 한계 근처 진동'].baseline);
 // 초기 관측(등급 1)에서 1건 + 위험 승격에서 1건 = 2건이 정상이다
 chk((cur['③ 진짜 지속 이탈'].threshold || 0) === 2, '③ 진짜 이탈: 초기 관측 + 승격 = 2건', 'threshold ' + cur['③ 진짜 지속 이탈'].threshold);
-chk((cur['③ 진짜 지속 이탈'].baseline || 0) === 1, '③ 진짜 이탈의 baseline은 1건(억제되지 않음)', 'baseline ' + cur['③ 진짜 지속 이탈'].baseline);
+chk((cur['③ 진짜 지속 이탈'].baseline || 0) === 1, '③ 진짜 이탈의 베이스라인 온셋은 1건(억제되지 않음)', 'baseline ' + cur['③ 진짜 지속 이탈'].baseline);
 chk((cur['④ 단조 상승'].threshold || 0) === 3, '④ 단조 상승은 존마다 1건씩 3건', 'threshold ' + cur['④ 단조 상승'].threshold);
 
 /* recHold를 0으로 두면 두 경로가 함께 폭주한다 — 이 설정이 유일한 방어선임을 못 박는다.
@@ -84,7 +87,7 @@ chk((cur['④ 단조 상승'].threshold || 0) === 3, '④ 단조 상승은 존�
   const bad = { recHold: 0 };
   const a = run(spikes, bad).threshold || 0, b = run(hover, bad).baseline || 0;
   console.log('\n■ recHold 0(즉시)으로 내리면: ①스파이크 threshold %d · ②한계진동 baseline %d', a, b);
-  chk(a > 50 && b > 50, 'recHold 0은 두 경로 모두 폭주 — 기본값을 낮추면 안 된다', `${a} / ${b}`);
+  chk(a > 50 && b > 50, 'recHold 0은 두 경로 모두 폭주 — 기본값을 낮추면 안 된다(존 전이=이벤트 · 베이스라인=상태)', `${a} / ${b}`);
 }
 
 /* 재무장 대기 중 다시 이탈해도 중복 이벤트가 나지 않아야 한다(해제 후보가 취소되는 경로).
@@ -94,10 +97,10 @@ chk((cur['④ 단조 상승'].threshold || 0) === 3, '④ 단조 상승은 존�
   let prev = null, n = 0;
   for (let i = 0; i < 200; i++) {
     const r = judgeTick(prev, 1, i % 4 < 2, i * 10000, cfg, null);
-    n += r.events.filter((e) => e.etype === 'baseline').length;
+    if (r.next.b && !(prev && prev.b)) n++;
     prev = r.next;
   }
-  chk(n === 1, '재무장 대기 중 재이탈은 중복 이벤트 없음', n + '건');
+  chk(n === 1, '재무장 대기 중 재이탈은 중복 온셋 없음', n + '건');
   chk(prev.b === true, '오가는 동안 이탈 상태 유지', 'b=' + prev.b);
 }
 
@@ -108,10 +111,10 @@ chk((cur['④ 단조 상승'].threshold || 0) === 3, '④ 단조 상승은 존�
   // 이탈 → 3분 정상 → 재이탈
   [[0, true], [10000, true], [20000, false], [200000, false], [210000, true]].forEach(([t, br]) => {
     const r = judgeTick(prev, 1, br, t, cfg, null);
-    n += r.events.filter((e) => e.etype === 'baseline').length;
+    if (r.next.b && !(prev && prev.b)) n++;
     prev = r.next;
   });
-  chk(n === 2, 'recHold 넘게 정상이면 재무장 — 다음 이탈이 잡힌다', n + '건');
+  chk(n === 2, 'recHold 넘게 정상이면 재무장 — 다음 이탈 온셋이 잡힌다', n + '건');
 }
 
 // ── 구간 RMS ───────────────────────────────────────────────────────────────

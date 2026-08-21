@@ -1,16 +1,16 @@
 // 화면 템플릿 — 이 파일이 소스다. 값은 전부 app.js의 renderVals()가 만들어 v로 넘긴다.
 // (최초 골격만 프로토타입 dc.html에서 자동 변환했고, 그 변환기는 지금 없다.)
 import { html } from './html.js';
+import { DateRange } from './daterange.js';
 
 export function view(v) {
   const {
-    activeCount, revPending, onKeepAllRevived, bandIvHint, bandLegend, bandNorm, bandNormLabel, bandNormNote, bandNormReady, onBandNorm, aliasRows, aliasCountText, aliasEmpty, aliasMoreText, onAliasScroll, tagQuery, onTagQuery, blEmpty, blK, blRows, blWin, blOldCnt, capShow, capText, capHint, capRows, cardSize, cards, cardDrag, cepNote, csvFrom, csvTo, dateStyle, delRepOpen, delRepName, delRepDate, onDelRepCancel, onDelRepDo, detBearing, detSpec, detWarn, detBusy, detBusyText, detailEmptyShow, detailShow, dlFmt, dlOpen, dxActions, dxAiFallback, dxAiIdle, dxAiLoading, dxAiSections, dxAiText, dxEvidence, dxLlmModel, dxOpen, dxStamp, dxToggleLabel, dxVerdict, envHint, envMarkers, equipRows, equipFilters, equipFilterEmpty, onEquipFilterAll, equipUnsetDot, escHold, escHoldOptions, evalBasisText, evalWinBad, evalWindowSel, evalWinCustom, evalWinCustomMin, onEvalWinMin, evalLoadText, evalLoadWarn, evalWindow, evalWindowOptions, evtCapped, evtCount, evtEmpty, evtEmptyText, evtRows, evtScopeChips, evtTagFilter, evtTagOptions, evtTypeFilter, evtTypeOptions, fftMarkers, fftRangeChips, fftRangeShow, filterNotice, tblFilterShow, tblOpen, tblOptions, tblChips, tblSelCount, tblTotal, tblAllOn, tblCaption, tblTip, tblNoneShow, tblQuery, tblNoMatch, tblMore, onTblQuery, onTblOpen, onTblClose, onTblMore, onTblSelectAll, onTblClearAll, genBtnLabel, genBtnStyle, genCancelLabel, genCancelStyle, genDateStyle, genKnobStyle, genLLMNotice, genPeriodCustomShow, genPeriodFrom, genPeriodNone, genPeriodPresetShow, genPeriodPresets, genPeriodShow, genPeriodSummary, genPeriodTo, genRunning, genSelAllLabel, genSteps, genTagsCount, genToggleStyle, goSettings, gridCols, indicsDesc, indicsTitle, isMonitor, isOllama, isSettings, kpiCells, kurtWarn, kurtWarnShow, kurtogramHint, kurtogramShow, lastEventText, lineHz, lineHzHint, lineHzShow, helpTip, healthWarns, bandOn, bandInterval, bandFillNone, bandIntervalKo, onBandIvOpen, bandFill, bandFillDesc, bandFillShort, bandFillBtnStyle, bandFillBarStyle, bandFillEta, onBandFill, onBandFillStop, bandIvOpen, bandIvNext, bandIvSame, onBandIvCancel, onBandIvPick, bandIvFacts, bandIvChoices, bandIvApplyStyle, onBandIvApply, bandToggleStyle, bandKnobStyle, bandRows, bandEmpty, bandLearnedN, bandTotalN, bandFillTargets, bandFillSkipTip, bandIvOptions, onBandIvPickDirect, bandSampleText, bandSampleWarn, bandWin, bandWinOptions, onBandWin, blSampleText, llmApiKey, llmModel, llmModelPh, llmProvOptions, llmProviderSel, llmProviders, llmProvsAvail, llmStatusColor, llmStatusText, llmTestColor, llmTestIcon, llmTestMsg, llmTestShow, llmTesting, logoFilter, mcDescBody, mcDescTitle, mcOptions, mcZones, monBlNotice, monBlUnlearned, monEmpty, monEventsShow, monKnobStyle, monModeBadgeShow, monModeBadgeStyle, monModeBadgeText, monModeOptions, monPillTitle, monToggleStyle, monitorDotColor, monitorDotRing, monitorInterval, monitorText, navTabs, notReady, notifChannels, ollamaUrl, onBlK, onBlLearnAll, onBlWin, onCancelGen, onCardSize, onClearFilter, onCloseDownload, onConfirmCancel, onConfirmDiscard, onConfirmSave, onCsvFrom, onCsvTo, onDlFmt, onDoDownload, onDxExplain, onEscHold, onEvalAgg, onEvalWindow, onEvtTag, onEvtType, onFormChange, onFromChange, onGenFromChange, onGenReport, onGenSelectAll, onGenToChange, onGoSource, onBandToggle, onBandInterval, onBandLearnAll, onLineHz, onLlmKey, onLlmModel, onLlmProvPick, onMonToggle, onMonitorInterval, onOllamaUrl, onOpenDownload, onRecHold, onRefresh, onResetThresh, onRpNext, onRpPrev, onSaveSettings, onSrcDismiss, onSrcReload, onSrcSelectAll, onTagChange, onTestLLM, onToChange, onToggleDx, onToggleGenLLM, onToggleMonitor, onTotalClick, pendingNavOpen, periodFrom, periodPresets, periodTo, periodApplyShow, periodApplyOff, periodApplyStyle, periodBad, onPeriodApply, onPeriodKey,
-    genApplyOff, genApplyStyle, genPeriodBad, onGenPeriodApply, onGenPeriodKey, qualityShow, qualityText, recHold, recHoldOptions, renotifyOptions, alertRows, reportEmpty, reportEmptyShow, reportRows, reportShow, reportTags, rootClass, routeNoneWarn, routeTimings, rpBtnStyle, rpPageText, rpPagerShow, secCriteria, secData, secEquip, secLlm, secMonitor, secSource, selTag,
+    activeCount, revPending, onKeepAllRevived, bandIvHint, bandLegend, bandNorm, bandNormLabel, bandNormNote, bandNormReady, onBandNorm, aliasRows, aliasCountText, aliasEmpty, aliasMoreText, onAliasScroll, tagQuery, onTagQuery, blEmpty, blK, blRows, blWin, blOldCnt, capShow, capText, capHint, capRows, cardSize, cards, cardDrag, cepNote, csvRange, delRepOpen, delRepName, delRepDate, onDelRepCancel, onDelRepDo, detBearing, detSpec, detWarn, detStale, detBusy, detBusyText, anchorNote, sevZoneNote, detailEmptyShow, detailShow, dlFmt, dlOpen, dxActions, dxAiFallback, dxAiIdle, dxAiLoading, dxAiSections, dxAiText, dxEvidence, dxLlmModel, dxOpen, dxStamp, dxToggleLabel, dxVerdict, envHint, envMarkers, equipRows, equipFilters, equipFilterEmpty, onEquipFilterAll, equipUnsetDot, escHold, escHoldOptions, evalBasisText, evalWinBad, evalWindowSel, evalWinCustom, evalWinCustomMin, onEvalWinMin, evalLoadText, evalLoadWarn, evalWindow, evalWindowOptions, evtCapped, evtCount, evtEmpty, evtEmptyText, evtRows, evtScopeChips, evtTagFilter, evtTagOptions, evtTypeFilter, evtTypeOptions, fftMarkers, fftRangeChips, fftRangeShow, filterNotice, tblFilterShow, tblOpen, tblOptions, tblChips, tblSelCount, tblTotal, tblAllOn, tblCaption, tblTip, tblNoneShow, tblQuery, tblNoMatch, tblMore, onTblQuery, onTblOpen, onTblClose, onTblMore, onTblSelectAll, onTblClearAll, genBtnLabel, genBtnStyle, genCancelLabel, genCancelStyle, genKnobStyle, genLLMNotice, genPeriodCustomShow, genPeriodNone, genPeriodNote, genPeriodPresets, genPeriodShow, genRange, genRunning, genSelAllLabel, genSteps, genTagsCount, genNoDataShow, genNoDataText, genToggleStyle, goSettings, gridCols, indicsDesc, indicsTitle, isMonitor, isOllama, isSettings, kpiCells, kurtWarn, kurtWarnShow, kurtNote, bandNote, kurtogramHint, kurtogramShow, lastEventText, lineHz, lineHzHint, lineHzShow, helpTip, healthWarns, bandOn, bandInterval, bandFillNone, bandIntervalKo, onBandIvOpen, bandFill, bandFillDesc, bandFillShort, bandFillBtnStyle, bandFillBarStyle, bandFillEta, onBandFill, onBandFillStop, bandIvOpen, bandIvNext, bandIvSame, onBandIvCancel, onBandIvPick, bandIvFacts, bandIvChoices, bandIvApplyStyle, onBandIvApply, bandToggleStyle, bandKnobStyle, bandRows, bandEmpty, bandLearnedN, bandTotalN, bandFillTargets, bandFillSkipTip, bandIvOptions, onBandIvPickDirect, bandSampleText, bandSampleWarn, bandWin, bandWinOptions, onBandWin, blSampleText, llmApiKey, llmModel, llmModelPh, llmProvOptions, llmProviderSel, llmProviders, llmProvsAvail, llmStatusColor, llmStatusText, llmTestColor, llmTestIcon, llmTestMsg, llmTestShow, llmTesting, logoFilter, mcDescBody, mcDescTitle, mcOptions, mcZones, monBlNotice, monBlUnlearned, monEmpty, monEventsShow, monKnobStyle, monModeBadgeShow, monModeBadgeStyle, monModeBadgeText, monModeOptions, monPillTitle, monToggleStyle, monitorDotColor, monitorDotRing, monitorInterval, monitorText, navTabs, notReady, notifChannels, ollamaUrl, onBlK, onBlLearnAll, onBlWin, onCancelGen, onCardSize, onClearFilter, onCloseDownload, onConfirmCancel, onConfirmDiscard, onConfirmSave, onDlFmt, onDoDownload, onDxExplain, onEscHold, onEvalAgg, onEvalWindow, onEvtTag, onEvtType, onFormChange, onGenReport, onGenSelectAll, onGoSource, onBandToggle, onBandInterval, onBandLearnAll, onLineHz, onLlmKey, onLlmModel, onLlmProvPick, onMonToggle, onMonitorInterval, onOllamaUrl, onOpenDownload, onRecHold, onRefresh, onResetThresh, onRpNext, onRpPrev, onSaveSettings, onSrcDismiss, onSrcReload, onSrcSelectAll, onTagChange, onTestLLM, onToggleDx, onToggleGenLLM, onToggleMonitor, onTotalClick, pendingNavOpen, periodPresets, periodRange, qualityShow, qualityText, recHold, recHoldOptions, renotifyOptions, alertRows, reportEmpty, reportEmptyShow, reportRows, reportShow, reportTags, rootClass, routeNoneWarn, routeTimings, rpBtnStyle, rpPageText, rpPagerShow, secCriteria, secData, secEquip, secLlm, secMonitor, secSource, selTag,
     usageBusy, usageReady, onUsageRefresh, dataRows, dataFootnote, onGoCriteria,
     orphanOpen, orphanRows, orphanTotalText, orphanBusy, onOrphanClose, onOrphanAll,
-    purgePickShow, purgePickTitle, purgeFrom, purgeTo, purgeHaveText, purgePickReady, onPurgeFrom, onPurgeTo, onPurgePickCancel, onPurgePickNext,
+    purgePickShow, purgePickTitle, purgeRange, purgeHaveText, purgePickReady, onPurgePickCancel, onPurgePickNext,
     purgeShow, purgeTitle, purgeSub, purgeWhen, purgeCounting, purgeN, purgeKeep, purgeNone,
-    purgeAsk, purgeBullets, purgeTable, purgeTyped, purgeTypeOk, onPurgeType, purgeReady, purgeBtnLabel, purgeRunning, onPurgeCancel, onPurgeConfirm, serverMon, setNav, settingsActiveStyle, settingsDirty, sevCards, sevColor, sevGradeKo, sevHold, sevHoldDetail, sevHoldNote, sevHoldWhy, sevLabel, sevMachine, sevReco, sevZones,showAdvanced, specIndics, srcNotice, srcSelAllLabel, srcSelCount, srcTables, srcTotal, statRows, stopClick, sumTotal, tagOptions, themeIcon, threshRows, toast, toastIcon, toastMsg, toastStyle, toggleTheme, totalStyle, unitChips, unitOptions
+    purgeAsk, purgeBullets, purgeTable, purgeTyped, purgeTypeOk, onPurgeType, purgeReady, purgeBtnLabel, purgeRunning, onPurgeCancel, onPurgeConfirm, serverMon, setNav, settingsActiveStyle, settingsDirty, sevCards, sevColor, sevGradeKo, sevHold, sevHoldDetail, sevHoldNote, sevHoldWhy, sevLabel, sevMachine, sevReco, sevZones,showAdvanced, specIndics, srcNotice, srcSelAllLabel, srcSelCount, srcTables, srcTotal, statSummary, statRows, stopClick, sumTotal, tagOptions, themeIcon, threshRows, toast, toastIcon, toastMsg, toastStyle, toggleTheme, totalStyle, unitChips, unitOptions
   } = v;
   return html`
 <div class=${rootClass} style="height: 100vh; display: flex; flex-direction: column; background: var(--bg-primary); color: var(--text-primary); font-family: var(--font-sans); font-size: 13px; overflow: hidden;">
@@ -204,11 +204,7 @@ export function view(v) {
           <div style="display: flex; background: var(--bg-elevated); border: 1px solid var(--border-default); border-radius: 6px; overflow: hidden;">
             ${(periodPresets || []).map((p) => html`<button onClick=${p.onClick} title=${p.title} style=${p.style}>${p.label}</button>`)}
           </div>
-          <input type="datetime-local" value=${periodFrom} onChange=${onFromChange} onKeyDown=${onPeriodKey} style=${dateStyle} />
-          <span style="color: var(--text-muted);">~</span>
-          <input type="datetime-local" value=${periodTo} onChange=${onToChange} onKeyDown=${onPeriodKey} style=${dateStyle} />
-          ${(periodApplyShow) ? html`<button onClick=${onPeriodApply} disabled=${periodApplyOff} title="고른 기간을 조회에 반영합니다 (Enter)" style=${periodApplyStyle}>적용</button>` : null}
-          ${(periodBad) ? html`<span style="font-size: 11px; color: var(--danger);">${periodBad}</span>` : null}
+          <${DateRange} ...${periodRange} />
           <button onClick=${onRefresh} style="margin-left: auto; display: inline-flex; align-items: center; gap: 6px; height: 34px; padding: 0 14px; border-radius: 6px; border: 1px solid var(--border-default); background: var(--bg-elevated); color: var(--text-secondary); font-size: 12px; font-weight: 500; cursor: pointer;"><span class="codicon codicon-refresh" style="font-size: 14px;"></span>새로고침</button>
         </div>
 
@@ -223,6 +219,14 @@ export function view(v) {
           <div style="display: flex; align-items: flex-start; gap: 10px; padding: 12px 14px; margin-bottom: 14px; border-radius: 8px; background: rgba(199,125,10,.1); border: 1px solid rgba(199,125,10,.4);">
             <span class="codicon codicon-warning" style="font-size: 14px; color: var(--warning); margin-top: 1px;"></span>
             <div style="font-size: 12.5px; color: var(--text-secondary); line-height: 1.6;">${detWarn}</div>
+          </div>
+        ` : null}
+
+        ${(detStale) ? html`
+          <div style="display: flex; align-items: flex-start; gap: 10px; padding: 12px 14px; margin-bottom: 14px; border-radius: 8px; background: rgba(0,108,210,.10); border: 1px solid var(--primary-light);">
+            <span class="codicon codicon-history" style="font-size: 14px; color: var(--primary-light); margin-top: 1px;"></span>
+            <div style="flex: 1; font-size: 12.5px; color: var(--text-secondary); line-height: 1.6;">${detStale}</div>
+            <button onClick=${onRefresh} style="flex-shrink: 0; height: 26px; padding: 0 12px; border-radius: 5px; border: 1px solid var(--primary-light); background: transparent; color: var(--primary-light); font-size: 11px; font-weight: 600; cursor: pointer;">새로고침</button>
           </div>
         ` : null}
 
@@ -262,20 +266,23 @@ export function view(v) {
               ${(sevZones || []).map((z) => html`<div style=${z.cellStyle}>${z.ko}</div>`)}
             </div>
             <div style="display: flex; margin-top: 4px;">
-              ${(sevZones || []).map((z) => html`<div style=${z.labStyle}>${z.range}</div>`)}
+              ${(sevZones || []).map((z) => html`<div style=${z.labStyle}>${z.isoMark ? '▲ ' : ''}${z.range}</div>`)}
             </div>
+            ${sevZoneNote ? html`<div style="margin-top: 7px; font-size: 11px; color: var(--text-muted); line-height: 1.5;">${sevZoneNote}</div>` : null}
             <div style="display: flex; align-items: center; gap: 12px; margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--border-light); flex-wrap: wrap;">
               <div style="flex: 1 1 240px; min-width: 0; display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap;">
                 <span style="font-size: 13px; font-weight: 600; color: var(--text-primary);">${dxVerdict}</span>
                 <span style="font-size: 12px; color: var(--text-tertiary);">${sevReco}</span>
+                ${anchorNote ? html`<span style="font-size: 11px; color: var(--text-muted); font-family: var(--font-mono);">${anchorNote}</span>` : null}
               </div>
               <button onClick=${onToggleDx} style="flex-shrink: 0; height: 28px; padding: 0 12px; border-radius: 5px; border: 1px solid var(--border-medium); background: transparent; color: var(--text-secondary); font-size: 11px; font-weight: 600; cursor: pointer;" class="vhov3">${dxToggleLabel}</button>
             </div>
           </div>
+          <div style="font-size: 11px; color: var(--text-muted); margin-bottom: 7px;">기간 통계 — 선택한 기간 전체의 롤업 버킷에서 냅니다. 등급이 아닙니다(등급은 위 종합 판정)</div>
           <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px;">
             ${(sevCards || []).map((c) => html`
               <div style="padding: 13px 14px; border: 1px solid var(--border-light); border-radius: 9px; ${c.style}">
-                <div style="margin-bottom: 8px; font-size: 12px; font-weight: 500; color: var(--text-secondary);">${c.label} <span style="display: inline-block; padding: 1px 6px; border-radius: 3px; font-size: 9px; font-weight: 700; letter-spacing: .3px; color: ${c.badgeColor}; background: ${c.badgeSoft}; margin-left: 4px; vertical-align: middle;">${c.badgeKo}</span></div>
+                <div style="margin-bottom: 8px; font-size: 12px; font-weight: 500; color: var(--text-secondary);">${c.label}${c.badgeKo ? html`<span style="display: inline-block; padding: 1px 6px; border-radius: 3px; font-size: 9px; font-weight: 700; letter-spacing: .3px; color: ${c.badgeColor}; background: ${c.badgeSoft}; border: 1px solid ${c.badgeBorder}; margin-left: 4px; vertical-align: middle;">${c.badgeKo}</span>` : null}</div>
                 <div style="font-size: 26px; font-weight: 700; color: var(--text-primary); letter-spacing: -0.5px; margin-bottom: 8px; font-variant-numeric: tabular-nums;">${c.valueText}<span style="font-size: 12px; font-weight: 500; color: var(--text-muted); margin-left: 2px;">${c.unit}</span></div>
                 <div style="display: flex; justify-content: space-between; align-items: center; font-size: 11px;">
                   <span style="color: var(--text-muted);">${c.thrText}</span>
@@ -323,13 +330,20 @@ export function view(v) {
 
         <div style="background: var(--bg-secondary); border: 1px solid var(--border-default); border-radius: 8px; padding: 16px 18px; margin-bottom: 14px;">
           <div style="display: flex; align-items: center; gap: 9px; font-size: 15px; font-weight: 600; color: var(--text-primary); margin-bottom: 12px;"><span style="width: 3px; height: 15px; border-radius: 2px; background: var(--primary-base);"></span>통계 요약</div>
-          <div style="display: grid; grid-template-columns: repeat(${(statRows || []).length || 1}, minmax(150px, 1fr)); gap: 1px; background: var(--border-light); border: 1px solid var(--border-light); border-radius: 6px; overflow-x: auto;">
-            ${(statRows || []).map((r) => html`
-              <div style="background: var(--bg-secondary); padding: 13px 16px;">
-                <div style="font-size: 11px; color: var(--text-muted);">${r.k}</div>
-                <div style="margin-top: 5px; font-size: 16px; font-weight: 600; color: var(--text-primary); font-family: var(--font-mono);">${r.v}</div>
+          ${(statSummary) ? html`<div title=${statSummary} style="font-size: 12px; color: var(--text-muted); margin: -4px 0 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${statSummary}</div>` : null}
+          <!-- 한 칸 한 줄·스크롤 없음이 규칙이다: 칸은 제 내용 폭으로 시작해 남는 폭을 나눠 갖고(flex auto),
+               폭이 모자라면 넓은 칸부터 줄어들며 말줄임 — 접히지도, 가로로 넘치지도 않는다(전문은 hover). -->
+          <div style="display: flex; flex-direction: column; gap: 1px; background: var(--border-light); border: 1px solid var(--border-light); border-radius: 6px; overflow: hidden;">
+            ${[(statRows || []).filter((r) => r.wide), (statRows || []).filter((r) => !r.wide)].map((grp, gi) => (grp.length ? html`
+              <div style="display: flex; gap: 1px;">
+                ${grp.map((r) => html`
+                  <div style="flex: 1 1 auto; min-width: 0; background: ${gi === 0 ? 'var(--bg-elevated)' : 'var(--bg-secondary)'}; padding: 13px 16px;">
+                    <div title=${r.k} style="font-size: 11px; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${r.k}</div>
+                    <div title=${r.t || r.v} style="margin-top: 5px; font-size: 15px; font-weight: 600; line-height: 1.45; color: var(--text-primary); font-family: var(--font-mono); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${r.v}</div>
+                  </div>
+                `)}
               </div>
-            `)}
+            ` : null))}
           </div>
         </div>
 
@@ -370,6 +384,7 @@ export function view(v) {
           <div style="background: var(--bg-primary); border: 1px solid var(--border-default); border-radius: 8px; padding: 16px 18px;">
             <div style="display: flex; align-items: center; gap: 9px; font-size: 15px; font-weight: 600; color: var(--text-primary); margin-bottom: 12px;"><span style="width: 3px; height: 15px; border-radius: 2px; background: var(--primary-base);"></span>첨도 추이 <span style="font-weight: 500; color: var(--text-muted); font-size: 13px;">Kurtosis</span></div>
             <div style="font-size: 12px; color: var(--text-muted); margin: -4px 0 12px;">파형 뾰족함의 통계 지표 · 3 = 정상(정규분포) · 클수록 충격성 결함</div>
+            ${(kurtNote) ? html`<div style="font-size: 11.5px; color: var(--text-muted); padding: 10px 12px; border-radius: 6px; background: var(--bg-secondary); border: 1px solid var(--border-light); line-height: 1.6; margin-bottom: 10px;">${kurtNote}</div>` : null}
             <div style="position: relative;">
               <canvas id="vc-kurt" style="width: 100%; height: 220px; display: block;"></canvas>
               <div id="vt-kurt" style="position: absolute; display: none; pointer-events: none; z-index: 10; background: var(--surface-menu); color: var(--text-primary); border: 1px solid var(--border-medium); border-radius: 4px; padding: 6px 9px; font-size: 12px; line-height: 1.55; white-space: nowrap; box-shadow: 0 4px 12px rgba(0,0,0,.3); font-family: var(--font-mono);"></div>
@@ -385,6 +400,7 @@ export function view(v) {
               <button onClick=${onBandNorm} title=${bandNormReady ? '' : '대역 베이스라인 학습이 필요합니다'} style="height: 26px; padding: 0 11px; border-radius: 6px; font-size: 11.5px; font-weight: 600; white-space: nowrap; font-family: inherit; cursor: pointer; opacity: ${(bandNorm || bandNormReady) ? 1 : .5}; border: 1px solid ${bandNorm ? 'var(--primary-base)' : 'var(--border-medium)'}; background: ${bandNorm ? 'rgba(0,108,210,.1)' : 'var(--bg-elevated)'}; color: ${bandNorm ? 'var(--primary-light)' : 'var(--text-secondary)'};">${bandNormLabel}</button>
             </div>
             ${(bandNormNote) ? html`<div style="font-size: 11px; color: var(--text-muted); margin: -6px 0 10px;">${bandNormNote}</div>` : null}
+            ${(bandNote) ? html`<div style="font-size: 11.5px; color: var(--text-muted); padding: 10px 12px; border-radius: 6px; background: var(--bg-secondary); border: 1px solid var(--border-light); line-height: 1.6; margin-bottom: 10px;">${bandNote}</div>` : null}
             <div style="position: relative;">
               <canvas id="vc-band" style="width: 100%; height: 220px; display: block;"></canvas>
             </div>
@@ -445,7 +461,7 @@ export function view(v) {
 
         ${(kurtogramShow) ? html`
         <div style="background: var(--bg-primary); border: 1px solid var(--border-default); border-radius: 8px; padding: 16px 18px; margin-bottom: 14px;">
-          <div style="display: flex; align-items: center; gap: 9px; font-size: 15px; font-weight: 600; color: var(--text-primary); margin-bottom: 4px;"><span style="width: 3px; height: 15px; border-radius: 2px; background: var(--primary-base);"></span>결함 대역 탐색 <span style="font-weight: 500; color: var(--text-muted); font-size: 13px;">Kurtogram · Spectral Kurtosis</span></div>
+          <div style="display: flex; align-items: center; gap: 9px; font-size: 15px; font-weight: 600; color: var(--text-primary); margin-bottom: 4px;"><span style="width: 3px; height: 15px; border-radius: 2px; background: var(--primary-base);"></span>대역별 충격성 <span style="font-weight: 500; color: var(--text-muted); font-size: 13px;">Kurtogram · Spectral Kurtosis</span></div>
           <div style="font-size: 12px; color: var(--text-muted); margin-bottom: 12px;">${kurtogramHint}</div>
           <div style="position: relative;"><canvas id="vc-kurtogram" style="width: 100%; height: 180px; display: block;"></canvas></div>
         </div>
@@ -563,31 +579,23 @@ export function view(v) {
               <div style="display: flex; align-items: center; gap: 5px; margin-bottom: 16px; font-size: 11px; color: var(--text-muted);"><span class="codicon codicon-info" style="font-size: 12px;"></span>대상 태그를 선택하면 기간을 정할 수 있습니다</div>
             ` : null}
             ${(genPeriodShow) ? html`
-              <div style="display: flex; background: var(--bg-elevated); border: 1px solid var(--border-default); border-radius: 6px; overflow: hidden; margin-bottom: 10px; width: fit-content;">
+              <div style="display: flex; background: var(--bg-elevated); border: 1px solid var(--border-default); border-radius: 6px; overflow: hidden; margin-bottom: 8px; width: fit-content;">
                 ${(genPeriodPresets || []).map((p) => html`<button onClick=${p.onClick} title=${p.title} style=${p.style}>${p.label}</button>`)}
               </div>
-            ` : null}
-            ${(genPeriodCustomShow) ? html`
-              <div style="display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: 6px 8px; margin-bottom: 8px;">
-                <span style="font-size: 11px; color: var(--text-muted);">시작</span>
-                <input type="datetime-local" value=${genPeriodFrom} onChange=${onGenFromChange} onKeyDown=${onGenPeriodKey} style=${genDateStyle} />
-                <span style="font-size: 11px; color: var(--text-muted);">종료</span>
-                <input type="datetime-local" value=${genPeriodTo} onChange=${onGenToChange} onKeyDown=${onGenPeriodKey} style=${genDateStyle} />
-              </div>
-              <div style="display: flex; align-items: center; justify-content: flex-end; gap: 8px; margin-bottom: 8px;">
-                ${(genPeriodBad) ? html`<span style="font-size: 11px; color: var(--danger); margin-right: auto;">${genPeriodBad}</span>` : null}
-                <button onClick=${onGenPeriodApply} disabled=${genApplyOff} title="고른 기간을 리포트에 반영합니다 (Enter)" style=${genApplyStyle}>적용</button>
-              </div>
-              <div style="display: flex; align-items: center; gap: 5px; margin-bottom: 16px; font-size: 11px; color: var(--text-muted);"><span class="codicon codicon-info" style="font-size: 12px;"></span>선택한 태그 전부에 이 구간이 그대로 적용됩니다</div>
-            ` : null}
-            ${(genPeriodPresetShow) ? html`
-              <div style="display: flex; align-items: center; gap: 5px; margin-bottom: 16px; font-size: 11px; color: var(--text-muted);"><span class="codicon codicon-calendar" style="font-size: 12px;"></span>${genPeriodSummary}</div>
+              <div style="margin-bottom: 8px;"><${DateRange} ...${genRange} /></div>
+              <div style="display: flex; align-items: center; gap: 5px; margin-bottom: 16px; font-size: 11px; color: var(--text-muted);"><span class="codicon codicon-${genPeriodCustomShow ? 'info' : 'calendar'}" style="font-size: 12px;"></span>${genPeriodNote}</div>
             ` : null}
             <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 6px;">
               <div style=${genToggleStyle} onClick=${onToggleGenLLM}><div style=${genKnobStyle}></div></div>
               <span style="font-size: 13px; color: var(--text-secondary);">LLM 소견 포함</span>
               ${(llmProvsAvail) ? html`<select value=${llmProviderSel} onChange=${onLlmProvPick} style="height: 28px; padding: 0 8px; border-radius: 6px; border: 1px solid var(--border-medium); background: var(--bg-elevated); color: var(--text-primary); font-size: 12px; cursor: pointer;"><option value="">— 프로바이더 —</option>${(llmProvOptions || []).map((o) => html`<option value=${o.id}>${o.label}</option>`)}</select>` : null}
             </div>
+            ${(genNoDataShow) ? html`
+              <div style="display: flex; align-items: flex-start; gap: 9px; padding: 11px 13px; margin-bottom: 10px; border-radius: 7px; background: rgba(199,125,10,.1); border: 1px solid rgba(199,125,10,.4);">
+                <span class="codicon codicon-warning" style="font-size: 14px; color: var(--warning); margin-top: 1px; flex-shrink: 0;"></span>
+                <div style="font-size: 11.5px; color: var(--text-secondary); line-height: 1.6;">${genNoDataText}</div>
+              </div>
+            ` : null}
             ${(genLLMNotice) ? html`<div style="font-size: 11px; color: var(--warning); margin-bottom: 6px;">${genLLMNotice}</div>` : null}
             <div style="margin-top: 14px;"></div>
             <button onClick=${onGenReport} style=${genBtnStyle}><span class="codicon codicon-file-add" style="font-size: 14px; vertical-align: -2px; margin-right: 6px;"></span>${genBtnLabel}</button>
@@ -1017,7 +1025,7 @@ export function view(v) {
               ${/* 구획은 소제목 + 윗선으로 나눈다 — 다른 카드가 전부 그 방식이라 상자를 겹치면 혼자 튄다.
                    추출(값을 만드는 일) · 학습(기준을 잡는 일) · 채널 상태 순. */ ''}
               <div style="display: flex; align-items: center; gap: 10px; margin-top: 16px;">
-                <span style="font-size: 13px; font-weight: 600; color: var(--text-primary);">대역 추출</span>
+                <span style="font-size: 13px; font-weight: 600; color: var(--text-primary);">대역·결함 패턴 추출</span>
                 <div style="margin-left: auto;"><div style=${bandToggleStyle} onClick=${onBandToggle}><div style=${bandKnobStyle}></div></div></div>
               </div>
               <div style="display: flex; align-items: center; gap: 10px; margin-top: 10px;">
@@ -1113,12 +1121,12 @@ export function view(v) {
                 <div>
                   <label style="display: block; font-size: 12px; font-weight: 600; color: var(--text-tertiary); margin-bottom: 7px;">진입 확인 시간</label>
                   <select value=${escHold} onChange=${onEscHold} style="height: 34px; width: 100%; padding: 0 10px; border-radius: 6px; border: 1px solid var(--border-medium); background: var(--bg-elevated); color: var(--text-primary); font-size: 13px;">${(escHoldOptions || []).map((o) => html`<option value=${o.v}>${o.l}</option>`)}</select>
-                  <div style="font-size: 10px; color: var(--text-muted); margin-top: 5px;">등급이 나빠진 상태가 해당 옵션 시간 이상 지속돼야 알람 — 순간 스파이크 무시</div>
+                  <div style="font-size: 10px; color: var(--text-muted); margin-top: 5px;">등급이 나빠진 상태가 해당 옵션 시간 이상 지속돼야 알람 — 순간 스파이크 무시<br/><b style="color: var(--text-tertiary);">베어링 결함 등급은 추출 주기(기본 10분)에 묶여 실제로는 10~20분이 걸립니다</b> — 이 설정은 진폭·정지·계측 이벤트에 그대로 적용됩니다</div>
                 </div>
                 <div>
                   <label style="display: block; font-size: 12px; font-weight: 600; color: var(--text-tertiary); margin-bottom: 7px;">복귀 유지 시간</label>
                   <select value=${recHold} onChange=${onRecHold} style="height: 34px; width: 100%; padding: 0 10px; border-radius: 6px; border: 1px solid var(--border-medium); background: var(--bg-elevated); color: var(--text-primary); font-size: 13px;">${(recHoldOptions || []).map((o) => html`<option value=${o.v}>${o.l}</option>`)}</select>
-                  <div style="font-size: 10px; color: var(--text-muted); margin-top: 5px;">주의·위험·심각 → 정상으로 바뀐 뒤 정상이 해당 옵션 시간 이상 유지돼야 '정상 복귀' 알람 — 경계 플래핑 방지</div>
+                  <div style="font-size: 10px; color: var(--text-muted); margin-top: 5px;">주의·위험·심각 → 정상으로 바뀐 뒤 정상이 해당 옵션 시간 이상 유지돼야 '정상 복귀' 알람 — 경계 플래핑 방지<br/><b style="color: var(--text-tertiary);">진입 확인과 같은 이유로 베어링 결함 복귀도 추출 주기를 따릅니다</b></div>
                 </div>
               </div>
               <!-- 채널·심각도 표와 한 카드 — 언제 낼지와 어디로 보낼지를 나눠 두면 같은 심각도 3행을 두 번 그리게 된다 -->
@@ -1250,11 +1258,7 @@ export function view(v) {
           </div>
           <div style="padding: 18px;">
             <label style="display: block; font-size: 12px; font-weight: 600; color: var(--text-tertiary); margin-bottom: 7px;">기간</label>
-            <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 16px;">
-              <input type="date" value=${csvFrom} onChange=${onCsvFrom} style="flex: 1; height: 34px; padding: 0 10px; border-radius: 6px; border: 1px solid var(--border-medium); background: var(--bg-elevated); color: var(--text-primary); font-size: 13px; font-family: var(--font-mono);" />
-              <span style="color: var(--text-muted);">~</span>
-              <input type="date" value=${csvTo} onChange=${onCsvTo} style="flex: 1; height: 34px; padding: 0 10px; border-radius: 6px; border: 1px solid var(--border-medium); background: var(--bg-elevated); color: var(--text-primary); font-size: 13px; font-family: var(--font-mono);" />
-            </div>
+            <div style="margin-bottom: 16px;"><${DateRange} ...${csvRange} /></div>
             <label style="display: block; font-size: 12px; font-weight: 600; color: var(--text-tertiary); margin-bottom: 7px;">파일 형식</label>
             <select value=${dlFmt} onChange=${onDlFmt} style="width: 100%; height: 34px; padding: 0 10px; border-radius: 6px; border: 1px solid var(--border-medium); background: var(--bg-elevated); color: var(--text-primary); font-size: 13px; margin-bottom: 20px;"><option value="csv">CSV (Excel)</option><option value="json">JSON</option></select>
             <div style="display: flex; gap: 8px;">
@@ -1288,7 +1292,7 @@ export function view(v) {
     ${(bandIvOpen) ? html`
       <div style="position: fixed; inset: 0; z-index: 200; background: var(--overlay-scrim); display: flex; align-items: center; justify-content: center; padding: 24px;">
         <div style="width: 480px; max-height: 100%; overflow: auto; background: var(--bg-elevated); border: 1px solid var(--border-default); border-radius: 10px; padding: 22px; box-shadow: 0 8px 40px rgba(0,0,0,.5);">
-          <div style="font-size: 15px; font-weight: 600; color: var(--text-primary); margin-bottom: 14px;">대역 추출 주기 변경</div>
+          <div style="font-size: 15px; font-weight: 600; color: var(--text-primary); margin-bottom: 14px;">대역·결함 패턴 추출 주기 변경</div>
           <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 14px;">
             <span style="font-size: 13px; font-family: var(--font-mono); color: var(--text-muted);">${bandIntervalKo}</span>
             <span class="codicon codicon-arrow-right" style="font-size: 12px; color: var(--text-muted);"></span>
@@ -1351,11 +1355,7 @@ export function view(v) {
           <div style="font-size: 15px; font-weight: 600; color: var(--text-primary); margin-bottom: 4px;">${purgePickTitle}</div>
           <div style="font-size: 12px; color: var(--text-muted); margin-bottom: 16px;">지울 기간을 정하세요. 다음 화면에서 지워질 양을 확인한 뒤 실행합니다.</div>
           ${(purgeHaveText) ? html`<div style="font-size: 11px; color: var(--text-muted); font-family: var(--font-mono); margin-bottom: 12px;">${purgeHaveText}</div>` : null}
-          <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 20px; flex-wrap: wrap;">
-            <input type="date" value=${purgeFrom} onChange=${onPurgeFrom} style="flex: 1; min-width: 130px; height: 32px; padding: 0 10px; border-radius: 6px; border: 1px solid var(--border-medium); background: var(--bg-input-dark); color: var(--text-primary); font-size: 13px; font-family: var(--font-mono);" />
-            <span style="color: var(--text-muted);">~</span>
-            <input type="date" value=${purgeTo} onChange=${onPurgeTo} style="flex: 1; min-width: 130px; height: 32px; padding: 0 10px; border-radius: 6px; border: 1px solid var(--border-medium); background: var(--bg-input-dark); color: var(--text-primary); font-size: 13px; font-family: var(--font-mono);" />
-          </div>
+          <div style="margin-bottom: 20px;"><${DateRange} ...${purgeRange} /></div>
           <div style="display: flex; gap: 8px; justify-content: flex-end;">
             <button onClick=${onPurgePickCancel} style="height: 34px; padding: 0 14px; border-radius: 6px; border: 1px solid var(--border-default); background: transparent; color: var(--text-secondary); font-size: 13px; cursor: pointer;">취소</button>
             <button onClick=${onPurgePickNext} disabled=${!purgePickReady} style="height: 34px; padding: 0 14px; border-radius: 6px; border: none; font-size: 13px; font-weight: 600; color: #fff; background: ${purgePickReady ? 'var(--primary-base)' : 'var(--text-muted)'}; cursor: ${purgePickReady ? 'pointer' : 'not-allowed'}; opacity: ${purgePickReady ? '1' : '.55'};">선택</button>

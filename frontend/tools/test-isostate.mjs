@@ -46,12 +46,14 @@ const line = (needle) => {
 };
 /* _lim0·_near는 계측 게이트 때문에 붙었다 — 베이스라인 쪽으로 알람이 날 상황이면 원본을 받아
    계측을 같이 확인한다(ISO 계산과 같은 샘플). 호출부를 떼어낼 때 이 줄들도 같이 와야 한다. */
+/* rg는 이제 결함 패턴 게이트를 거친 값이라, 이 테스트가 보는 것은 그 앞의 ISO 등급(_isoG)이다.
+   게이트 자체는 test-sevgrade가 잠근다 — 여기서는 ISO 계산·보류·TTL만 본다. */
 const BODY = [src, line('var _lim0 = baselineLimit('), line('var _near ='),
   line('var _iso = isoValue('), line('var _hold ='), line('var val = _hold ?'),
-  line('var rg = _hold ?'), line('if(_iso.fresh){ res.next.iso')].join('\n');
+  line('var _isoG = _hold ?'), line('if(_iso.fresh){ res.next.iso')].join('\n');
 const step = new Function('now', 'prev', 'db', 'esc', 'dtms', 'LAST', 'WVAL', 'isoNeeded', 'isoSkippable', 'isoRms',
   'baselineLimit', 'gateFromRaw', 'GRAW', 'impactEvidence', 'IMP',
-  't', 'wide', 'z', 'key', 'res', BODY + '\nreturn {val:val, rg:rg, hold:_hold, fresh:_iso.fresh, next:res.next};');
+  't', 'wide', 'z', 'key', 'res', BODY + '\nreturn {val:val, rg:_isoG, hold:_hold, fresh:_iso.fresh, next:res.next};');
 
 // ── 스텁 — DB만 갈아끼운다 ────────────────────────────────────────────────
 const KEY = 'T:A', TAG = { tbl: 'T', tag: 'A', fs: FS, zones: Z };

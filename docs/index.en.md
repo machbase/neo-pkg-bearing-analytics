@@ -40,15 +40,20 @@ There are three main tabs plus a Settings (⚙) entry point. The header also hol
 
 ## How detection works
 
-Every tag is evaluated from three angles at once, and **the worst result becomes that machine's grade**.
+**The fault pattern switches the grade on; the ISO zone sets its height.**
 
-| Criterion | Question | Needs training |
-| :--- | :--- | :---: |
-| ISO zone | Is it absolutely high by international standard? | No |
-| Baseline | Is it high compared to this machine's own normal? | Yes |
-| Band energy | Has one specific frequency band jumped? | Yes |
+| Criterion | Question | Role | Needs training |
+| :--- | :--- | :--- | :---: |
+| **Fault pattern** | Does evidence stand at the bearing fault frequencies? | **gate** — without it the grade stays good | No |
+| **ISO zone** | Is it absolutely high by international standard? | **height** — how urgent | No |
+| Baseline | Is it high compared to this machine's own normal? | evidence display | Yes |
+| Band energy | Has one specific frequency band jumped? | evidence display | Yes |
 
-With ISO zones alone, a sensor dominated by high-frequency content keeps reading Good even as a bearing degrades. That is why all three run together. See [How detection works](./detection.en.md) for the full picture.
+High vibration alone does not raise the grade — that fact is stated separately on screen. Across the 383 verification cases, putting all four criteria into the grade gives **69%** false positives on healthy machines; this structure gives **3%**.
+
+Neither grade-forming criterion needs training, so **judgment starts as soon as you finish setup**.
+
+[How detection works](./detection.en.md) has the details; [what this tool does and does not do](./scope.en.md) has the measured limits.
 
 ## Monitoring modes
 
@@ -107,6 +112,8 @@ Settings are stored not in the DB but as JSON files inside the package (`cgi-bin
 | [Usage](./usage.en.md) | Monitoring · detail analysis · reports |
 | [Alarms & events](./alarms.en.md) | Monitoring modes · alarm settings · notification channels |
 | [How detection works](./detection.en.md) | What is measured and how grades are decided |
+| [What this tool does and does not do](./scope.en.md) | Measured performance · what it cannot do · what was tried and lost |
+| [Fault types and signatures](./faults.en.md) | Which faults are distinguished, on what evidence, and what each setting unlocks |
 | [Troubleshooting](./troubleshooting.en.md) | Symptoms, causes, and fixes |
 
 ## Navigation

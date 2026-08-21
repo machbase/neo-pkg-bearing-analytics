@@ -2,6 +2,10 @@
 
 A vibration analysis package for monitoring rotating-machinery health from time-series data stored in Machbase Neo.
 
+> **It does not replace a human diagnosis.** It covers the gap between scheduled inspections, ranks
+> what to look at first, and puts the spectrum the inspector needs on screen before they arrive.
+> See [what this tool does and does not do](docs/scope.en.md) for measured performance and named limits.
+
 ## Overview
 
 neo-pkg-vibe-analytics turns vibration sensor data in Machbase Neo TAG tables into actionable machine-health insight — without writing a single line of SQL or TQL.
@@ -20,8 +24,8 @@ The app connects to your Neo instance on launch, auto-detects TAG tables, and ru
 ## Key Features
 
 - **Real-time Monitoring** — equipment card grid with live RMS sparklines, ISO 10816-3 severity grades (양호 / 주의 / 위험 / 심각), a KPI summary bar that doubles as a severity filter, drag-to-reorder cards, and a filterable event feed. A header toggle turns alarm judgment on or off.
-- **Detail Analysis** — a snapshot of the selected tag: raw waveform, RMS / Peak-to-Peak / Crest Factor / Kurtosis trends, defect-band energy trends, FFT spectrum with bearing fault-frequency markers (1× / 2× / 3×, BPFO / BPFI / BSF / FTF), fault-band search, envelope, cepstrum, and spectrogram — with harmonic / sideband analysis.
-- **Three-criteria Grading** — every tag is judged against the ISO zone (absolute, band-limited to 10–1000 Hz as the standard defines), a learned baseline (relative to its own normal), and per-band energy (relative, per frequency band). The worst of the three becomes the grade, and the screen shows which one raised it.
+- **Detail Analysis** — a snapshot of the selected tag: raw waveform, RMS / Peak-to-Peak / Crest Factor / Kurtosis trends, defect-band energy trends, FFT spectrum with bearing fault-frequency markers (1× / 2× / 3×, BPFO / BPFI / BSF / FTF), fault-band search, envelope, cepstrum, kurtogram, and spectrogram — with harmonic / sideband analysis. The envelope drives the bearing verdict; the kurtogram, cepstrum, and spectrogram are shown for context and deliberately kept out of the grade (see [what this tool does and does not do](docs/scope.en.md)).
+- **Four-criteria Grading** — every tag is judged against the ISO zone (absolute, band-limited to 10–1000 Hz as the standard defines), the fault pattern (evidence standing at a bearing fault frequency), a learned baseline (relative to its own normal), and per-band energy (relative, per frequency band). The worst of the four becomes the grade, and the screen shows which one raised it. The first two need no training, so detail analysis is complete without it.
 - **Rule-based Diagnosis** — automatic fault verdict (imbalance, misalignment, bearing inner/outer race, looseness, gear) with sourced supporting evidence, evidence scores, and prioritized recommended actions. Faults the current measurement cannot resolve are marked "not observable" with the reason, rather than scored low.
 - **Measurement-validity Gate** — clipping and saturation patterns put the whole diagnosis into a "withheld" state and lower every candidate's evidence score together, because a shaky measurement affects the entire spectrum. Misdiagnosis starts with trusting a bad measurement.
 - **App or Server Monitoring** — evaluate in the open app, or register the evaluation settings as a Neo timer so events keep accruing with the app closed. Both modes run the *same* judgment rules, and the app reports when monitoring has stopped, stalled, or has nothing left to evaluate — so "no events" never quietly means "monitoring is dead".

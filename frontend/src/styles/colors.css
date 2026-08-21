@@ -102,6 +102,13 @@
   --chart-blue: #4199ff;
   --chart-orange: #fdb532;
 
+  /* ---- 기간 달력 (DateRange) ----
+     accent blue(--primary-*)는 흰 바탕 기준 진한 파랑이라 다크 표면 위에서는 밴드가 배경에,
+     끝날이 밴드에 묻힌다. 밴드·끝날·토요일만 테마별로 따로 잡는다. */
+  --cal-band: #2a4a6b;            /* 선택 구간 밴드 */
+  --cal-edge: #0075e2;            /* 구간의 시작·종료 날 */
+  --cal-sat: #6aa9e9;             /* 토요일 */
+
   /* ---- Borders ---- */
   --border-default: rgba(255, 255, 255, 0.13);
   --border-light: #f1f1f125;      /* ~9% white hairline */
@@ -211,4 +218,7 @@
   --etc-table: #b8860b;
   --chart-blue: #2b7cd3;
   --chart-orange: #e08a12;
+  --cal-band: #d1e5f7;
+  --cal-edge: #005fb8;
+  --cal-sat: #005fb8;
 }

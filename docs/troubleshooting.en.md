@@ -59,7 +59,11 @@ If there is no warning, check the following.
 - **In app monitoring mode the app must be open.** If monitoring must continue with the app closed, switch to **server monitoring**.
 - **Nothing is recorded while Good simply continues.** Only Warning-and-worse, plus the return from a bad state, are recorded.
 - **Intermediate steps while still bad** (Critical → Danger, for instance) are not recorded separately; one "improved" event represents them.
-- A long entry hold deliberately ignores spikes shorter than that hold.
+- A long entry hold deliberately ignores variation shorter than that hold.
+- **With RPM or bearing model empty, no events fire at all.** The axis that switches the grade on is the fault-frequency grid, and without shaft speed or geometry that grid cannot be built. The card's coverage indicator reads "cannot judge".
+- **High vibration on its own produces no event.** Bearing-fault evidence must stand for the grade to rise. Imbalance, misalignment and looseness are only reported as "amplitude high but no bearing-fault evidence".
+- **Baseline and band produce no events.** A breach appears only in the evidence table.
+- **Grades are judged once every 10 minutes.** A machine that just deteriorated has to wait for the next cycle.
 
 ## "Zero tags evaluated" warning
 
@@ -128,6 +132,7 @@ Server monitoring **runs with the settings as of your last save.** After changin
 3. In **per-severity delivery**, confirm that severity is set to **Immediate**. The default sends Danger and Critical immediately, with Warning set to No notification.
 4. If delivery is **No notification**, the event is recorded but nothing is sent.
 5. Webhook is the only delivery channel. For email or SMS, relay through an automation tool such as n8n — see [Alarms and events](./alarms.en.md).
+6. If it still does not arrive, check whether **an event was recorded at all**. No event means this is a judgment problem, not a delivery one — go to "No events are being recorded" above.
 
 ## Older events are missing from the event list
 
@@ -142,7 +147,7 @@ This is the browser's generic warning for CSV/JSON downloads. Nothing is wrong w
 - Confirm you registered unit, RPM, and bearing model under **Equipment**. Without a unit there is no defined threshold row to inherit, and without RPM or a bearing, fault-frequency matching is limited.
 - Check whether **mounting** is specified. On a magnet mount left unspecified, the mount's resonance (typically 2–5 kHz) can be selected as the fault band, so a ringing mount reads as a bearing fault.
 - Check in **Criteria** that the thresholds suit your equipment. Acceleration (`g`) and displacement (`μm`) defaults are general reference values, not standard values, and are meant to be adjusted.
-- Learning the normal state adds the relative criterion alongside thresholds.
+- Learning the normal state adds a "versus normal" note to the evidence table (it does not change the grade).
 - Diagnosis is computed from a single-channel, single-direction measurement with no phase information. Fault mechanisms are hypotheses; confirming them requires multi-axis and phase measurement.
 
 If a fault candidate in the report is marked "not observable with this measurement", the stated reason names the information that was missing. Filling that field under **Equipment** brings the candidate back into scope.

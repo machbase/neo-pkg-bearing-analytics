@@ -28,13 +28,36 @@ const mk = (tab) => {
 };
 const tick = async (a) => { await a._tickLive(); await new Promise((r) => setTimeout(r, 60)); };
 
-// ── 판정 틱이 설정 화면을 건드리지 않는다 ──────────────────────────────────
-for (const [tab, repaint] of [['monitor', true], ['detail', true], ['report', true], ['settings', false]]) {
+// ── 판정 틱이 설정·상세분석 화면을 건드리지 않는다 ─────────────────────────
+// 상세분석은 캡처한 스냅샷을 보는 화면이라 틱이 끌고 갈 이유가 없다 — 새로고침·태그전환·기간변경으로만 갱신
+for (const [tab, repaint] of [['monitor', true], ['detail', false], ['report', true], ['settings', false]]) {
   const a = mk(tab);
   await tick(a);
   chk((a.repaints > 0) === repaint,
     tab + ' 탭 — 틱이 화면을 ' + (repaint ? '다시 그린다' : '다시 그리지 않는다'), 'repaints=' + a.repaints);
 }
+/* 상세분석 스냅샷 — 재캡처 판단은 사용자가 고른 것(기간·기준시각·표시 물리량)으로만 한다.
+   앵커 값으로 판단하면 그 값이 lastSeen에 물려 있어, 감시가 켜져 있는 동안 판정 틱마다
+   캐시가 버려지고 상세분석이 통째로 다시 캡처된다(스냅샷이 아니라 실시간이 된다). */
+{
+  const a = mk('detail');
+  const eq = { id: 'e1', table: 'T', name: 'tag', lastSeen: 1700000000000, stat: { minMs: 1699999000000, maxMs: 1700000000000 } };
+  Object.assign(a.state, { period: 'all', from: '2023-11-15T10:00', to: '2023-11-15T11:00', detailAnchor: null, viewUnit: null });
+  const key = a._detailKey();
+  const snap = { state: 'ready', det: {}, eqSnap: Object.assign({}, eq), snapNow: eq.lastSeen, key, anchor: 1700000000001, viewUnit: null, gate: null };
+  a._detailCache[eq.id] = snap;
+  a._detail(eq);
+  eq.lastSeen += 3000;                 // 판정 틱이 최신 수집 시각을 밀어 올린다
+  a._detail(eq);
+  chk(a._detailCache[eq.id] === snap, '★ 상세분석 — lastSeen이 전진해도 스냅샷을 다시 잡지 않는다');
+  chk(a._detailCache[eq.id].anchor === 1700000000001, '   기준 시각도 캡처 시점 값 그대로', 'anchor=' + a._detailCache[eq.id].anchor);
+  a._runState = { 'T:tag': { gate: { label: '플랫라인', detail: '' } } };
+  chk(a._detailCache[eq.id].gate === null, '   감시가 계측 이상을 새로 봐도 스냅샷의 게이트는 그대로');
+  chk(a._gateOf(eq).label === '플랫라인', '   라이브 게이트는 따로 읽힌다(배너 비교용)');
+  a.setState({ period: '1h' });        // 사용자가 기간을 바꾸면 그때는 다시 잡는다
+  chk(a._detailKey() !== key, '   조회 기간을 바꾸면 재캡처된다');
+}
+
 // 막은 것은 화면 갱신뿐 — 판정·알림은 설정 화면에서도 계속 돌아야 한다
 {
   const a = mk('settings');

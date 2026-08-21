@@ -196,5 +196,39 @@ chk(VC.isoNeeded(0) === false && VC.isoNeeded(undefined) === false, '샘플레�
     '이름이 압축돼도 임베드본이 동작 (상호참조가 한 스코프에 있다)', good.err || good.v.toFixed(6));
 }
 
+// ── 원본 단위가 달라도 ISO 축은 같은 규격 경계를 쓴다 ─────────────────────
+/* ISO 10816은 속도(mm/s) 규격이다. 가속도·변위로 들어온 신호를 원본 단위 그대로
+   임의 존(g 0.5/1/2 · μm 12/25/50)에 대면 규격이 아닌 숫자로 판정하게 된다.
+   변환해서 같은 경계 하나로 판정해야 단위 설정을 바꿔도 등급이 흔들리지 않는다. */
+{
+  const ISO_II = VC.ISO_ZONES.II;              // 1.12 / 2.8 / 7.1 mm/s
+  const fr = 30;                               // 1800 RPM
+  // 60 Hz 순수 톤 — 속도 진폭을 알고 만들어 가속도·변위로 되돌린다
+  const vAmp = 4.0;                            // mm/s peak → RMS 2.83 (주의 존)
+  const vel = tone(60, vAmp, N, FS);
+  const wantV = rms(vel);
+
+  // 속도 → 가속도(미분) · 속도 → 변위(적분). 그 뒤 다시 속도로 돌려 ISO 판정
+  const acc = VC.convertDomain(vel, FS, 'mm/s', 'g', fr);
+  const dis = VC.convertDomain(vel, FS, 'mm/s', 'μm', fr);
+  const backFromAcc = VC.isoRms(VC.convertDomain(acc, FS, 'g', 'mm/s', fr), FS);
+  const backFromDis = VC.isoRms(VC.convertDomain(dis, FS, 'μm', 'mm/s', fr), FS);
+
+  chk(Math.abs(backFromAcc - wantV) / wantV < 0.02,
+    '가속도로 받아 적분해도 원래 속도 RMS로 돌아온다', backFromAcc.toFixed(4) + ' vs ' + wantV.toFixed(4));
+  chk(Math.abs(backFromDis - wantV) / wantV < 0.02,
+    '변위로 받아 미분해도 원래 속도 RMS로 돌아온다', backFromDis.toFixed(4) + ' vs ' + wantV.toFixed(4));
+  chk(VC.gradeFor(backFromAcc, ISO_II) === VC.gradeFor(wantV, ISO_II)
+    && VC.gradeFor(backFromDis, ISO_II) === VC.gradeFor(wantV, ISO_II),
+    '세 단위 모두 같은 ISO 등급', ['mm/s', 'g', 'μm'].map((u, i) =>
+      u + '=' + VC.gradeFor([wantV, backFromAcc, backFromDis][i], ISO_II)).join(' '));
+
+  // 원본 단위 임의 존에 그대로 대면 등급이 갈린다 — 통일이 필요한 이유
+  const gZones = VC.zonesFor('g', 'II');
+  chk(VC.gradeFor(rms(acc), gZones) !== VC.gradeFor(wantV, ISO_II),
+    '변환 없이 g 임의 존에 대면 등급이 어긋난다(통일이 필요한 이유)',
+    'g존=' + VC.gradeFor(rms(acc), gZones) + ' vs ISO=' + VC.gradeFor(wantV, ISO_II));
+}
+
 console.log(fail ? `\n=== FAIL ${fail}건 ===` : '\n=== 전부 통과 ===');
 process.exit(fail ? 1 : 0);

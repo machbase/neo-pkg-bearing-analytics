@@ -15,15 +15,23 @@
   }
 
   var STATUS_COLOR = { '양호': '#3aa76d', '주의': '#d99a2b', '위험': '#e07b39', '심각': '#e5484d' };
+  // 등급어는 아니지만 "보라"는 표시 — 회색으로 내리면 뜻이 정반대로 읽힌다
+  var NOTE_BADGE = { '충격성 강함': 1 };
+
+  /* 라이트 팔레트는 테마 토글과 인쇄가 함께 쓴다 — 한 곳에서 고쳐야 화면과 종이가 갈리지 않는다 */
+  var LIGHT_VARS = "--bg-primary:#e9ebef;--bg-panel:#fff;--bg-elevated:#f5f6f8;--bg-dropdown:#fff;--bg-hover:rgba(0,0,0,.045);"
+    + "--bg-input:rgba(0,0,0,.05);--text-primary:#262831;--text-secondary:#40434e;--text-tertiary:#5f636f;--text-muted:#8a8d99;"
+    + "--border-default:rgba(0,0,0,.12);--border-medium:#b9bcc5;--border-faint:rgba(0,0,0,.08)";
 
   var CSS = [
     ":root{--bg-primary:#1e1e1e;--bg-panel:#252525;--bg-elevated:#2c2c2c;--bg-dropdown:#2d2d2d;--bg-hover:rgba(255,255,255,.08);--bg-input:rgba(255,255,255,.13);--text-primary:#f1f1f1;--text-secondary:#c4c4c4;--text-tertiary:#a3a3a3;--text-muted:#727272;--border-default:rgba(255,255,255,.13);--border-medium:#626263;--border-faint:rgba(255,255,255,.06);--primary:#005fb8;--primary-hover:#0075e2;--radius-sm:4px;--radius-md:8px}",
-    ".theme-light{--bg-primary:#e9ebef;--bg-panel:#fff;--bg-elevated:#f5f6f8;--bg-dropdown:#fff;--bg-hover:rgba(0,0,0,.045);--bg-input:rgba(0,0,0,.05);--text-primary:#262831;--text-secondary:#40434e;--text-tertiary:#5f636f;--text-muted:#8a8d99;--border-default:rgba(0,0,0,.12);--border-medium:#b9bcc5;--border-faint:rgba(0,0,0,.08)}",
+    ".theme-light{" + LIGHT_VARS + "}",
     "*{margin:0;padding:0;box-sizing:border-box}body{font-family:'Pretendard',-apple-system,BlinkMacSystemFont,'Segoe UI','Malgun Gothic',sans-serif;background:var(--bg-primary);color:var(--text-primary);line-height:1.65;font-size:15px}",
     ".page{max-width:1320px;margin:0 auto;padding:40px 28px 56px}",
     ".report-header{display:flex;align-items:flex-start;justify-content:space-between;gap:24px;padding:4px 0 26px;border-bottom:1px solid var(--border-default);margin-bottom:28px}",
-    ".report-header .logo{height:42px;width:auto;flex-shrink:0;margin-top:2px}.theme-light .report-header .logo{filter:brightness(.18)}",
+    ".report-header .logo{height:42px;width:auto;flex-shrink:0;margin-top:2px}.theme-light .report-header .logo{filter:brightness(0)}",
     ".hd-right{display:flex;flex-direction:column;align-items:flex-end;gap:16px;flex-shrink:0}",
+    ".hd-btns{display:flex;align-items:center;gap:8px}",
     ".theme-btn{display:inline-flex;align-items:center;justify-content:center;width:34px;height:34px;color:var(--text-secondary);background:var(--bg-input);border:1px solid var(--border-default);border-radius:var(--radius-sm);cursor:pointer}",
     ".theme-btn:hover{border-color:var(--border-medium);color:var(--text-primary)}.theme-btn svg{width:18px;height:18px;display:block}",
     ".theme-btn .ic-sun{display:none}.theme-light .theme-btn .ic-sun{display:block}.theme-light .theme-btn .ic-moon{display:none}",
@@ -48,7 +56,8 @@
     ".summary-box{background:var(--bg-panel);border:1px solid var(--border-default);border-radius:var(--radius-md);padding:20px 24px 18px;margin-bottom:24px}",
     "body.view-sum #detail{display:none}",
     "body.view-full .summary-box{display:none}",
-    "@media print{.summary-box{display:block !important}.sum-more{display:none}}",
+    /* 인쇄는 전체 보기로 나간다 — 요약 상자를 같이 실으면 같은 판정이 종이에서 두 번 나온다 */
+    "@media print{.summary-box{display:none !important}}",
     ".view-sw{display:inline-flex;border:1px solid var(--border-default);border-radius:var(--radius-sm);overflow:hidden}",
     ".view-btn{padding:0 12px;height:34px;font-size:12px;font-weight:600;color:var(--text-tertiary);background:var(--bg-input);border:none;cursor:pointer}",
     ".view-btn.on{background:var(--primary);color:#fff}",
@@ -137,6 +146,38 @@
     ".neg-box .nb-r{margin-left:12px;color:var(--text-muted)}",
     ".unit-fx{display:inline-block;width:46px;text-align:left;color:var(--text-muted)}",
     "@media print{.navbar{display:none}}",
+    /* 종이는 화면 테마와 무관하게 항상 라이트다 — 다크로 보다 눌러도 흰 바탕으로 나가야 하고,
+       .theme-light가 켜진 상태까지 선택자에 넣어야 두 경우 모두 같은 값이 된다.
+       배경색을 인쇄에 살리려면 print-color-adjust가 필요하다(존 막대·배지가 흰색으로 날아간다). */
+    "@media print{:root,.theme-light{" + LIGHT_VARS + ";--bg-primary:#fff;-webkit-print-color-adjust:exact;print-color-adjust:exact}",
+    ".noprint{display:none!important}}",
+    /* 종이 여백은 브라우저 인쇄 여백에 맡긴다 — 여기서 또 주면 두 여백이 겹쳐 본문 폭이 좁아진다 */
+    "@media print{.page{padding:0 0 10px;max-width:none}}",
+    /* 페이지 나눔 — 섹션 통째로 '쪼개지 마라'를 걸면 한 장에 안 들어가는 섹션이 다음 장으로 통째로 밀려
+       페이지마다 3분의 1 이상이 빈다. 쪼개지면 안 되는 것은 한 장에 들어가는 작은 단위(차트 한 장, 카드,
+       표의 한 행, 재현성 스트립)뿐이고, 긴 섹션은 흘러가게 둔다.
+       제목·그룹 머리글은 뒤 내용과 붙여야 한다 — 혼자 페이지 끝에 남으면 무엇의 제목인지 알 수 없다. */
+    "@media print{.section{break-inside:auto}",
+    ".chart-wrap,.sev-card,.stat-grid,.spec-panel,.build-strip,.gate-box,.summary-box,tr,.ind-row{break-inside:avoid}",
+    ".group-hd,.section-title{break-after:avoid}.group-hd{break-inside:avoid}",
+    "thead{display:table-header-group}tfoot{display:table-footer-group}",
+    /* 스펙 패널은 인쇄 폭이 좁아 22px 값이 칸을 넘어 옆 칸 글자와 겹친다 — 종이에서만 한 단계 줄인다 */
+    ".spec-v{font-size:15px}.spec-col{padding:12px 14px;min-width:110px}",
+    /* 종이는 화면보다 촘촘하게 — 카드 여백이 화면 기준이면 페이지 수만 늘어난다 */
+    ".section{padding:16px 18px;margin-bottom:14px}.spec-panel{margin-bottom:14px}",
+    /* 종이는 전부 한 줄에 하나 — 두 장씩 앉히면 칸 폭이 340px로 줄어 눈금·범례가 뭉친다 */
+    /* 인쇄는 어차피 1열이라 격자를 쓸 이유가 없다 — 격자 안의 페이지 나눔은 브라우저마다 처리가
+       달라 항목이 갈릴 여지가 남는다. 블록 흐름으로 바꾸면 break-inside:avoid가 확실히 지켜진다. */
+    ".grid2{display:block}.grid2>.section{margin-bottom:14px}.sev-cards{grid-template-columns:repeat(2,1fr)}",
+    /* 캔버스는 그릴 때 잰 폭을 인라인 px로 박는다(chart.js) — 인쇄 여백 설정에 따라 종이 폭이
+       그 값과 달라지면 오른쪽에 빈 띠가 남거나 넘친다. 종이에서는 칸을 꽉 채우게 덮어쓴다. */
+    "canvas{width:100%!important;height:auto!important}",
+    /* 요약 줄만 앞 장에 남고 격자가 다음 장으로 가면 무엇의 요약인지 끊긴다 */
+    ".stat-sum,.sec-desc{break-after:avoid}.sec-chart{break-inside:avoid}",
+    /* 재현성 스트립은 칸마다 170px을 요구해 종이 폭에서 3+2로 접히고 두 줄이 된다 —
+       내용 폭만큼만 잡게 풀면 다섯 칸이 한 줄에 들어간다(문서 끝의 부속 정보라 작게 둔다) */
+    ".build-strip{margin-top:14px}.build-strip .bs-i,.build-strip .bs-i.narrow{flex:1 1 auto;padding:8px 11px}",
+    ".build-strip .bs-k{font-size:9px}.build-strip .bs-v{font-size:11.5px;margin-top:3px}.build-strip .bs-s{font-size:10px}}",
     "details.adv{margin-bottom:24px}",
     "details.adv>summary{cursor:pointer;font-size:12.5px;color:var(--text-secondary);padding:10px 14px;background:var(--bg-elevated);border:1px solid var(--border-faint);border-radius:8px;list-style:none}",
     "details.adv>summary::-webkit-details-marker{display:none}",
@@ -160,13 +201,17 @@
     ".analysis-content .op-arrow{margin:1px 0 8px 22px;padding-left:9px;border-left:1px solid var(--border-medium);color:var(--text-tertiary);font-size:12.5px;line-height:1.6}",
     ".analysis-content .op-arrow strong{color:var(--text-secondary);font-weight:600}",
     ".rec-item{margin:10px 0 6px 8px;font-size:14px;color:var(--text-secondary)}.rec-item .no{font-weight:700;color:var(--primary-hover);margin-right:8px}",
-    ".footer{margin-top:32px;padding-top:14px;border-top:1px solid var(--border-default);display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px;font-size:11px;color:var(--text-muted)}",
     ".build-strip{display:flex;flex-wrap:wrap;gap:1px;margin-top:26px;background:var(--border-faint);border:1px solid var(--border-faint);border-radius:6px;overflow:hidden}",
     ".build-strip .bs-i{flex:1 1 170px;background:var(--bg-panel);padding:11px 14px}",
     ".build-strip .bs-i.narrow{flex:0 1 190px}",
     ".build-strip .bs-k{font-size:9.5px;font-weight:600;letter-spacing:.6px;text-transform:uppercase;color:var(--text-muted)}",
     ".build-strip .bs-v{margin-top:4px;font-size:13px;font-weight:600;color:var(--text-primary);font-family:'D2Coding',monospace;white-space:nowrap}",
     ".build-strip .bs-s{margin-top:2px;font-size:11px;color:var(--text-muted);font-family:'D2Coding',monospace;white-space:nowrap}",
+    /* 인쇄 직전 재렌더용 — 캔버스는 그릴 때의 CSS 폭으로 비트맵을 굳히므로, 화면 폭(1300px)으로 그린 뒤
+       종이(700px)에서 축소되면 눈금 글자가 절반 크기로 찌그러진다. 그리는 순간에도 종이와 같은
+       폭·열수가 되도록 맞춘 다음 다시 그린다. */
+    "body.printing .page{max-width:186mm}body.printing .grid2{grid-template-columns:1fr;gap:12px}",
+    "body.printing .sev-cards{grid-template-columns:repeat(2,1fr)}",
     ".group-hd{display:flex;align-items:center;gap:10px;margin:4px 0 14px;color:var(--text-primary)}.group-hd .hr{flex:1 1 0;height:1px;background:var(--border-faint)}",
     ".grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(460px,1fr));gap:24px;margin-bottom:24px}.grid2 .section{margin-bottom:0}",
     ".sev-cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px;margin-top:14px}",
@@ -175,11 +220,15 @@
     ".sev-card .badge2{display:inline-block;padding:1px 6px;border-radius:3px;font-size:9px;font-weight:700;letter-spacing:.3px;margin-left:4px;vertical-align:middle}",
     ".sev-card .val{font-size:26px;font-weight:700;letter-spacing:-.5px;margin-bottom:8px;font-variant-numeric:tabular-nums;color:var(--text-primary)}.sev-card .val .u{font-size:12px;font-weight:500;color:var(--text-muted);margin-left:2px}",
     ".sev-card .foot{display:flex;justify-content:space-between;font-size:11px;color:var(--text-muted)}",
-    // 항목 수(6)와 열 수가 안 맞으면 마지막 줄에 빈칸이 남는다 → auto-fit 대신 약수 열로 고정
-    ".stat-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:1px;background:var(--border-faint);border:1px solid var(--border-faint);border-radius:6px;overflow:hidden}",
-    "@media(min-width:1100px){.stat-grid{grid-template-columns:repeat(6,1fr)}}",
-    "@media(max-width:680px){.stat-grid{grid-template-columns:repeat(2,1fr)}}",
-    ".stat-grid .cell{background:var(--bg-panel);padding:13px 16px}.stat-grid .cell .k{font-size:11px;color:var(--text-muted)}.stat-grid .cell .v{margin-top:5px;font-size:16px;font-weight:600;color:var(--text-primary);font-family:'D2Coding',monospace}",
+    /* 화면과 같은 규칙 — 한 칸 한 줄, 가로 스크롤 없음. 칸은 제 내용 폭으로 시작해 남는 폭을 나눠 갖고,
+       폭이 모자라면 넓은 칸부터 줄며 말줄임(전문은 title). 문장은 칸이 아니라 제목 아래 요약 줄이 싣는다. */
+    ".stat-sum{font-size:12px;color:var(--text-muted);margin:-2px 0 10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}",
+    ".stat-grid{display:flex;gap:1px;background:var(--border-faint);border:1px solid var(--border-faint);border-radius:6px;overflow:hidden}",
+    ".stat-grid .cell{flex:1 1 auto;min-width:0;background:var(--bg-panel);padding:13px 16px}",
+    ".stat-grid .cell .k,.stat-grid .cell .v{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}",
+    ".stat-grid .cell .k{font-size:11px;color:var(--text-muted)}.stat-grid .cell .v{margin-top:5px;font-size:15px;font-weight:600;color:var(--text-primary);font-family:'D2Coding',monospace}",
+    // 인쇄에는 hover가 없다 — 잘린 꼬리를 볼 방법이 없으므로 종이에서만 접어서 전부 남긴다
+    "@media print{.stat-sum{white-space:normal}.stat-grid{flex-wrap:wrap}.stat-grid .cell .k,.stat-grid .cell .v{white-space:normal;overflow:visible}}",
   ].join('\n');
 
   // 저장된 리포트 안에서 차트를 그리는 부트 스크립트 (고정 코드 — 사용자 입력 미포함)
@@ -229,14 +278,23 @@
     "var navA=[].slice.call(document.querySelectorAll('.navbar a'));",
     "function syncNav(){var y=window.scrollY+120,cur=null;navA.forEach(function(a){var el=document.querySelector(a.getAttribute('href'));if(el&&el.getBoundingClientRect().top+window.scrollY<=y)cur=a;});navA.forEach(function(a){a.classList.toggle('on',a===cur);});}",
     "var st;window.addEventListener('scroll',function(){clearTimeout(st);st=setTimeout(syncNav,60);});syncNav();",
-    "window.addEventListener('beforeprint',function(){var b=document.body;b.classList.remove('view-sum');b.classList.remove('view-full');drawAll();});",
-    "window.addEventListener('afterprint',function(){try{applyView(localStorage.getItem('neoVibeReportView')||'sum');}catch(e){applyView('sum');}});",
+    "window.printReport=function(){window.print();};",
+    /* 캔버스는 그릴 때의 테마 색을 픽셀로 굳힌다 — CSS만 라이트로 덮으면 흰 종이에 다크 차트가 찍힌다.
+       인쇄 직전에 라이트로 바꿔 다시 그리고, 끝나면 보던 테마로 되돌린다. */
+    "var _pDark=false;",
+    "window.addEventListener('beforeprint',function(){var b=document.body,r=document.documentElement;",
+    " b.classList.remove('view-sum');b.classList.add('view-full');b.classList.add('printing');",
+    " _pDark=!r.classList.contains('theme-light');if(_pDark)r.classList.add('theme-light');drawAll();});",
+    "window.addEventListener('afterprint',function(){var r=document.documentElement;",
+    " document.body.classList.remove('printing');",
+    " if(_pDark){r.classList.remove('theme-light');_pDark=false;}",
+    " try{applyView(localStorage.getItem('neoVibeReportView')||'sum');}catch(e){applyView('sum');}drawAll();});",
     "drawAll();",
     "})();",
   ].join('\n');
 
-  function sectionOpen(h, title, sub, hint, id) {
-    h.push('<div class="section"' + (id ? ' id="' + id + '"' : '') + '><div class="section-title"><span class="bar"></span> ' + esc(title)
+  function sectionOpen(h, title, sub, hint, id, cls) {
+    h.push('<div class="section' + (cls ? ' ' + cls : '') + '"' + (id ? ' id="' + id + '"' : '') + '><div class="section-title"><span class="bar"></span> ' + esc(title)
       + (sub ? ' <span style="font-weight:500;color:var(--text-muted);font-size:13px;">' + esc(sub) + '</span>' : '')
       + (hint ? ' <span class="nav-hint">' + hint + '</span>' : '')
       + '</div>');
@@ -246,7 +304,9 @@
 
   function chartSection(h, opts) {
     // opts: {title, sub, hintText(esc필요없는 고정), desc, canvasId, h, tipId, xlineId, legend:[{label,color}]}
-    sectionOpen(h, opts.title, opts.sub, opts.hint);
+    /* 차트 한 장짜리 섹션은 한 페이지에 들어간다 — 통째로 묶어야 제목·설명만 앞 장에 남고
+       그림이 다음 장으로 넘어가는 일이 없다(sec-chart는 인쇄 규칙에서만 쓴다). */
+    sectionOpen(h, opts.title, opts.sub, opts.hint, null, 'sec-chart');
     if (opts.desc) h.push('<div class="section-desc">' + esc(opts.desc) + '</div>');
     h.push('<div class="chart-wrap"><canvas id="' + opts.canvasId + '" height="' + opts.h + '"></canvas>'
       + (opts.xlineId ? '<div class="xline" id="' + opts.xlineId + '"></div>' : '')
@@ -264,7 +324,7 @@
   }
 
   // p: { docNo, alias, tagName, generatedText, logoDataURL, specs, sevMachine, gradeKo, gradeColor,
-  //      zones:[문자3], zonesUnit, gradeIdx, verdict, verdictSub, sevCards, stats, indics,
+  //      zones:[문자3], zonesUnit, gradeIdx, verdict, verdictSub, anchorNote, sevCards, stats, statSummary, indics,
   //      opinion, opinionModel, actions, data(RPT — 차트 데이터), chartLibSrc(chart.js 소스),
   //      fftHint, waveDesc, envDesc, cepDesc }
   function buildReportHTML(p) {
@@ -307,10 +367,14 @@
     h.push('</div></div><div class="hd-right">');
     if (p.logoDataURL) h.push('<img class="logo" src="' + p.logoDataURL + '" alt="MACHBASE NEO">');
     h.push('<div class="view-sw"><button class="view-btn on" data-v="sum" onclick="setView(\'sum\')">요약</button><button class="view-btn" data-v="full" onclick="setView(\'full\')">전체</button></div>');
-    h.push('<button class="theme-btn" onclick="toggleTheme()" title="라이트/다크 전환">');
+    h.push('<div class="hd-btns">');
+    h.push('<button class="theme-btn noprint" onclick="printReport()" title="인쇄 · PDF로 저장">');
+    h.push('<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 6 2 18 2 18 9"></polyline><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"></path><rect x="6" y="14" width="12" height="8"></rect></svg>');
+    h.push('</button>');
+    h.push('<button class="theme-btn noprint" onclick="toggleTheme()" title="라이트/다크 전환">');
     h.push('<svg class="ic-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path></svg>');
     h.push('<svg class="ic-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="5"></circle><line x1="12" y1="1" x2="12" y2="3"></line><line x1="12" y1="21" x2="12" y2="23"></line><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line><line x1="1" y1="12" x2="3" y2="12"></line><line x1="21" y1="12" x2="23" y2="12"></line><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line></svg>');
-    h.push('</button></div></div>');
+    h.push('</button></div></div></div>');
 
     // ── 조회 스펙 패널 ──
     h.push('<div class="spec-panel">');
@@ -368,8 +432,12 @@
       // [2] 상태 — 규격 판정과 감시 등급은 다른 값이며 한 문장에 섞지 않는다
       h.push('<div class="sum-sec"><div class="sum-t">' + (sm.gate ? '관측값 <span class="mut">— 게이트 적용 중 · 전부 잠정</span>' : '상태') + '</div>');
       // 한 문서에 RMS가 여러 종류라 "주의"와 "위험"이 동시에 보인다 — 판정에 쓰는 값을 못박고 나머지를 참고로 내린다
-      if (isoH) h.push('<div class="judge-note">판정에 쓰는 값은 <b>ISO 대역제한 속도 RMS ' + esc(isoH.rms) + ' ' + esc(p.zonesUnit || 'mm/s') + '</b> 하나입니다'
-        + (sm.gate ? ' <span class="mut">— 단, 계측 게이트로 판정 보류</span>' : '') + '. 아래 나머지 값은 참고입니다.</div>');
+      /* 등급은 ISO 하나가 만들지 않는다 — 결함 패턴이 게이트이고 ISO는 그 높이를 정한다.
+         "ISO가 판정값"이라고 쓰면 진동만 높고 베어링은 멀쩡한 경우를 문서가 설명 못 한다. */
+      if (isoH) h.push('<div class="judge-note">등급은 <b>결함 패턴이 켜질 때만</b> 오르고, 그 높이를 '
+        + '<b>ISO 대역제한 속도 RMS ' + esc(isoH.rms) + ' ' + esc(p.zonesUnit || 'mm/s') + '</b>가 정합니다'
+        + (sm.gate ? ' <span class="mut">— 단, 계측 게이트로 판정 보류</span>' : '')
+        + '. ISO 값만 높고 결함 근거가 없으면 등급을 올리지 않습니다 — 원인이 베어링 밖일 수 있습니다. 아래 나머지 값은 참고입니다.</div>');
       h.push('<table class="sum-tbl"><tbody>');
       if (isoH) {
         // 게이트 중에는 "판정"이 아니라 관측값이다 — 라벨·색을 내리고 편향 방향(상한/하한)을 밝힌다.
@@ -431,7 +499,7 @@
           [esc(_ux.join(' · ')), '구동 계통도(풀리비·기어비)·인접 기계 확인 시 대부분 해소']);
         h.push('</div>');
       }
-      h.push('<div class="sum-more">상세 근거·그래프·LLM 소견은 <a href="#" onclick="setView(\'full\');return false;" class="lnk">전체 보기</a>에서 · 인쇄·저장 시에는 항상 전체가 포함됩니다</div>');
+      h.push('<div class="sum-more">상세 근거·그래프·LLM 소견은 <a href="#" onclick="setView(\'full\');return false;" class="lnk">전체 보기</a>에서 · 인쇄하면 이 요약 대신 전체 보기가 인쇄됩니다</div>');
       h.push('</div>');
     }
     h.push('<div id="detail">');   // 요약 보기에서 숨겨지는 상세 영역(인쇄 시엔 항상 노출)
@@ -474,13 +542,19 @@
           + Math.round(d.hfFrac * 100) + '%가 게재 보류된 1 kHz 초과 대역이며, 그 대역을 제외하면 ' + esc(d.velExHigh) + ' ' + esc(d.mon.unit || '')
           + (d.exHighSameZone === true ? '로 규격 판정과 같은 존입니다' : d.exHighSameZone === false ? '(' + esc(d.exHighZoneKo) + ' 존)입니다' : '입니다')
           + ' — 감시값(1초 롤업)과는 산출 창이 다릅니다' : '') + '</div>' : '') + '</div>');
-    h.push('<div class="verdict"><span style="font-weight:700;">' + esc(p.verdict) + '</span><span style="font-size:12px;color:var(--text-tertiary);">' + esc(p.verdictSub) + '</span></div>');
+    h.push('<div class="verdict"><span style="font-weight:700;">' + esc(p.verdict) + '</span><span style="font-size:12px;color:var(--text-tertiary);">' + esc(p.verdictSub) + '</span>'
+      + (p.anchorNote ? '<span style="font-size:11px;color:var(--text-muted);font-family:var(--font-mono);">' + esc(p.anchorNote) + '</span>' : '') + '</div>');
     h.push('</div>');
+    h.push('<div style="font-size:11px;color:var(--text-muted);margin-bottom:7px;">기간 통계 — 선택한 기간 전체의 롤업 버킷에서 냅니다. 등급이 아닙니다(등급은 위 종합 판정)</div>');
     h.push('<div class="sev-cards">');
     (p.sevCards || []).forEach(function (c) {
-      var bc = STATUS_COLOR[c.badgeKo] || '#8a8f99';
+      /* 화면과 같은 규칙 — 등급어 배지만 색으로 채우고, 등급이 아닌 배지(참고·잠정)는 테두리만 둔다.
+         회색으로 채우면 그 카드가 꺼진 것처럼 읽힌다. 관측 사실(충격성 강함)은 앰버로 채워 눈에 남긴다. */
+      var _kg = STATUS_COLOR[c.badgeKo] || (NOTE_BADGE[c.badgeKo] ? '#d99a2b' : '');
+      var bc = _kg || 'var(--text-muted)';
+      var bstyle = _kg ? 'color:' + bc + ';background:' + bc + '26;' : 'color:' + bc + ';border:1px solid var(--border-medium);';
       h.push('<div class="sev-card"><div class="lab">' + esc(c.label)
-        + '<span class="badge2" style="color:' + bc + ';background:' + bc + '26;">' + esc(c.badgeKo) + '</span></div>'
+        + (c.badgeKo ? '<span class="badge2" style="' + bstyle + '">' + esc(c.badgeKo) + '</span>' : '') + '</div>'
         + '<div class="val">' + esc(c.value) + '<span class="u">' + esc(c.unit || '') + '</span></div>'
         + '<div class="foot"><span>' + esc(c.thr) + '</span><span style="color:' + (c.over ? '#e5484d' : '#3aa76d') + ';font-weight:600;">' + esc(c.arrow + ' ' + c.delta) + '</span></div>'
         + (c.foot2 ? '<div style="margin-top:4px;font-size:10.5px;color:var(--text-muted);line-height:1.45;">' + esc(c.foot2) + '</div>' : '')
@@ -533,8 +607,12 @@
 
     // ── 통계 요약 ──
     sectionOpen(h, '통계 요약');
+    if (p.statSummary) h.push('<div class="stat-sum" title="' + esc(p.statSummary) + '">' + esc(p.statSummary) + '</div>');
     h.push('<div class="stat-grid">');
-    (p.stats || []).forEach(function (s) { h.push('<div class="cell"><div class="k">' + esc(s.k) + '</div><div class="v">' + esc(s.v) + '</div></div>'); });
+    (p.stats || []).forEach(function (s) {
+      h.push('<div class="cell"><div class="k" title="' + esc(s.k) + '">' + esc(s.k) + '</div>'
+        + '<div class="v" title="' + esc(s.t || s.v) + '">' + esc(s.v) + '</div></div>');
+    });
     h.push('</div></div>');
 
     // ── 추세 분석 ──
@@ -569,9 +647,11 @@
     // 나머지는 접되 요약줄에 숫자를 남긴다 — 접힌 줄만 읽어도 무엇이 있는지 알아야 "안 본 것"이 되지 않는다.
     // 전체 보기에서는 접지 않는다 — 요약/전체 토글이 이미 "짧게 보기"를 담당한다.
     if (d.spec) chartSection(h, { title: '스펙트로그램', sub: '시간×주파수', desc: '충격이 특정 시각에 몰렸는지(계측 사고) 구간에 고르게 퍼졌는지(기계 현상) 판별 · 밝을수록 강한 성분', canvasId: 'cSpec', h: 200 });
-    // 커토그램이 대역을 고르고 포락선이 그 대역으로 복조한다 — 파이프라인 순서대로
-    if (d.kurtogram) chartSection(h, { title: '결함 대역 탐색', sub: 'Kurtogram · Spectral Kurtosis', desc: (d.kurtogram.best ? '충격성 최대 대역 ' + (d.kurtogram.best.loHz / 1000).toFixed(1) + '–' + (d.kurtogram.best.hiHz / 1000).toFixed(1) + ' kHz (SK ' + d.kurtogram.best.sk.toFixed(1) + ') → 아래 포락선을 이 대역으로 복조 · 마운팅이 자석이면 2 kHz 초과 분석은 무효' : '충격성이 가장 강한 대역 자동 탐색'), canvasId: 'cKurtogram', h: 180 });
-    if (d.env) chartSection(h, { title: '포락선 스펙트럼', sub: 'Envelope · 위 커토그램 대역으로 복조', desc: p.envDesc, canvasId: 'cEnv', h: 210 });
+    /* 커토그램은 **참고**다 — 복조는 고정 1~5 kHz에서 한다(첨도 최대화가 안티에일리어싱 잡음·
+       인버터 스위칭 대역에 붙잡혀 검출이 54%→11%로 떨어졌다). 화면은 이미 "(고정)"이라 적는데
+       리포트만 옛 문구가 남아 "판정이 SK 최댓값 대역에서 나왔다"고 읽히고 있었다. */
+    if (d.kurtogram) chartSection(h, { title: '대역별 충격성', sub: 'Kurtogram · Spectral Kurtosis', desc: (d.kurtogram.best ? '충격성 최대 대역 ' + (d.kurtogram.best.loHz / 1000).toFixed(1) + '–' + (d.kurtogram.best.hiHz / 1000).toFixed(1) + ' kHz (SK ' + d.kurtogram.best.sk.toFixed(1) + ') · 참고용 — 복조는 고정 1–5 kHz에서 합니다 · 마운팅이 자석이면 2 kHz 초과 분석은 무효' : '충격성이 가장 강한 대역 자동 탐색'), canvasId: 'cKurtogram', h: 180 });
+    if (d.env) chartSection(h, { title: '포락선 스펙트럼', sub: 'Envelope · 고정 1–5 kHz 대역으로 복조(커토그램은 참고)', desc: p.envDesc, canvasId: 'cEnv', h: 210 });
     if (d.cep) chartSection(h, { title: '켑스트럼', sub: 'Cepstrum', desc: p.cepDesc, canvasId: 'cCep', h: 200 });
 
     // ── 지표 요약 ──
@@ -592,6 +672,12 @@
       var starOf = function (s) { s = Math.max(0, Math.min(5, Math.round(s))); return '★★★★★'.slice(0, s) + '☆☆☆☆☆'.slice(0, 5 - s); };
       sectionOpen(h, '결함 근거 강도', '근거 점수(Evidence Score, 0~100) · 높은 순 = 우선순위', null, 's-evid');
       h.push('<div style="font-size:11px;color:var(--text-muted);margin:-4px 0 10px;">동기/비동기 피크·충격성·대역 에너지 등 실제 지표에서 규칙으로 산출한 <b>근거 점수(Evidence Score)</b>입니다 — <b>확률(%)이 아닙니다</b>. "근거" 열에 점수를 만든 가점 내역을 그대로 공개합니다.</div>');
+      /* 1순위 점수가 채택 임계에 못 미치면 그 사실을 표 위에 적는다 — 표는 점수 순으로 정렬되므로
+         약한 후보도 맨 위에 놓이고, 그러면 판정문이 원인을 안 짚었는데도 표만 원인을 지목한 것처럼 읽힌다. */
+      if (d.evidWeak) {
+        h.push('<div style="font-size:11px;color:#c77d0a;margin:-6px 0 10px;padding:7px 10px;border:1px solid rgba(199,125,10,.35);border-radius:6px;">'
+          + '<b>유력 후보 없음</b> — 1순위 점수가 원인 채택 기준에 못 미칩니다. 아래는 <b>상대 순위일 뿐 원인 지목이 아닙니다</b>.</div>');
+      }
       h.push('<table><thead><tr><th>결함 후보</th><th style="width:120px;">근거 강도</th><th class="num" style="width:66px;">근거점수</th><th>근거 내역 (가점 합산)</th></tr></thead><tbody>');
       d.evidence.forEach(function (c, i) {
         var sc = c.score != null ? c.score : c.s * 20;
@@ -696,7 +782,6 @@
       });
       h.push('</div>');
     }
-    h.push('<div class="footer"><span>Machbase Neo 데이터 기반으로 생성 되었습니다.</span></div>');
     h.push('</div>');
 
     // ── 차트 엔진 + 데이터 + 부트 (자립 렌더) ──

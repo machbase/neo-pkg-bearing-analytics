@@ -189,9 +189,10 @@ const cases = [
     } },
     ['판정 보류', '계측 이상 1대', '신호 두절 1대', '정지 1대']],
   /* 상세 통계 요약 — 리포트와 같은 지표를 쓴다. COUNT/AVG/MIN/MAX는 진동에서 오해를 만든다:
-     MIN은 정지 구간 값이고, MAX는 계측 스파이크 하나에 좌우되며, AVG는 간헐 고진동을 평탄화한다. */
+     MIN은 정지 구간 값이고, MAX는 계측 스파이크 하나에 좌우되며, AVG는 간헐 고진동을 평탄화한다.
+     같은 것을 재는 값은 한 줄로 묶는다 — 열 줄이 되면 훑는 카드가 아니라 읽는 표가 된다. */
   ['detail 통계 요약(중앙값·P95)', { tab: 'detail' },
-    ['중앙값 RMS', 'P95 RMS', 'B/C 초과 버킷', 'Crest P95', '변화율', '관측 창',
+    ['광대역 RMS', '중앙 ', 'P95 ', '지속 최악', 'Crest P95', '변화율', '관측 창', 'B/C 초과',
       '!건수 (COUNT)', '!평균 (AVG)', '!최솟값 (MIN)', '!최댓값 (MAX)']],
   /* 카드 숫자 = 판정값(항상 ISO 대역제한). 라벨은 "어느 대역에서 잰 값인가"를 주파수로 적어
      원인으로 오해되지 않게 한다. 나머지 두 축의 값은 카드에 안 적는다 — 신규 설치에서는
@@ -236,7 +237,7 @@ const cases = [
     events: { rows: 100, span: { from: d.now - 30 * 86400000, to: d.now } }, band: { rows: 0, keys: 0, span: null }, monstate: { rows: 0 }, baseline: { rows: 0 },
   }, purgePick: 'events', purgeFrom: null, purgeTo: null },
     ['이벤트 이력 삭제', '>선택<', '지울 기간을 정하세요', '보관 중:',
-      'value="' + E.fmtDT(d.now - 30 * 86400000).slice(0, 10) + '"', 'value="' + E.fmtDT(d.now).slice(0, 10) + '"']],
+      E.fmtDT(d.now - 30 * 86400000).slice(0, 10) + ' ~ ' + E.fmtDT(d.now).slice(0, 10)]],
   // 보관 정보가 없으면 지울 것이 없다 — 빈칸 + 잠금
   ['settings data 날짜 고르기(데이터 없음·잠금)', { tab: 'settings', setSection: 'data', usage: {
     events: { rows: 0, span: null }, band: { rows: 0, keys: 0, span: null }, monstate: { rows: 0 }, baseline: { rows: 0 },
@@ -245,7 +246,7 @@ const cases = [
   ['settings data 날짜 고르면 잠금 해제', { tab: 'settings', setSection: 'data', usage: {
     events: { rows: 100, span: { from: d.now - 30 * 86400000, to: d.now } }, band: { rows: 0, keys: 0, span: null }, monstate: { rows: 0 }, baseline: { rows: 0 },
   }, purgePick: 'events', purgeFrom: '2026-07-01', purgeTo: '2026-07-15' },
-    ['value="2026-07-01"', 'value="2026-07-15"', '!not-allowed']],
+    ['2026-07-01 ~ 2026-07-15', '!not-allowed']],
   ['settings data 확인(세는 중)', { tab: 'settings', setSection: 'data', usage: {
     events: { rows: 7730, span: null }, band: { rows: 0, keys: 0, span: null }, monstate: { rows: 0 }, baseline: { rows: 0 },
   }, purge: { kind: 'events', fromMs: d.now - 86400000, toMs: d.now, counting: true, n: null } }, ['세는 중', '건수 확인 중']],
@@ -354,7 +355,7 @@ const cases = [
   /* 카드 구조 — 값 만들기와 기준 잡기가 섞이면 설정과 설명이 번갈아 나와 훑기 어렵다.
      구획 제목으로 나누고 상세 설명은 툴팁으로 내렸는지 확인한다. */
   ['settings criteria 대역 카드 구획', { tab: 'settings', setSection: 'criteria', bandOn: true },
-    ['대역 추출', '정상 기준 학습', '채널별 학습 상태', '학습됨',
+    ['대역·결함 패턴 추출', '정상 기준 학습', '채널별 학습 상태', '학습됨',
       // 채우기는 학습 기간에 의존하므로 그 설정보다 뒤에 와야 한다
       '!대역값 만들기',
       /* 설명은 툴팁(data-tip 속성) 안에만 둔다 — 본문에 늘어놓으면 설정과 설명이 번갈아 나온다.
@@ -416,7 +417,7 @@ const cases = [
   // 주기 변경 모달 — 숫자 근거와 이전 구간 처리 3안이 나와야 한다
   ['settings criteria 주기변경 모달', { tab: 'settings', setSection: 'criteria', bandOn: true,
     bandIvOpen: true, bandIvNext: '1m', bandIvAct: 'refill' },
-    ['대역 추출 주기 변경', '대역 학습 표본', '회차당 소요', '서버 점유율', '최소 학습 소요',
+    ['대역·결함 패턴 추출 주기 변경', '대역 학습 표본', '회차당 소요', '서버 점유율', '최소 학습 소요',
       '그대로 둠', '새 주기로 다시 계산', '대역 베이스라인 초기화', '적용']],
   // 1시간 주기 + 24h 학습창 = 24개 → 최소 30 미달이라 경고가 떠야 한다
   ['settings criteria 주기변경 학습불가 경고', { tab: 'settings', setSection: 'criteria', bandOn: true,

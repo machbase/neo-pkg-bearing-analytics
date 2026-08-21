@@ -12,6 +12,7 @@
   // spec: { judgeSrc(judgeTick 소스문자열), limitSrc(baselineLimit 소스문자열 — 클램프 포함),
   //         winSrc(windowRms 소스 — 구간 RMS), winMs(RMS 구간 길이 ms),
   //         bandSrc(bandJudgeSrc() — 상수 포함 자체 완결형), bandWinMs(대역값 룩백, 기본 2h),
+  //         patSrc(patSrc() — 포락선·격자 자체 완결형), patTtlMs(패턴 재계산 최소 간격, 기본 10분),
   //         tags:[{tbl,tag,alias,unit,zones:[z0,z1,z2],bl:{mu,sigma,k}|null,bb:{sub:{mu,sigma,k},...}|null}],
   //         cfg:{escHold,recHold,reno:{1,2,3}}(ms), secWinNs(최신 sec 버킷 조회 룩백, 기본 10s),
   //         notify:{src(notify.serverSrc()), cfg:{channels,routes}}, dryRun }
@@ -27,6 +28,7 @@
       'var judgeTick = ' + (spec.judgeSrc || 'function(){return{next:{},events:[]}}') + ';',
       'var baselineLimit = ' + (spec.limitSrc || 'function(){return null}') + ';',
       spec.bandSrc ? 'var bandJudge = ' + spec.bandSrc + ';' : 'var bandJudge = function(){return null;};',
+      spec.patSrc || 'var patternGate = function(p,i){return p?Math.max(1,i||0):0;}; var envelopeSpectrum=function(){return{freqs:[],mags:[]};}; var targetedMatch=function(){return null;}; var bearingFreqs=function(){return null;}; var envMaxFor=function(){return 500;}; var demodFixed=function(){return null;};',
       spec.winSrc ? 'var windowRms = ' + spec.winSrc + ';' : 'var windowRms = function(){return null;};',
       spec.runSrc ? 'var isRunning = ' + spec.runSrc + ';' : 'var isRunning = function(){return true;};',
       spec.isoSrc || 'var isoRms = function(){return null;}; var isoNeeded = function(){return false;}; var isoSkippable = function(){return false;};',
@@ -70,6 +72,7 @@
     var isoSrc = spec.isoSrc || '';
     var gateSrc = spec.gateSrc || '';   // 계측 게이트 — 파형이 기계 신호인지 계측 문제인지
     var isoTtlMs = spec.isoTtlMs || 30000;
+    var patTtlMs = spec.patTtlMs || 600000;   // 패턴 재계산 최소 간격 — 대역 추출과 같은 10분
     var isoWinMs = spec.isoWinMs || 1000;
     var refSrc = spec.refSrc || '';
     var tickMs = spec.tickMs || 10000;          // 판정 주기 — 두절 기준(6배)의 근거
@@ -94,6 +97,9 @@
       'var judgeTick = ' + judgeSrc + ';', // 순수 judgeTick(prev,rg,breach,now,cfg,bandState) — 앱과 동일 소스
       'var baselineLimit = ' + limitSrc + ';', // 베이스라인 한계식(클램프 포함) — 앱과 동일 소스
       bandSrc ? 'var bandJudge = ' + bandSrc + ';' : 'var bandJudge = function(){return null;};',
+      /* 결함 패턴 — 등급을 켜는 축이라 서버에서도 같은 소스를 돌려야 앱과 갈리지 않는다.
+         goja가 느려서(16k 표본 855 ms) 25회전 창을 쓰고 patTtlMs(기본 10분)로 재계산을 막는다. */
+      spec.patSrc || 'var patternGate = function(p,i){return p?Math.max(1,i||0):0;}; var envelopeSpectrum=function(){return{freqs:[],mags:[]};}; var targetedMatch=function(){return null;}; var bearingFreqs=function(){return null;}; var envMaxFor=function(){return 500;}; var demodFixed=function(){return null;};',
       winSrc ? 'var windowRms = ' + winSrc + ';' : 'var windowRms = function(b){ if(!b||!b.length) return null; var ss=0,n=0; for(var i=0;i<b.length;i++){ ss+=b[i].rms*b[i].rms*b[i].cnt; n+=b[i].cnt; } return n?{rms:Math.sqrt(ss/n)}:null; };',
       runSrc ? 'var isRunning = ' + runSrc + ';' : 'var isRunning = function(){return true;};',
       refSrc ? 'var runRef = ' + refSrc + ';' : 'var runRef = function(){return 0;};',
@@ -153,6 +159,30 @@
       '  var im = impactEvidence(vals, t.fs); if(im) IMP[key]=im; else delete IMP[key];',
       '  var v = isoRms(vals, t.fs);',
       '  return v==null ? {v:wide, fresh:false, hold:true} : {v:v, fresh:true};',
+      '}',
+      /* 결함 패턴 — 25회전 원시 파형 → 포락선 → 결함주파수 격자. 등급을 켜는 축이다.
+         patTtlMs(기본 10분) 안이면 직전 값을 그대로 쓴다 — 판정은 10초마다 도는데 포락선은
+         태그당 수백 ms라 매 틱 돌릴 수 없다. 베어링 열화는 며칠 단위라 10분이면 충분하고,
+         급변은 ISO·베이스라인 축이 10초로 따로 본다.
+         회전수·기하가 없거나 샘플레이트가 낮아 고정 대역이 안 서면 null — 그건 "정상"이 아니라
+         "판정 못 함"이고, 등급이 안 오르는 대신 커버리지가 화면에 드러낸다. */
+      'function patValue(t, prev, key){',
+      '  if(prev && prev.pat!=null && (now-(prev.patAt||0)) < ' + patTtlMs + ') return {on:!!prev.pat, r:prev.patR, iso:prev.patIso, cached:true};',
+      '  if(!t.rpm || !t.geo || !t.geo.n) return null;',
+      '  var fr = t.rpm/60; if(!(fr>0)) return null;',
+      '  var band = demodFixed(t.fs); if(!band) return null;',
+      '  var bf = bearingFreqs(t.rpm, t.geo); if(!bf) return null;',
+      '  var secs = Math.min(22, MON_REV/fr), end = LAST[key]||now, vals=[];',
+      '  try{ db.query("select VALUE from "+t.tbl+" where NAME=\'"+esc(t.tag)+"\' and TIME between to_date(\'"+dtms(end-Math.round(secs*1000))+"\') and to_date(\'"+dtms(end)+"\') order by TIME")',
+      '    .forEach(function(r){ vals.push(+r[0]); }); }catch(e){ return null; }',
+      '  if(vals.length < 4096) return null;',
+      '  var env = envelopeSpectrum(vals, t.fs, envMaxFor(bf, fr, t.fs), band);',
+      '  var m = targetedMatch(env, bf, fr, env.resTrue||env.res);',
+      '  var r2 = m ? (m.r||0) : 0;',
+      /* 등급 높이를 정할 ISO도 같은 파형에서 잰다 — 10초 축 값을 쓰면 등급이 10초마다 움직여
+         10분 주기인 패턴과 시간축이 어긋난다. 한 등급은 한 시점에서 나와야 한다. */
+      '  var _iv = null; try{ _iv = isoRms(vals, t.fs); }catch(e){}',
+      '  return {on: r2 >= MON_ADOPT, r: r2, iso: _iv, fresh:true};',
       '}',
       // 화면의 durKo와 같은 규칙 — 같은 사건을 이벤트와 화면이 다르게 적으면 같은 것인지 알 수 없다
       'function durAgo(ms){ if(ms<60000) return Math.round(ms/1000)+"초";'
@@ -272,7 +302,12 @@
          escHold가 0이면 그 틱에 바로 알람이 나간다. 이벤트에 실을 값은 직전에 잰 ISO를 쓴다. */
       '  var _hold = !!_iso.hold;',
       '  var val = _hold ? ((prev&&prev.iso!=null)?prev.iso:wide) : _iso.v;',
-      '  var rg = _hold ? (prev?(prev.g||0):0) : (val<z[0]?0:val<z[1]?1:val<z[2]?2:3);',
+      /* 등급은 결함 패턴이 켤 때만 오르고 ISO가 높이를 정한다 — 앱과 같은 규칙(patternGate).
+         ISO를 독립 축으로 두면 검증 풀에서 단독 오탐 69%가 그대로 등급이 된다(게이트로 4%). */
+      '  var _isoG = _hold ? (prev?(prev.g||0):0) : (val<z[0]?0:val<z[1]?1:val<z[2]?2:3);',
+      '  var _pv = patValue(t, prev, key);',
+      '  var _hG = (_pv && _pv.iso!=null) ? (_pv.iso<z[0]?0:_pv.iso<z[1]?1:_pv.iso<z[2]?2:3) : _isoG;',
+      '  var rg = patternGate(!!(_pv && _pv.on), _hG);',
       '  var lim = baselineLimit(t.bl);',
       '  var breach = lim!=null && wide>lim;',
       /* 계측 게이트 — 두절 확인 뒤, 진동 판정 앞. 파형이 계측 문제로 보이면 진동 판정을 멈추고
@@ -287,7 +322,10 @@
       '  var sens = sensorTick(prev, bad, now, CFG);',
       // 대역 판정 — 설비당 1건으로 합성. 미학습·추출 미사용이면 null이라 judgeTick이 조용히 지나간다.
       // t.soft = 마운팅 상한 초과 대역(앱이 계산해 구워 보낸다) — 그 대역만 이탈하면 '주의'가 상한
-      '  var bj = sens.on ? null : bandJudge(bandNow(t), t.bb, !!(prev&&prev.bb), t.soft);',
+      /* elat: 포락선 계열의 이탈 이력. 앱 판정과 같은 규칙이어야 두 모드가 갈리지 않는다 —
+         결함 패턴은 되돌아가지 않으므로 신호가 묻혀도 유지하고, 재학습에서만 풀린다. */
+      '  var bj = sens.on ? null : bandJudge(bandNow(t), t.bb, !!(prev&&prev.bb), t.soft, prev&&prev.elat, now);',
+      '  var _elat = bj ? bj.latch : (prev && prev.elat);',
       /* 운전 판별 — 정지 수준이면 판정을 얼린다. 정지를 개선으로 읽으면 "복귀했습니다" 알림이
          나가고, 사람은 설비가 고쳐진 줄 안다. 기준은 학습 μ, 없으면 최근 버킷 P75(학습과 같은 방법). */
       '  var recent=(WVAL[key]||[]).map(function(x){return x.rms;});',
@@ -297,6 +335,7 @@
       '  var res=judgeTick(prev,rg,breach,now,CFG,bj,run);',
       '  res.next.lost = lost?1:0;',
       '  sens.events.forEach(function(e){ res.events.push(e); });',
+      '  if(_elat && Object.keys(_elat).length) res.next.elat=_elat;',
       '  res.next.sf=sens.next.sf; if(sens.next.sfs!=null) res.next.sfs=sens.next.sfs; if(sens.next.sfc!=null) res.next.sfc=sens.next.sfc;',
       /* 원본을 실제로 본 틱(_iso.fresh)에만 갱신한다 — 봤는데 이상이 없으면 저장하지 않아
          그 자리에서 딱지가 떨어진다. 안 본 틱은 유효기간 안에서 직전 판정을 그대로 물려준다. */
@@ -306,6 +345,10 @@
       '  else if(prev && prev.im && (now-(prev.im.at||0)) < 60000) res.next.im=prev.im;',
       // 실제로 잰 틱에만 시각을 찍는다 — 캐시·폴백값에 찍으면 TTL이 영원히 만료되지 않는다
       '  if(_iso.fresh){ res.next.iso=val; res.next.isoAt=now; } else if(prev&&prev.iso!=null){ res.next.iso=prev.iso; res.next.isoAt=prev.isoAt; }',
+      /* 패턴 결과도 상태에 실어 나른다 — TQL은 매 실행 새로 시작하므로 캐시가 여기 말고는 없다.
+         못 잰 틱(회전수 미입력·표본 부족)에는 직전 값을 그대로 넘겨 TTL이 살아 있게 한다. */
+      '  if(_pv && _pv.fresh){ res.next.pat=_pv.on?1:0; res.next.patR=_pv.r; res.next.patIso=_pv.iso; res.next.patAt=now; }',
+      '  else if(prev && prev.pat!=null){ res.next.pat=prev.pat; res.next.patR=prev.patR; res.next.patIso=prev.patIso; res.next.patAt=prev.patAt; }',
       '  var _im = IMP[key] || ((prev && prev.im && (now-(prev.im.at||0)) < 60000) ? prev.im.v : null);',
       '  res.events.forEach(function(ev){',
       // 대역 이벤트는 값이 "한계 대비 배수"라 단위가 다르다 — val=배수, lim=1(=한계). 앱과 동일.

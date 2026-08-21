@@ -31,10 +31,10 @@ const mk = (state) => {
     ready: true, tab: 'detail', srcSel: app.liveTables.slice(), selTag: eq.id,
     events: [], reports: [],
   });
-  // 캐시를 실제와 같은 모양으로 심는다 — 앵커가 어긋나면 _detail이 캐시를 버리고 조회를 시작한다
-  const anchor = app._detailAnchorMs(eq);
+  // 캐시를 실제와 같은 모양으로 심는다 — 키가 어긋나면 _detail이 캐시를 버리고 조회를 시작한다
   app._detailCache[eq.id] = {
-    state, det: Mock.buildDetail(eq), anchor, viewUnit: app.state.viewUnit || null,
+    state, det: Mock.buildDetail(eq), key: app._detailKey(), anchor: app._detailAnchorMs(eq),
+    viewUnit: app.state.viewUnit || null, gate: null,
     eqSnap: Object.assign({}, eq), snapNow: d.now,
   };
   return app;

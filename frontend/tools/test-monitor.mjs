@@ -16,6 +16,17 @@ const spec = {
   ],
   dryRun: true,
 };
+/* 시드 태그가 없으면 순회 0건이 되어 "실패"로 보고된다 — 데이터가 빠진 것을 코드 회귀로
+   읽게 하지 않으려고 건너뛴다. 조용히 통과시키면 같은 함정의 반대쪽이라 사유를 찍는다. */
+const seeded = await fetch(NEO + '/db/query?format=csv&q='
+  + encodeURIComponent("select count(*) from VIBE_TEST where NAME in ('" + spec.tags.map((t) => t.tag).join("','") + "')"))
+  .then((r) => r.text()).then((t) => Number((t.trim().split(String.fromCharCode(10))[1] || '0')) > 0).catch(() => false);
+if (!seeded) {
+  console.log('건너뜀 — VIBE_TEST에 시드 태그(' + spec.tags.map((t) => t.tag).join(', ') + ')가 없습니다.');
+  console.log('monitor-tql live: 건너뜀(픽스처 없음)');
+  process.exit(0);
+}
+
 const tql = buildMonitorTql(spec);
 console.log('--- 생성 TQL 길이:', tql.length, '자 · judgeTick 임베드:', tql.includes('function judgeTick'));
 

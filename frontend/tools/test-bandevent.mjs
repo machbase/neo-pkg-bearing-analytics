@@ -65,20 +65,22 @@ chk(/GRADE, LIM, DETAIL/.test(SQL.eventsSelect(10)), 'SELECT가 DETAIL 포함');
   chk(Math.abs(VC.BAND_HYST - 0.9) < 1e-9, '히스테리시스 상수 0.9', String(VC.BAND_HYST));
 }
 
-// ── ① 설비당 1건 · ⑤ 시간홀드 미적용 ───────────────────────────────────────
+// ── 대역은 이벤트를 내지 않는다 · 상태만 추적 ──────────────────────────────
+/* 8개 계열을 각각 한계와 대보고 하나라도 넘으면 켜는 구조라 그 자체가 작은 다중비교다
+   (대역 단독 오탐 13% · 베이스라인 0%). 대역이 움직이면 대개 베이스라인도 같이 움직이므로
+   알림은 그쪽이 내고, 대역 값은 근거표에서 "어느 계열이 움직였나"로 원인을 좁히는 데 쓴다. */
 {
-  const cfg = { escHold: 300000, recHold: 300000, reno: {} };  // 홀드를 크게 줘도 대역은 즉시 나야 한다
-  let st = null; const seq = [];
+  const cfg = { escHold: 300000, recHold: 300000, reno: {} };
+  let st = null; const seq = [], bbs = [];
   [false, true, true, true, false, false].forEach((on, i) => {
     const r = judgeTick(st, 1, false, 1000 * i, cfg, { on: on, gi: 1 });
     st = r.next;
     seq.push(r.events.filter((e) => /^band/.test(e.etype)).map((e) => e.etype).join(','));
+    bbs.push(st.bb);
   });
-  chk(seq[1] === 'band', '이탈 온셋에 즉시 band 1건 (escHold 무시)', JSON.stringify(seq));
-  chk(seq[2] === '' && seq[3] === '', '이탈 유지 중 중복 이벤트 없음');
-  chk(seq[4] === 'bandrec', '복귀 시 bandrec 1건 (recHold 무시)');
-  chk(seq.filter((x) => x).length === 2, '전 구간 대역 이벤트 정확히 2건 — 설비당 1건 원칙', seq.filter((x) => x).join('|'));
-  chk(st.bb === false, '상태에 bb 필드 유지', 'bb=' + st.bb);
+  chk(seq.every((x) => x === ''), '대역 이벤트가 하나도 안 난다', JSON.stringify(seq));
+  chk(JSON.stringify(bbs) === JSON.stringify([false, true, true, true, false, false]),
+    '이탈 상태(bb)는 그대로 추적한다 — 근거표가 읽어야 한다', JSON.stringify(bbs));
 }
 
 // ── DETAIL 왕복 ────────────────────────────────────────────────────────────
@@ -405,8 +407,12 @@ chk(VC.bandJudge({ fault: 1.0 }, { one: BLS.one }, false) === null, '겹치는 �
     tags: [{ tbl: 'T', tag: 'A', alias: 'a', unit: 'mm/s', zones: [1, 2, 3], bl: BL3, bb: { vh3: BL3 }, soft: ['vh3'] }],
     cfg: { escHold: 0, recHold: 0, reno: {} },
   });
-  chk(/bandJudge\(bandNow\(t\), t\.bb, !!\(prev&&prev\.bb\), t\.soft\)/.test(tql), '서버 TQL이 상한 초과 대역을 판정에 전달');
+  chk(/bandJudge\(bandNow\(t\), t\.bb, !!\(prev&&prev\.bb\), t\.soft, prev&&prev\.elat, now\)/.test(tql),
+    '서버 TQL이 상한 초과 대역과 포락선 이탈 이력을 판정에 전달');
   chk(/"soft":\["vh3"\]/.test(tql), '태그 스펙에 잠정 대역 목록이 값으로 구워짐');
+  /* 포락선 이탈 이력은 저장까지 관통해야 뜻이 있다 — 판정에만 넘기고 안 담으면 매 틱 초기화된다.
+     앱(app.js)과 서버가 같은 필드(elat)를 쓰지 않으면 모드를 바꿀 때 이력이 사라진다. */
+  chk(/res\.next\.elat=_elat/.test(tql), '이탈 이력을 판정 상태에 담아 다음 틱으로 넘긴다');
 }
 
 console.log(fail ? `\n=== FAIL ${fail}건 ===` : '\n=== 전부 통과 ===');

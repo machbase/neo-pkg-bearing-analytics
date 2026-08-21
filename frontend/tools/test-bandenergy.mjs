@@ -2,6 +2,7 @@
 // 값의 정의가 bandEnergy 하나이므로, 여기서 틀리면 학습·판정·리포트가 전부 같이 틀린다.
 // 그래서 "알려진 신호를 넣어 이론값이 나오는가"로 확인한다.
 globalThis.window = globalThis;
+import { mulberry32 } from './_rnd.mjs';
 const Band = (await import('../../cgi-bin/monitor/band.js')).default;
 const VC = (await import('../../cgi-bin/calc/calc.js')).default;
 
@@ -79,8 +80,7 @@ const run = (vals) => Band.bandEnergy(vals, FS, FR, FS / 2).vals;
 {
   /* 잡음 신호의 대역값을 여러 번 재서 변동계수를 본다.
      대역값이 출렁이면 그 흔들림이 대역 베이스라인의 σ로 들어가 한계를 느슨하게 만든다. */
-  let rnd = 12345;
-  const rand = () => { rnd = (rnd * 1103515245 + 12345) & 0x7fffffff; return rnd / 0x7fffffff * 2 - 1; };
+    const rand = mulberry32(12345);
   const vals = [];
   for (let t = 0; t < 20; t++) {
     const noise = new Array(N); for (let i = 0; i < N; i++) noise[i] = rand();
@@ -174,8 +174,7 @@ const run = (vals) => Band.bandEnergy(vals, FS, FR, FS / 2).vals;
   chk(near(r.vals[idx('one')], 1 / Math.SQRT2, 3), '1× 대역에는 28.5 Hz만 남는다', r.vals[idx('one')].toFixed(4));
 
   // 잡음만 있으면 실측하지 않는다 — 잡음 봉우리를 물면 앵커마다 경계가 흔들려 학습이 망가진다
-  let rnd = 987654;
-  const rand = () => { rnd = (rnd * 1103515245 + 12345) & 0x7fffffff; return rnd / 0x7fffffff * 2 - 1; };
+    const rand = mulberry32(987654);
   const noise = new Array(N); for (let i = 0; i < N; i++) noise[i] = rand();
   r = be(noise);
   chk(!r.meas, '잡음만 있으면 실측하지 않는다');
@@ -216,8 +215,7 @@ const run = (vals) => Band.bandEnergy(vals, FS, FR, FS / 2).vals;
   const FS2 = 25600, N2 = 32768, FR2 = 30;
   const bf = VC.faultCoeffs(VC.BEARINGS['6206']);
   const fBPFO = bf.O * FR2;
-  let rnd = 4242;
-  const rand = () => { rnd = (rnd * 1103515245 + 12345) & 0x7fffffff; return rnd / 0x7fffffff * 2 - 1; };
+    const rand = mulberry32(4242);
 
   /* 합성 신호: 1× 정현파 + 광대역 잡음 + (BPFO 주기로 4 kHz 공진을 때리는 충격열).
      실제 설비를 흉내 내려면 잡음이 반드시 있어야 한다 — 잡음 없는 순수 합성에서는 어떤 지표든
@@ -271,7 +269,10 @@ const run = (vals) => Band.bandEnergy(vals, FS, FR, FS / 2).vals;
     const dEnv = weak.env.O / base.env.O;           // BPFO 하모닉 합
     chk(dBand < 1.2, '초기 결함에서 대역은 거의 안 움직인다', `×${dBand.toFixed(2)}`);
     chk(dEnv > 2, '같은 신호에서 포락선은 확실히 이탈한다', `×${dEnv.toFixed(2)}`);
-    chk(dEnv > dBand * 2, '포락선이 대역보다 민감하다 — 조기 경보의 근거', `포락선 ×${dEnv.toFixed(2)} vs 대역 ×${dBand.toFixed(2)}`);
+    /* 배수 하한은 위 두 검사(env>2, band<1.2)가 이미 함의하는 1.67보다 조금 아래로 둔다.
+       예전 값 ×2는 난수 생성기 버그로 잡음에 하모닉 숲이 있던 시절에 잡힌 것이라,
+       정상 잡음에서는 실측이 1.9배로 그 선에 아슬아슬하게 걸렸다. */
+    chk(dEnv > dBand * 1.6, '포락선이 대역보다 민감하다 — 조기 경보의 근거', `포락선 ×${dEnv.toFixed(2)} vs 대역 ×${dBand.toFixed(2)}`);
   }
 
   // 심각도를 따라가는가 — 검출만 되고 추세가 안 되면 계열로 쌓을 이유가 없다

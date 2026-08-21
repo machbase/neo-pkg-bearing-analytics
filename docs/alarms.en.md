@@ -43,6 +43,17 @@ Things to know:
 
 ## Evaluation interval and window
 
+> **First, know this — monitoring runs on two cadences.**
+>
+> | | What it does | Interval |
+> | :--- | :--- | :--- |
+> | Fast axis | running/stopped · signal lost · instrumentation faults · amplitude tracking | the **evaluation interval** set below (default 10 s) |
+> | Slow axis | **fault pattern — grades and events come from here** | the **pattern/band extraction interval** (default 10 min) |
+>
+> The settings below configure the **fast axis**. Grades actually change on the slow axis, so
+> shortening the evaluation interval to 1 second does not make alarms arrive sooner.
+> See [How detection works](./detection.en.md) for the full picture.
+
 The first item in alarm settings reads as one sentence:
 
 > Evaluate the last **[RMS window]** of data every **[interval]**
@@ -73,6 +84,12 @@ These settings reduce noise from momentary spikes and from flapping across a bou
 | Recovery hold | Immediate · 1m · 5m · 10m | After returning to normal, it must hold this long before a recovery alarm |
 
 If alarms arrive less often than expected, check the entry hold first; if too often, check the recovery hold.
+
+> **A 10-minute judgment cadence changed what this setting means.** An entry hold shorter than
+> 10 minutes effectively means "confirmed on the next cycle" — no grade judgment happens in between.
+> For a real delay, use **multiples** of the extraction interval (10 min extraction + 20 min entry
+> = two consecutive cycles). The recovery hold still works as before: it stops recovery alerts
+> repeating when the grade oscillates across a boundary.
 
 ### Where to send — the notification channel
 
@@ -171,7 +188,12 @@ The order of use:
 1. Turn on **band extraction** and set the extraction interval (10m · 30m · 1h).
 2. If samples are short, use **backfill past data** to compute retroactively from raw data already in the DB.
 3. Once there are enough samples, run **Learn** to build the per-series normal reference.
-4. When a trained series exceeds its limit, a **band breach** event is created.
+4. When a trained series exceeds its limit, it is shown on the card and in the evidence table as a **multiple of the limit**.
+
+> **Bands do not raise alerts.** Comparing eight series against their limits and firing if any one
+> exceeds is a small multiple-comparison problem in itself (13% false positives alone), and its
+> time axis differs from the grade's. Band values are used as **evidence for narrowing down which
+> band moved**, not as alerts. Baseline breaches are silent for the same reason — displayed only.
 
 Alongside the eight frequency bands, **envelope series** accumulate and are judged the same way: a periodicity measure, plus BPFO·BPFI·BSF fault-frequency series when a bearing part number is set. Per-channel status shows something like `trained 4/9`, where the denominator is the number of series **measurable on that tag** — low sample rates drop the upper bands and a missing bearing number drops the fault-frequency series. That is normal.
 
@@ -213,6 +235,7 @@ To verify alarms end to end, check in this order:
 4. If notifications don't arrive, isolate the delivery path first with the channel **Test**.
 5. If tests arrive but real alarms don't, check **per-severity delivery** and the **entry hold** (the state must persist that long to be confirmed).
 6. If only certain tags are silent in server mode, check whether their table has ROLLUP.
+7. If vibration is clearly high but no alarm fires at all, check that the **shaft speed and bearing part number** are filled in — without either, the fault pattern cannot be computed and the grade never rises. The card's coverage indicator shows this.
 
 ## Navigation
 

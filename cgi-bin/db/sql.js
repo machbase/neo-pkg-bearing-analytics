@@ -11,8 +11,9 @@
 //                    (RMS=√(SS/CNT), P2P=MX-MN, Crest=max|·|/RMS 는 calc가 계산)
 // 6. rollupBatch   : 테이블 단위 다태그 롤업 — GROUP BY NAME, RT (모니터링 5초 갱신용)
 // 7. rawWindow     : 원시 파형 구간 — TIME BETWEEN to_date(초 단위)
-// 8. fftTql        : 서버 FFT — TQL: SQL(raw)→MAPKEY('fft')→GROUPBYKEY()→FFT(minHz,maxHz)→CSV
-// 9. 상시감시(P6) : NEO_VIBE_EVENTS(TAG — 이벤트 이력, NAME='<테이블>:<태그>'라 설비 단위 삭제 가능) +
+// 8. lastSampleAt  : 앵커 이하 마지막 표본이 있는 초 — 초 롤업 역순 1건(간헐 수집 데이터 대응)
+// 9. fftTql        : 서버 FFT — TQL: SQL(raw)→MAPKEY('fft')→GROUPBYKEY()→FFT(minHz,maxHz)→CSV
+// 10. 상시감시(P6) : NEO_VIBE_EVENTS(TAG — 이벤트 이력, NAME='<테이블>:<태그>'라 설비 단위 삭제 가능) +
 //                    MONSTATE/BASELINE(LOOKUP — 직전 판정/μ·σ, UPSERT 필요).
 //                    판정은 앱이 열려 있는 동안 앱(app._judgeLive)이 수행 — 타이머/서버 상주 없음.
 //                    KV류(MONSTATE/BASELINE) VAL은 encodeURIComponent(JSON)+('→%27) 관례.
@@ -98,6 +99,17 @@
   function rawWindow(table, tag, fromMs, toMs) {
     return 'select TIME, VALUE from ' + ident(table) + " where NAME='" + esc(tag) + "' and TIME between "
       + sqlDate(fromMs) + ' and ' + sqlDate(toMs) + ' order by TIME';
+  }
+
+  /* 앵커 이하로 표본이 실제로 있는 마지막 '초'. 간헐 수집(예: 10분마다 1초)에서는 분석 창을
+     앵커에 그대로 붙이면 수집 공백에 떨어져 통째로 빈다 — 창 끝을 실데이터에 맞추기 위한 조회다.
+     원본을 역방향으로 훑는 방식(MAX(TIME)·ORDER BY TIME DESC)은 스캔 폭에 비례해 느려지므로
+     초 롤업에서 찾는다. 롤업은 사전 집계라 데이터 기간이 길어져도 비용이 사실상 일정하다.
+     COUNT는 폴백(DATE_TRUNC) 경로에서 빈 버킷을 거르려고 함께 받는다. */
+  function lastSampleAt(table, tag, fromMs, toMs, useTrunc) {
+    return 'select ' + bucketExpr('sec', useTrunc) + ' RT, COUNT(VALUE) CNT from ' + ident(table)
+      + " where NAME='" + esc(tag) + "' and TIME between " + sqlDate(fromMs) + ' and ' + sqlDate(toMs)
+      + ' group by RT order by RT desc limit 1';
   }
 
   /* 샘플레이트 추정용 — 값은 필요 없고 연속한 표본의 시각만 있으면 된다.
@@ -245,7 +257,7 @@
     esc: esc, ident: ident, sqlDate: sqlDate,
     catalogTables: catalogTables, catalogCount: catalogCount, tagSchemas: tagSchemas,
     tagList: tagList, tagStats: tagStats,
-    rollupTrend: rollupTrend, rollupBatch: rollupBatch, rawWindow: rawWindow, sampleTimes: sampleTimes, fftTql: fftTql,
+    rollupTrend: rollupTrend, rollupBatch: rollupBatch, rawWindow: rawWindow, lastSampleAt: lastSampleAt, sampleTimes: sampleTimes, fftTql: fftTql,
     monCreateTables: monCreateTables, bandTrend: bandTrend, bandRaw: bandRaw, bandTimes: bandTimes, bandLatest: bandLatest, eventsSelect: eventsSelect, eventsRange: eventsRange,
     eventsCount: eventsCount, eventInsert: eventInsert,
     eventsDeleteTag: eventsDeleteTag, eventsDeleteRange: eventsDeleteRange,

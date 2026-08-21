@@ -84,11 +84,12 @@ const types = l => l.map(e => e.etype);
   check('완화: 상태는 위험(2)로 갱신', st.g === 2);
 }
 
-// 7) 베이스라인 이탈 온셋 — 등급 전이와 독립, 한 번만
+// 7) 베이스라인 이탈 — 상태는 추적하되 이벤트는 내지 않는다(이벤트는 10분 패턴 축 전용)
 {
   const c = { ...cfg, escHold: 0 };
-  const { log } = run([[0, 0, false], [S, 0, true], [2 * S, 0, true]], c);
-  check('베이스라인: 온셋 1건만(양호 등급이어도)', log.filter(e => e.etype === 'baseline').length === 1);
+  const { log, st } = run([[0, 0, false], [S, 0, true], [2 * S, 0, true]], c);
+  check('베이스라인: 이벤트 0건', log.filter(e => e.etype === 'baseline').length === 0);
+  check('베이스라인: 이탈 상태는 남는다(근거표가 읽는다)', st.b === true);
 }
 
 // 8) 최초 관측이 이미 나쁨 — 즉시 기록

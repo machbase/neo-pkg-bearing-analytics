@@ -2,6 +2,7 @@
 // 정답을 아는 합성 신호를 넣어 "계산이 물리적으로 맞는가"를 본다.
 // 라이브 데이터로는 "그럴듯한 값이 나왔다"까지밖에 확인할 수 없다 — 정현파 100 Hz를 넣으면
 // 100 Hz가 나와야 하고, 진폭 2.0이면 스펙트럼 피크도 2.0이어야 한다. 그걸 여기서 못 박는다.
+import { mulberry32 } from './_rnd.mjs';
 const VC = (await import('../../cgi-bin/calc/calc.js')).default;
 
 let fail = 0;
@@ -15,8 +16,7 @@ const near = (a, b, tolPct) => Math.abs(a - b) <= Math.abs(b) * (tolPct / 100) +
 const sine = (n, fs, f, amp, phase) => Array.from({ length: n }, (_, i) => amp * Math.sin(2 * Math.PI * f * i / fs + (phase || 0)));
 const add = (...arrs) => arrs[0].map((_, i) => arrs.reduce((s, a) => s + a[i], 0));
 // 결정론 잡음 — Math.random은 실행마다 결과가 달라져 회귀 판정이 불가능하다
-let _seed = 12345;
-const rnd = () => { _seed = (_seed * 1103515245 + 12345) & 0x7fffffff; return _seed / 0x7fffffff * 2 - 1; };
+const rnd = mulberry32(12345);
 const noise = (n, amp) => Array.from({ length: n }, () => amp * rnd());
 const peakOf = (freqs, mags) => { let bi = 0; for (let i = 1; i < mags.length; i++) if (mags[i] > mags[bi]) bi = i; return { f: freqs[bi], m: mags[bi] }; };
 

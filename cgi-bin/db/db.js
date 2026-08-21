@@ -141,6 +141,29 @@
     });
   }
 
+  /* 앵커(toMs) 이하로 표본이 있는 마지막 '초'의 시작 ms — 없으면 null.
+     rollupTrend와 같은 폴백 규약을 따른다: 롤업 미지원 테이블은 DATE_TRUNC로 내려가고,
+     그 경로는 원본 전체 스캔이라 구간을 캡한다(기본 1시간 — 그보다 긴 수집 공백은 포기하고 null). */
+  function lastSampleMs(table, tag, fromMs, toMs, opts) {
+    opts = opts || {};
+    function run(useTrunc) {
+      var f = fromMs;
+      if (useTrunc) f = Math.max(fromMs, toMs - (opts.truncCapMs || 3600e3));
+      if (f > toMs) return Promise.resolve(null);
+      return q(SQL.lastSampleAt(table, tag, f, toMs, useTrunc)).then(function (rows) {
+        if (!rows.length) return null;
+        var ms = +rows[0][0];
+        return (isFinite(ms) && +rows[0][1] > 0) ? ms : null;
+      });
+    }
+    if (_noRollup[table]) return run(true);
+    return run(false).catch(function (e) {
+      if (!isRollupErr(e)) throw e;
+      _noRollup[table] = true;
+      return run(true);
+    });
+  }
+
   /* 샘플레이트 추정용 표본 시각 — 마이크로초 정수 배열.
      ms는 고주파 간격이 0으로 뭉개지고 ns는 JS 안전 정수를 넘는다 — μs만 두 조건을 만족한다.
      실패하면 빈 배열 — 호출측이 다른 추정으로 넘어간다. */
@@ -619,7 +642,7 @@
     createBandTimer: createBandTimer, deleteBandTimer: deleteBandTimer, bandTrend: bandTrend, bandRaw: bandRaw, bandBackfill: bandBackfill, bandTimes: bandTimes, bandLatest: bandLatest,
     ensureDir: ensureDir, saveFile: saveFile, listDir: listDir, deleteFile: deleteFile, readFileBlob: readFileBlob,
     listTagTables: listTagTables, tagSchemas: tagSchemas, listTags: listTags, tagStats: tagStats, isNoRollup: isNoRollup,
-    rollupTrend: rollupTrend, rollupBatch: rollupBatch, rawWindow: rawWindow, sampleTimes: sampleTimes, fftSpectrum: fftSpectrum,
+    rollupTrend: rollupTrend, rollupBatch: rollupBatch, rawWindow: rawWindow, lastSampleMs: lastSampleMs, sampleTimes: sampleTimes, fftSpectrum: fftSpectrum,
     loadConfig: loadConfig, saveConfig: saveConfig, saveConfigPartial: saveConfigPartial,
     ensureMonTables: ensureMonTables, loadEvents: loadEvents, loadEventsRange: loadEventsRange, countEvents: countEvents,
     loadBaselines: loadBaselines, saveBaseline: saveBaseline, deleteBaseline: deleteBaseline,

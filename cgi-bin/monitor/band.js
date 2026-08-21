@@ -21,7 +21,12 @@
   var WIN_POW = 15; // 2^15 = 32,768 샘플 (25.6 kHz에서 1.28초 · 1 kHz에서 32.8초)
 
   // fr(회전주파수) 기준 대역 경계 — live.js의 정의와 반드시 같아야 한다(두 벌이면 값이 어긋난다)
+  /* 회전수를 모르면 1× 상대 대역(sub·one·fault·high)은 정의 자체가 없다. 폭 0으로 돌려주면
+     에너지가 0이 되어 학습이 그 대역을 거부하고 판정이 건너뛴다 — 이미 있는 경로를 그대로 탄다.
+     추측한 fr로 경계를 그으면 네 대역이 전부 엉뚱한 곳을 재면서 값은 멀쩡해 보인다. */
   function bandsFor(fr, nyq) {
+    if (!(fr > 0)) return [[0, 0], [0, 0], [0, 0], [0, 0], [1000, 2000], [2000, 4000], [4000, 8000], [8000, 16000]]
+      .map(function (b, i) { return i < 4 ? b : [Math.min(b[0], nyq), Math.min(b[1], nyq)]; });
     return [
       [2, Math.max(3, 0.5 * fr)],
       [Math.max(2, 0.5 * fr), 1.5 * fr],
@@ -252,6 +257,9 @@
       'var __bandEnergy=' + bandEnergy.toString() + ';',
       // null이면 태그마다 MAX_TIME 하나(타이머), 배열이면 그 시각들을 창 끝으로 반복(백필)
       'var ANCHORS=' + (spec.anchors && spec.anchors.length ? JSON.stringify(spec.anchors.map(Number)) : 'null') + ';',
+      /* 백필 앵커의 격자 간격. 앵커가 수집 공백에 떨어졌을 때 되짚을 범위이자, 이미 채운 칸을
+         가려내는 단위다. 타이머 경로는 앵커가 MAX_TIME 하나뿐이라 0(되짚기·구간 중복검사 없음). */
+      'var GRID=' + (spec.anchors && spec.anchors.length ? Math.max(0, Number(spec.grid) || 0) : 0) + ';',
       'var db=$.db(), now=' + (Number(spec.nowMs) || Date.now()) + ', nOk=0;',
       'function esc(s){return String(s).replace(/\'/g,"\'\'");}',
       // 시각 문자열(밀리초 포함) — sqlDate와 같은 규약
@@ -289,8 +297,10 @@
          백필 경로는 앱이 bandTimes로 이미 걸러 보내지만, 여기서도 막아 두 경로가 같게 동작한다. */
       /* dry run은 쓰지 않으므로 이 검사를 하지 않는다 — 하면 이미 저장된 앵커에서
          미리보기가 빈 결과로 나와 검증이 통과 여부를 못 가린다. */
-      dry ? '' : '  var seen=0;',
-      dry ? '' : '  try { db.query("select count(*) from NEO_VIBE_BAND where NAME=\'"+esc(t.tbl+":"+t.tag+":"+NAMES[0])+"\' and TIME between to_date(\'"+dt(maxMs)+"\') and to_date(\'"+dt(maxMs)+"\')")',
+      /* 되짚기가 붙으면 저장 시각이 앵커와 달라진다 — 앵커 한 점만 보면 매번 못 찾아 같은 구간을
+         다시 계산하고 값이 쌓인다. 그래서 백필은 격자 한 칸 안에 이미 값이 있는지로 판단한다. */
+      dry ? '' : '  var seen=0, dLo = GRID>0 ? (maxMs-GRID) : maxMs;',
+      dry ? '' : '  try { db.query("select count(*) from NEO_VIBE_BAND where NAME=\'"+esc(t.tbl+":"+t.tag+":"+NAMES[0])+"\' and TIME between to_date(\'"+dt(dLo)+"\') and to_date(\'"+dt(maxMs)+"\')")',
       // 표가 아직 없거나 조회가 실패하면 중복을 감수하고 진행한다 — 감시가 통째로 죽는 것보다 낫다
       dry ? '' : '    .forEach(function(r){ seen=+r[0]; }); } catch(e) { seen=0; }',
       dry ? '' : '  if(seen>0) return;',
@@ -299,6 +309,25 @@
       // 원본 조회도 같다 — 없는 테이블이면 이 앵커만 버리고 다음 태그로 간다
       '  try { db.query("select VALUE from "+t.tbl+" where NAME=\'"+esc(t.tag)+"\' and TIME between to_date(\'"+dt(fromMs)+"\') and to_date(\'"+dt(maxMs)+"\') order by TIME")',
       '    .forEach(function(r){ vals.push(+r[0]); }); } catch(e) { return; }',
+      /* 간헐 수집(예: 10분마다 1초) 대응 — 백필 앵커는 벽시계 격자(정각·10분·20분…)에 맞춰 만들어지는데
+         수집 시각은 그 격자와 무관하다. 그대로 두면 앵커가 거의 전부 수집 공백에 떨어져 백필이 한 건도
+         못 쌓고, 대역 베이스라인이 영영 학습되지 않아 세 판정 중 대역 판정만 조용히 죽는다.
+         비었으면 앵커 이전에서 표본이 실제로 있는 마지막 초로 한 번만 당겨 다시 읽는다.
+         하한은 격자 한 칸 — 더 가면 여러 앵커가 같은 구간을 겹쳐 재 추세가 같은 값의 반복이 되고,
+         그러면 σ가 붕괴해 한계가 μ에 붙는다(중복 저장을 막는 이유와 같다).
+         타이머 경로(GRID=0)는 앵커가 이미 MAX_TIME이라 되짚을 필요가 없어 건너뛴다. */
+      '  if(vals.length < 1024 && GRID > 0){',
+      '    var snapMs=0;',
+      '    try { db.query("select ROLLUP(\'sec\',1,TIME) RT, COUNT(VALUE) CNT from "+t.tbl+" where NAME=\'"+esc(t.tag)+"\' and TIME between to_date(\'"+dt(maxMs-GRID)+"\') and to_date(\'"+dt(maxMs)+"\') group by RT order by RT desc limit 1")',
+      '      .forEach(function(r){ if(+r[1]>0) snapMs=tms(r[0]); }); } catch(e) { snapMs=0; }',
+      '    if(snapMs>0){',
+      '      maxMs = snapMs + 1000;',   // 그 초의 끝까지 창에 넣는다
+      '      fromMs = maxMs - durMs;',
+      '      vals=[];',
+      '      try { db.query("select VALUE from "+t.tbl+" where NAME=\'"+esc(t.tag)+"\' and TIME between to_date(\'"+dt(fromMs)+"\') and to_date(\'"+dt(maxMs)+"\') order by TIME")',
+      '        .forEach(function(r){ vals.push(+r[0]); }); } catch(e) { return; }',
+      '    }',
+      '  }',
       '  if(vals.length < 1024) return;',
       // 대역값의 정의는 bandEnergy 하나뿐 — 앱·서버·테스트가 같은 소스를 쓴다
       '  var vv=__bandEnergy(vals, t.fs, t.fr, t.fs/2, {demod:t.demod, bf:t.bf});',

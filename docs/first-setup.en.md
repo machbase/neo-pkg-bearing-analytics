@@ -12,7 +12,7 @@ When you first open the app, the **Settings** screen is where you define what to
 | Section | Contents | Required |
 | :--- | :--- | :---: |
 | Data Source | Select TAG table(s) & tags, aliases | Yes |
-| Equipment | Unit · Class · RPM · bearing model · measurement & drive | Recommended |
+| Equipment | Unit · Class · **RPM · bearing model** · measurement & drive | **Yes** |
 | Criteria | Machine class, severity thresholds, baseline learning | Optional |
 | Alarms | Monitoring mode, evaluation interval/window, alarm behavior, notifications | Optional |
 | LLM | Provider for report and event opinions | Optional |
@@ -48,18 +48,24 @@ If a selected table or tag is removed from the DB or becomes empty, a change ban
 
 ## Equipment
 
-Telling the app what each tag actually is improves diagnostic accuracy. It works without this, but these values make grading and diagnosis more precise. Tags left unset are marked with an amber dot.
+The app needs to know what each tag actually is before it can produce a grade. Tags left unset are marked with an amber dot.
+
+> **RPM and bearing model are required.** The axis that switches the grade on is the fault-frequency grid, and without shaft speed and bearing geometry that grid cannot be built. If either is missing, that tag's **grade never rises** — which is "cannot judge", not "normal", and the card's coverage indicator says so.
+>
+> The remaining fields (unit, class, measurement, drive) are optional; judgment runs without them.
 
 | Field | Description |
 | :--- | :--- |
 | Unit | `mm/s` (velocity) · `g` (acceleration) · `μm` (displacement). Determines which threshold row is inherited |
 | Class | Equipment class (I–IV). Applies ISO 10816 severity zones |
-| RPM | Rotational speed — the basis for 1× and bearing fault frequency calculation (defaults to 1800) |
-| Bearing model | Pick from the catalog and geometry plus fault frequencies are computed automatically |
+| **RPM** | Rotational speed — the basis of the fault-frequency grid. **Leave it empty and no judgment is produced** (it is never guessed) |
+| **Bearing model** | Pick from the catalog and geometry plus fault frequencies are computed automatically. **Leave it empty and no judgment is produced** |
 
 Hovering the <kbd>?</kbd> next to each field name shows what the value is, where to find it, and what happens if you leave it empty.
 
 **Leave fields you don't know empty.** Only the faults judged from that field are reported as "not observable with this measurement"; the rest of the diagnosis proceeds normally. Filling a field by guessing is worse — the guess becomes evidence.
+
+The same principle now applies to RPM. It used to default to 1800 when empty, which threw the whole grid off on 2-pole (3600 rpm) and 6-pole (1200 rpm) machines while the screen went on producing grades as usual — the worst kind of silent error, so it was removed. **Read it off the nameplate and enter it exactly, or leave it empty and let it read "cannot judge".**
 
 ### ISO class reference
 
@@ -120,7 +126,7 @@ Thresholds can be edited directly in the table and restored with **Reset to defa
 
 Thresholds always apply. On top of that, learning the equipment's normal state adds a second, relative criterion.
 
-The app learns the center (μ) and typical variation (σ) of RMS over a normal operating window, then raises a **baseline breach** event when a value exceeds the limit. This catches a jump relative to normal even when the absolute value is still inside the Good zone.
+The app learns the center (μ) and typical variation (σ) of RMS over a normal operating window, then marks a **sharp rise versus normal** when a value exceeds the limit. This catches a jump relative to normal even when the absolute value is still inside the Good zone. Note that this axis produces **neither a grade nor an alert** — it is evidence to read on the card and in the evidence table.
 
 | Setting | Values | Description |
 | :--- | :--- | :--- |
