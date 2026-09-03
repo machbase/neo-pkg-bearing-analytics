@@ -4,6 +4,10 @@
 // 검증 풀에서 ISO 단독 오탐이 69%인데 그게 그대로 등급이 됐다 — 게이트로 바꾸면 4%다.
 globalThis.window = globalThis;
 const VC = (await import('../../cgi-bin/calc/calc.js')).default;
+/* 소스 대조는 파일을 직접 읽는다 — 경로를 cwd 기준으로 잡으면 어디서 부르느냐에 따라
+   검사가 통째로 안 돌거나 죽는다. 모듈 위치에서 푼다. */
+const PKG = new URL('../../', import.meta.url);
+const readPkg = async (rel) => (await import('node:fs')).readFileSync(new URL(rel, PKG), 'utf8');
 const { judgeTick } = await import('../src/app.js');
 
 let fail = 0;
@@ -79,13 +83,37 @@ const chk = (c, label, extra) => {
 {
   const { monPattern } = await import('../src/data/live.js');
   chk(typeof monPattern === 'function', 'monPattern이 감시용 진입점이다');
-  const src = (await import('node:fs')).readFileSync('frontend/src/data/live.js', 'utf8');
+  const src = await readPkg('frontend/src/data/live.js');
   const body = src.slice(src.indexOf('export async function monPattern'), src.indexOf('// 상세분석 상세 데이터'));
   chk(/const need = Math\.max\(4096, Math\.round\(fs_ \* VC\.MON_REV \/ fr\)\)/.test(body),
     '필요한 표본 수를 회전수에서 역산한다');
   chk(/for \(let k = 0; k < 2 && w\.values\.length && w\.values\.length < need/.test(body),
     '모자라면 창을 넓혀 다시 읽는다 — 밀도가 낮은 태그가 조용히 빠지지 않게');
   chk(/w\.values\.length > need/.test(body), '넘치면 최신 쪽만 쓴다 — 창이 길어지면 운전 상태가 섞인다');
+}
+
+/* ── 저샘플 폴백: 세 경로가 같은 규칙을 쓴다 ────────────────────────────────
+   고정 대역(1~5 kHz)은 fs ≥ 10.5 kHz에서만 선다. 그보다 낮으면 대역통과 없이 전대역으로
+   복조한다 — 여기서 손을 떼면 등급을 켜는 축이 통째로 빠져 카드가 '판정 보류'로 굳는데,
+   같은 신호를 상세분석은 전대역으로 복조해 진단을 낸다(두 화면이 다른 말을 한다).
+   커토그램으로 물러서지는 않는다 — 커토그램 대역 12% vs 대역통과 없음 43%(6.4 kHz 재현).
+   근거가 약해지는 것은 사실이므로 세 경로 모두 '전대역이었다'를 함께 돌려준다. */
+{
+  chk(VC.demodFixed(20480) && !VC.demodFixed(2048), '고정 대역은 고샘플에서만 선다',
+    JSON.stringify(VC.demodFixed(2048)));
+  // 대역 없이도 포락선이 나온다 — 폴백의 전제
+  const sig = []; for (let i = 0; i < 8192; i++) sig.push(Math.sin(2 * Math.PI * 120 * i / 2048) * (1 + Math.sin(2 * Math.PI * 7 * i / 2048)));
+  chk(VC.envelopeSpectrum(sig, 2048, 500, null).freqs.length > 0, '대역이 null이면 전대역으로 복조한다');
+
+  const live = await readPkg('frontend/src/data/live.js');
+  const mon = live.slice(live.indexOf('export async function monPattern'), live.indexOf('// 상세분석 상세 데이터'));
+  chk(!/if \(!band\) return null/.test(mon), '감시 경로가 저샘플에서 손을 떼지 않는다');
+  chk(/demodSrc: band \? 'fixed' : 'wideband'/.test(mon), '감시 경로가 복조 출처를 알려준다');
+  chk(/det\.demodSrc = fixBand \? 'fixed' : 'wideband'/.test(live), '상세 경로도 같은 이름으로 알려준다');
+
+  const srv = await readPkg('cgi-bin/monitor/monitor.js');
+  chk(!/demodFixed\(t\.fs\); if\(!band\) return null/.test(srv), '서버 감시도 저샘플에서 손을 떼지 않는다');
+  chk(/demodFixed\(t\.fs\) \|\| null/.test(srv) && /wide: !band/.test(srv), '서버 감시도 전대역 여부를 함께 돌려준다');
 }
 
 console.log(fail ? `\n=== FAIL ${fail}건 (추가분 포함) ===` : '\n=== 추가분까지 전부 통과 ===');

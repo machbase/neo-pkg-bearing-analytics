@@ -56,29 +56,38 @@ const rowOf = (vm, id) => (vm.equipRows || []).filter((r) => r.id === id)[0];
   const vm = app.renderVals();
   chk(vm.equipRows.length === 7, '필터 없이는 전 태그가 나온다 — 목록 자체를 자르지 않는다', String(vm.equipRows.length));
   const f = {}; (vm.equipFilters || []).forEach((x) => { f[x.label] = x; });
-  chk((vm.equipFilters || []).length === 2, '필터는 전체/미설정 둘뿐 — 부분집합 관계인 칩을 나란히 두면 같은 수가 두 번 보인다',
+  chk((vm.equipFilters || []).length === 2, '필터는 전체/판정 불가 둘뿐 — 부분집합 관계인 칩을 나란히 두면 같은 수가 두 번 보인다',
     JSON.stringify((vm.equipFilters || []).map((x) => x.label + ':' + x.count)));
   chk(f['전체'] && f['전체'].count === 7, '전체 수를 센다');
-  chk(f['미설정'] && f['미설정'].count === 7, '아무것도 지정 안 했으면 전부 미설정');
+  /* "미설정"이 아니라 "판정 불가"를 센다 — 미설정은 OR라 RPM 하나만 넣어도 빠지는데
+     그 태그도 격자를 못 그어 등급이 안 선다. 조치로 이어지는 쪽을 남긴다. */
+  chk(f['판정 불가'] && f['판정 불가'].count === 7, '회전수·베어링이 없으면 전부 판정 불가');
+}
+{
+  // 회전수만 넣은 줄은 여전히 판정 불가다 — 격자에는 베어링 기하도 있어야 한다
+  const app = mkApp({ equipRpm: { [MX]: 1800 } });
+  const f = (app.renderVals().equipFilters || []).filter((x) => x.label === '판정 불가')[0];
+  chk(f.count === 7, 'RPM만 넣어서는 판정 불가가 줄지 않는다', String(f.count));
 }
 {
   // 좌측 내비 배지(_equipUnset)와 같은 기준으로 걸러야 배지를 보고 들어온 사람이 그 줄만 본다
-  const app = mkApp({ equipCls: { [MX]: 'III' } });
+  const app = mkApp({ equipRpm: { [MX]: 1800 }, equipBearing: { [MX]: '6208' } });
   const vm = app.renderVals();
-  const f = (vm.equipFilters || []).filter((x) => x.label === '미설정')[0];
-  chk(f.count === 6, '한 줄을 채우면 미설정이 줄어든다', String(f.count));
+  const f = (vm.equipFilters || []).filter((x) => x.label === '판정 불가')[0];
+  chk(f.count === 6, '회전수와 베어링을 둘 다 채우면 판정 불가가 줄어든다', String(f.count));
 
-  app.state.equipFilter = 'unset';
+  app.state.equipFilter = 'blocked';
   const vm2 = app.renderVals();
-  chk(vm2.equipRows.length === 6 && !rowOf(vm2, MX), '미설정 필터는 채운 줄을 뺀다', String(vm2.equipRows.length));
+  chk(vm2.equipRows.length === 6 && !rowOf(vm2, MX), '판정 불가 필터는 채운 줄을 뺀다', String(vm2.equipRows.length));
   chk(vm2.equipFilterEmpty === false, '남은 줄이 있으면 빈 상태가 아니다');
 }
 {
-  const cls = {}; [MX, MY, MZ, PX, ID('T1', 'PUMP_02_Y'), FX, ID('T2', 'FAN_09_Y')].forEach((id) => { cls[id] = 'II'; });
-  const app = mkApp({ equipCls: cls, equipFilter: 'unset' });
+  const ALL = [MX, MY, MZ, PX, ID('T1', 'PUMP_02_Y'), FX, ID('T2', 'FAN_09_Y')];
+  const rpm = {}, br = {}; ALL.forEach((id) => { rpm[id] = 1800; br[id] = '6209'; });
+  const app = mkApp({ equipRpm: rpm, equipBearing: br, equipFilter: 'blocked' });
   const vm = app.renderVals();
-  chk(vm.equipRows.length === 0 && vm.equipFilterEmpty === true, '다 채우면 미설정 필터는 빈 상태를 낸다');
-  const f = (vm.equipFilters || []).filter((x) => x.label === '미설정')[0];
+  chk(vm.equipRows.length === 0 && vm.equipFilterEmpty === true, '다 채우면 판정 불가 필터는 빈 상태를 낸다');
+  const f = (vm.equipFilters || []).filter((x) => x.label === '판정 불가')[0];
   chk(f.onClick === null, '0건 필터는 눌리지 않는다 — 빈 목록으로 들어가는 길을 막는다');
   vm.onEquipFilterAll();
   chk(app.state.equipFilter === 'all', '빈 상태에서 전체 보기로 돌아온다');
@@ -229,8 +238,8 @@ const rowOf = (vm, id) => (vm.equipRows || []).filter((r) => r.id === id)[0];
   // 필터를 바꾸면 패널을 닫는다 — 열어 둔 원본 행이 걸러져 사라지면 패널만 떠 있게 된다
   const app = mkApp({ equipCls: { [MX]: 'III' }, equipBulk: { id: MX, scope: '', fields: {} } });
   const vm = app.renderVals();
-  (vm.equipFilters || []).filter((x) => x.label === '미설정')[0].onClick();
-  chk(app.state.equipBulk === null && app.state.equipFilter === 'unset', '필터를 바꾸면 일괄 적용 패널이 닫힌다');
+  (vm.equipFilters || []).filter((x) => x.label === '판정 불가')[0].onClick();
+  chk(app.state.equipBulk === null && app.state.equipFilter === 'blocked', '필터를 바꾸면 일괄 적용 패널이 닫힌다');
 }
 
 console.log(fail ? `\n=== FAIL ${fail}건 ===` : '\n=== 전부 통과 ===');

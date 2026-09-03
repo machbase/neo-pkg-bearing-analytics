@@ -207,6 +207,11 @@
   function bandDeleteRange(fromMs, toMs) {
     return 'delete from NEO_VIBE_BAND where TIME between ' + sqlDate(fromMs) + ' and ' + sqlDate(toMs);
   }
+  /* 계열 한 점 저장 — 대역 타이머는 자기 TQL 안에서 직접 INSERT를 만들지만,
+     앱이 매 회차 격자 점수를 남길 때는 이 문장을 쓴다(같은 표·같은 키 규칙). */
+  function bandInsert(key, ms, v) {
+    return "insert into NEO_VIBE_BAND values('" + esc(key) + "', " + sqlDate(ms) + ', ' + (+v || 0) + ')';
+  }
   function bandDeleteKey(key) { return "delete from NEO_VIBE_BAND where NAME='" + esc(key) + "'"; }
   /* 데이터가 하나도 안 남은 태그의 이름을 메타에서 지운다 — 행을 다 지워도 이름은 메타에 남는다.
      이름을 지워도 무해하다: INSERT가 없는 이름을 자동 재등록하므로 살아 있는 태그는 저절로 돌아온다. */

@@ -107,6 +107,10 @@
     ".act.plan{border-color:rgba(224,123,57,.45);background:rgba(224,123,57,.07)}.act.plan .act-h{color:#e07b39}",
     ".act.urgent{border-color:rgba(229,72,77,.45);background:rgba(229,72,77,.07)}.act.urgent .act-h{color:#e5484d}",
     ".sum-tbl .k-sub{font-size:10.5px;font-weight:400;color:var(--text-muted);margin-top:1px}",
+    /* 판정과 ISO가 갈릴 때 그 사실을 적는 자리 — 등급 팔레트를 쓰지 않는다.
+       색으로 심각도를 말하면 "5번째 등급"으로 오독된다. 테두리만 두고 본문 색을 쓴다. */
+    ".judge-gap{margin:12px 0 2px;padding:10px 13px;border-radius:6px;border:1px solid var(--border-default);background:var(--bg-input);font-size:12.5px;color:var(--text-secondary);line-height:1.6}",
+    ".judge-gap b{color:var(--text-primary)}.judge-gap .mut{color:var(--text-muted);font-size:11.5px}",
     ".judge-note{margin:2px 0 8px;padding:7px 11px;border-radius:6px;background:var(--bg-input);font-size:12px;color:var(--text-secondary);line-height:1.55}",
     ".judge-note b{color:var(--text-primary)}.judge-note .mut{color:var(--text-muted);font-weight:400}",
     ".sum-tbl .mut{color:var(--text-tertiary)}",
@@ -442,7 +446,10 @@
       if (isoH) {
         // 게이트 중에는 "판정"이 아니라 관측값이다 — 라벨·색을 내리고 편향 방향(상한/하한)을 밝힌다.
         // 값을 숨기지는 않는다: 8블록 평균한 대역제한 값이 이 리포트에서 아티팩트에 가장 강건한 숫자다.
-        h.push('<tr><td class="k">' + (sm.gate ? 'ISO 대역제한 속도 RMS<div class="k-sub">판정 보류</div>' : 'ISO 10816 판정') + '</td>'
+        /* 라벨에서 "판정"을 뗀다 — 판정은 위 헤드라인이 하고, 이 행은 규격 값이다.
+           행 자체는 남긴다: 규격 준수를 문서로 요구받는 현장에서 인용되는 숫자다. */
+        h.push('<tr><td class="k">' + (sm.gate ? 'ISO 대역제한 속도 RMS<div class="k-sub">판정 보류</div>'
+          : 'ISO 10816 존<div class="k-sub">규격 참조값</div>') + '</td>'
           + '<td class="v">' + (sm.gate
             ? '<span class="mut">' + esc(isoH.gradeKo) + ' 수준</span> · ' + esc(isoH.rms) + ' ' + esc(p.zonesUnit || 'mm/s') + ' <span class="tag">잠정</span>'
             : '<b style="color:' + esc(isoH.color) + ';">' + esc(isoH.gradeKo) + '</b> · ' + esc(isoH.rms) + ' ' + esc(p.zonesUnit || 'mm/s')) + '</td>'
@@ -509,13 +516,19 @@
       + (p.opinion ? '<a href="#s-llm">LLM 소견</a>' : '') + '<a href="#s-verdict">권고</a></div>');
 
     // ── 심각도 평가 ──
-    // 헤드라인은 ISO 10816 규격 정의(10–1000 Hz 대역제한 속도 RMS)로 판정 — 광대역 감시 RMS(알람용)와 분리.
-    // 감시 등급이 더 높아도 규격 판정은 방어 가능한 값이어야 정비팀 신뢰를 유지한다.
-    var hlKo = isoH ? isoH.gradeKo : p.gradeKo, hlColor = isoH ? isoH.color : p.gradeColor, hlIdx = isoH ? isoH.gradeIdx : p.gradeIdx;
+    /* 헤드라인은 **판정 등급**이다 — 화면 카드와 같은 값(결함 패턴이 켜고 ISO가 높이를 정한다).
+       여기에 ISO 존을 쓰면 안 된다 — 383 케이스에서 두 값이 46% 어긋나고 방향이 둘 다 나쁘다:
+         · 결함 283건 중 115건이 리포트 표지에 "양호"로 나간다(진폭이 아직 낮은 초기 결함)
+         · 정상 100건 중 42건이 주의 이상으로 나간다(그중 4건은 "심각")
+       ISO 값은 버리지 않는다 — 규격 참조값으로 아래에 그대로 남고, 판정과 다르면 그 사실을 크게 적는다. */
+    var hlKo = p.gradeKo, hlColor = p.gradeColor, hlIdx = p.gradeIdx;
+    var J = p.judge || {};
+    // 판정을 못 한 경우는 등급이 아니라 측정 상태다 — 양호로 인쇄하면 갖지 않은 근거를 주장하게 된다
+    if (J.patNa) { hlKo = '판정 못 함'; hlColor = 'var(--text-muted)'; hlIdx = -1; }
     sectionOpen(h, '진동 심각도 평가', null, '<span class="mono">' + esc(p.sevMachine) + '</span>', 's-sev');
     h.push('<div class="sev-box">');
     h.push('<div style="font-size:11px;color:var(--text-muted);margin-bottom:3px;">' + (isoH
-      ? 'ISO 10816 판정 <span style="color:var(--text-tertiary);">· 10–1000 Hz 대역제한 속도 RMS ' + esc(isoH.rms) + ' ' + esc(p.zonesUnit || 'mm/s')
+      ? '판정 <span style="color:var(--text-tertiary);">· 결함 패턴이 등급을 켜고 ISO 존이 높이를 정합니다 · 근거 10–1000 Hz 대역제한 속도 RMS ' + esc(isoH.rms) + ' ' + esc(p.zonesUnit || 'mm/s')
         + (isoH.blocks ? ' · ' + isoH.blocks + '블록 에너지 평균' : '') + (isoH.anaSec ? ' · 총 ' + esc(isoH.anaSec) + '초' : '')
         + (isoH.spread ? ' · 블록간 변동 ×' + esc(isoH.spread) : '') + ' — 규격 정의 물리량 기준</span>'
         + (isoH.spreadWarn ? '<span style="margin-left:6px;color:#c77d0a;font-weight:600;">⚠정상상태 전제 미충족 — 존 판정 잠정</span>' : '')
@@ -527,15 +540,40 @@
       { ko: '양호', range: '< ' + Z[0] }, { ko: '주의', range: Z[0] + '–' + Z[1] },
       { ko: '위험', range: Z[1] + '–' + Z[2] }, { ko: '심각', range: '> ' + Z[2] },
     ];
-    if (isoH) h.push('<span class="zone-lab">ISO 10816 Zone ' + ['A', 'B', 'C', 'D'][isoH.gradeIdx] + '</span>');
+    /* 등급 옆 배지는 **등급을 켠 축**을 말한다 — ISO Zone은 아래 게이지가 따로 가리키므로 여기 겹쳐 쓰지 않는다. */
+    h.push('<span class="zone-lab">' + (J.patNa ? '결함 패턴 미측정'
+      : J.patOn ? ('결함 패턴 검출' + (J.site ? ' · ' + esc(J.site) : ''))
+        : '결함 패턴 없음') + '</span>');
+    /* 판정과 ISO가 갈릴 때 — 이 문단이 없으면 "심각이 양호가 됐다"로 읽힌다.
+       두 방향 모두 숨기지 않고 무엇을 확인해야 하는지까지 적는다. */
+    if (J.patNa) {
+      h.push('<div class="judge-gap"><b>회전수·베어링 정보가 없어 판정하지 못했습니다.</b><br>'
+        + '결함주파수 격자를 세울 수 없습니다. 설정 → 설비 정보에 명판 회전수와 베어링 품번을 넣고 다시 생성하십시오.'
+        + (isoH ? '<br><span class="mut">참고 — ISO 대역제한 속도 RMS ' + esc(isoH.rms) + ' ' + esc(p.zonesUnit || 'mm/s')
+          + ' (존 ' + ['A', 'B', 'C', 'D'][isoH.gradeIdx] + '). 이 값만으로는 베어링 상태를 말할 수 없습니다.</span>' : '')
+        + '</div>');
+    } else if (J.isoOnly > 0 && isoH) {
+      h.push('<div class="judge-gap">⚠ <b>진폭은 ISO 존 ' + ['A', 'B', 'C', 'D'][isoH.gradeIdx]
+        + '(' + esc(isoH.gradeKo) + ') — ' + esc(isoH.rms) + ' ' + esc(p.zonesUnit || 'mm/s') + '</b><br>'
+        + '베어링 결함주파수 자리에 근거가 서지 않아 등급을 올리지 않았습니다. 진동이 높은 것은 사실이며, 원인이 베어링 밖일 가능성이 큽니다.'
+        + '<br><span class="mut">확인할 것 — 불평형 · 정렬불량 · 체결 풀림 · 유체력(캐비테이션·서징)'
+        + '<br>이 도구로는 판별 불가 — 위상(타코)·축방향 채널이 필요합니다.</span></div>');
+    } else if (J.patOn && isoH && isoH.gradeIdx === 0) {
+      h.push('<div class="judge-gap">⚠ <b>진폭은 아직 낮습니다 — ISO 존 A (' + esc(isoH.rms) + ' ' + esc(p.zonesUnit || 'mm/s') + ')</b><br>'
+        + '결함은 진폭보다 먼저 주파수에 나타납니다. 초기 단계로 보이며, 지금 조치하면 계획 정지에 맞출 수 있습니다.</div>');
+    }
     h.push('<div class="gauge">');
+    var gaugeIdx = isoH ? isoH.gradeIdx : hlIdx;   // 게이지는 ISO 존 눈금이므로 ISO 위치를 가리킨다
     zoneDefs.forEach(function (zz, i) {
-      var act = i === hlIdx;
+      var act = i === gaugeIdx;
       h.push('<div class="cell" style="' + (act ? 'background:' + STATUS_COLOR[zz.ko] + ';color:#fff;' : 'background:var(--bg-elevated);color:var(--text-muted);') + 'border-right:1px solid var(--border-faint);">' + zz.ko + '</div>');
     });
     h.push('</div><div class="gauge-lab">');
     zoneDefs.forEach(function (zz) { h.push('<div>' + esc(zz.range + (p.zonesUnit ? ' ' + p.zonesUnit : '')) + '</div>'); });
     h.push('</div>');
+    // 게이지가 가리키는 것이 등급이 아니라 ISO 존임을 못 박는다 — 둘이 다를 때 눈금만 보면 오독된다
+    if (isoH) h.push('<div style="margin-top:4px;font-size:11px;color:var(--text-muted);">'
+      + '↑ ISO 10816 존 위치 (규격 참조값) — 위 등급과 다른 축입니다</div>');
     if (isoH && d.mon) h.push('<div style="margin-top:8px;font-size:12px;color:var(--text-secondary);">실시간 감시 등급(' + esc(d.mon.rms) + ' ' + esc(d.mon.unit || '') + '): <b style="color:' + esc(d.mon.color) + ';">' + esc(d.mon.gradeKo) + '</b> <span style="color:var(--text-muted);">— ' + esc(d.mon.basis || '') + '</span>'
       + (d.gate ? '<div style="margin-top:3px;color:#c77d0a;">⚠계측 게이트 적용 중 — 이 등급도 잠정입니다'
         + (d.hfFrac > 0.2 ? '. 분석 창(' + esc(d.anaSecTxt) + '초) 광대역 ' + esc(d.velBB) + ' ' + esc(d.mon.unit || '') + ' 기준으로 에너지의 '

@@ -27,6 +27,9 @@ app.liveTables = ['VIBRATION_RAW', 'SENSOR_DATA', 'MOTOR_CURRENT', 'GEARBOX_VIB'
 const sorted = d.equipment.slice().sort((a, b) => b.grade - a.grade);
 sorted.forEach((e, i) => { e.order = i; });
 const eq0 = sorted[0];
+/* 판정이 한 회차 돈 뒤의 _gradeState — 전 태그를 채운다.
+   한 태그만 채우면 나머지 카드가 '판정 대기'로 떠서 보류 부재를 검사할 수 없다. */
+const gradedAll = (patOk) => Object.fromEntries(sorted.map((e) => [e.table + ':' + e.name, { gi: 0, patOk: patOk, patOn: false }]));
 app._detailCache[eq0.id] = { state: 'ready', det: Mock.buildDetail(eq0) };
 Object.assign(app.state, {
   ready: true, srcSel: app.liveTables.slice(), selTag: eq0.id, diagTag: eq0.id,
@@ -94,18 +97,31 @@ const cases = [
   // '신호 두절'이라는 말 자체는 이벤트 유형 필터에도 있으므로, 배지 아이콘으로 부재를 확인한다
   ['monitor 운전 중이면 배지 없음', { tab: 'monitor', _runState: { [eq0.table + ':' + eq0.name]: { lost: false, run: true, age: 1000 } } },
     ['!codicon-debug-disconnect', '!codicon-debug-pause']],
-  /* 등급 원인 표시 — 존(ISO)만으로 등급을 매기면 고주파가 지배하는 센서에서 베어링이
-     나빠져도 카드가 양호로 남는다. 무엇이 등급을 올렸는지 카드에 보여야 한다. */
-  ['monitor 등급 원인(대역)', { tab: 'monitor',
-    _gradeState: { [eq0.table + ':' + eq0.name]: { gi: 2, src: 'band', iso: 0.31, wide: 3.55, limited: true } } },
-    ['· 대역', 'ISO 10~1000 Hz', '전대역', '1 kHz 위']],
-  ['monitor 등급 원인(베이스라인)', { tab: 'monitor',
-    _gradeState: { [eq0.table + ':' + eq0.name]: { gi: 1, src: 'baseline', iso: 0.31, wide: 3.55, limited: true } } },
-    ['· 베이스라인']],
-  // ISO가 올린 등급은 원인을 안 붙인다 — 기본이라 매 카드에 붙으면 잡음이 된다
-  ['monitor 등급 원인(ISO는 미표시)', { tab: 'monitor',
-    _gradeState: { [eq0.table + ':' + eq0.name]: { gi: 2, src: 'iso', iso: 3.1, wide: 3.2, limited: true } } },
-    ['!· 대역', '!· 베이스라인']],
+  /* 등급 칩 옆에는 축 이름을 안 붙인다 — 등급을 올리는 축이 결함 패턴 하나뿐이라
+     매 카드에 같은 말이 붙는다. 무엇이 등급을 올렸는지는 값 호버가 답한다.
+     (전에는 대역·베이스라인도 등급을 올려서 그 이름을 칩 옆에 적었다. 지금 src는 iso/pattern 둘뿐이다.) */
+  /* 확정 상태를 칩 옆에 적는다 — 나빠질 때와 좋아질 때가 대칭이어야 한다.
+     복귀 1회차에 아무 표시가 없으면 카드가 조용히 초록이 되고, 그 뒤 되돌아가도 이벤트가 안 나므로
+     "좋아졌다가 원래대로"가 화면에도 이력에도 안 남는다. */
+  ['monitor 확정 전은 회차 표시', { tab: 'monitor', _runState: {},
+    _gradeState: Object.assign(gradedAll(true), { [eq0.table + ':' + eq0.name]: { gi: 1, patOk: true, patOn: true } }),
+    _monState: { [eq0.table + ':' + eq0.name]: { g: 0, candN: 1 } } },
+    ['1회차']],
+  ['monitor 확정 뒤는 지속 시간', { tab: 'monitor', _runState: {},
+    _gradeState: Object.assign(gradedAll(true), { [eq0.table + ':' + eq0.name]: { gi: 1, patOk: true, patOn: true } }),
+    _monState: { [eq0.table + ':' + eq0.name]: { g: 1, since: Date.now() - 40 * 60000 } } },
+    ['40분째']],
+  ['monitor 복귀 대기는 복귀 회차', { tab: 'monitor', _runState: {},
+    _gradeState: Object.assign(gradedAll(true), { [eq0.table + ':' + eq0.name]: { gi: 0, patOk: true, patOn: false } }),
+    _monState: { [eq0.table + ':' + eq0.name]: { g: 1, since: Date.now() - 40 * 60000, candN: 1 } } },
+    ['복귀 1회차']],
+  ['monitor 등급 칩에 축 이름 없음', { tab: 'monitor',
+    _gradeState: { [eq0.table + ':' + eq0.name]: { gi: 2, src: 'pattern', patOk: true, patOn: true, patR: 6.04, iso: 0.31, wide: 3.55, limited: true } } },
+    ['!· 대역', '!· 베이스라인', '!· 결함 패턴']],
+  // 대신 값 호버가 근거를 든다 — 격자 점수까지 함께
+  ['monitor 등급 근거는 값 호버에', { tab: 'monitor',
+    _gradeState: { [eq0.table + ':' + eq0.name]: { gi: 2, src: 'pattern', patOk: true, patOn: true, patR: 6.04, iso: 0.31, wide: 3.55, limited: true } } },
+    ['결함 패턴 검출', '격자 6.0', 'ISO 10~1000 Hz', '전대역', '1 kHz 위']],
   /* 되살아난 태그 — 지웠다 다시 등록된 태그에 옛 학습값이 말없이 붙는 것을 막는다.
      확인 전까지 베이스라인·대역 판정이 멈춰 있으므로 그 사실이 화면에 보여야 한다. */
   ['settings criteria 되살아난 태그', { tab: 'settings', setSection: 'criteria',
@@ -177,9 +193,19 @@ const cases = [
   ['monitor 판정 보류 칩(두절)', { tab: 'monitor',
     _runState: { [eq0.table + ':' + eq0.name]: { lost: true, run: false, age: 7200000 } } },
     ['판정 보류', '신호 두절']],
-  // 보류가 아니면 등급 칩이 그대로 나와야 한다 — 전 카드가 보류로 덮이면 안 된다
-  // '판정 보류'는 KPI 칸 라벨에도 늘 있으므로, 칩 툴팁 문구로 부재를 본다
-  ['monitor 정상은 등급 칩 유지', { tab: 'monitor', _runState: {} }, ['!지금 등급을 매기지 않습니다']],
+  /* 보류가 아니면 등급 칩이 그대로 나와야 한다 — 전 카드가 보류로 덮이면 안 된다.
+     '판정 보류'는 KPI 칸 라벨에도 늘 있으므로, 칩 툴팁 문구로 부재를 본다.
+     _gradeState를 채우는 이유: 결함 패턴을 실제로 잰 상태(patOk)라야 보류가 아니다. */
+  ['monitor 정상은 등급 칩 유지', { tab: 'monitor', _runState: {}, _gradeState: gradedAll(true) },
+    ['!지금 등급을 매기지 않습니다']],
+  /* 회전수·기하가 없어 결함 패턴을 못 잰 태그는 **양호가 아니라 보류**다.
+     등급을 켜는 축이 그 하나라, 못 쟀는데 초록으로 두면 화면이 "이상 없음"이라고 단언하게 된다.
+     이 자리가 비어 있던 동안 카드는 게이트를 건너뛴 ISO 존 등급을 그대로 보여줬다. */
+  ['monitor 패턴 미측정은 보류', { tab: 'monitor', _runState: {}, _gradeState: gradedAll(false) },
+    ['판정 보류', '지금 등급을 매기지 않습니다', '판정 못 함']],
+  // 첫 판정 회차 전에도 등급을 지어내지 않는다
+  ['monitor 판정 전에는 대기', { tab: 'monitor', _runState: {}, _gradeState: {} },
+    ['판정 보류', '지금 등급을 매기지 않습니다', '판정 대기']],
   // KPI 칸 — 내역은 호버로 내린다(칸을 늘리면 난잡해진다)
   ['monitor KPI 판정 보류 칸', { tab: 'monitor',
     _runState: {
@@ -299,11 +325,13 @@ const cases = [
   /* 목록 필터·일괄 적용 — 감시 태그는 상한(100개)까지 늘어난다. 목록에 자체 스크롤을 두지 않는
      대신(행이 펼쳐지므로 고정 높이 안에 가두면 펼친 내용이 갇힌다) 손댈 줄만 남기는 필터와,
      한 행을 채워 같은 설비로 퍼뜨리는 일괄 적용을 둔다. 값 검사는 test-equipbulk.mjs. */
-  // 필터는 전체/미설정 둘뿐 — "설정 미완료"는 필터가 아니라 각 행의 n/N 배지가 짚는다
+  /* 필터는 전체/판정 불가 둘뿐 — "미설정"은 판정 불가의 부분집합이라 칩을 따로 두지 않는다
+     (같은 수가 두 번 보인다). 아무것도 안 넣은 줄은 행의 점이, 덜 채운 줄은 n/N 배지가 짚는다. */
   ['settings equip 목록 필터', { tab: 'settings', setSection: 'equip' },
-    ['미설정', '기본값(Class II · 1800 rpm · mm/s)으로 판정 중', '!설정 미완료']],
-  ['settings equip 필터 빈 상태', { tab: 'settings', setSection: 'equip', equipFilter: 'unset',
-    equipCls: Object.fromEntries(d.equipment.map((e) => [e.id, 'II'])) },
+    ['판정 불가', '회전수와 베어링 기하가 둘 다 있어야', '!설정 미완료']],
+  ['settings equip 필터 빈 상태', { tab: 'settings', setSection: 'equip', equipFilter: 'blocked',
+    equipRpm: Object.fromEntries(d.equipment.map((e) => [e.id, '1800'])),
+    equipBearing: Object.fromEntries(d.equipment.map((e) => [e.id, '6209'])) },   // 카탈로그에 있는 품번이라야 기하가 붙는다
     ['조건에 맞는 태그가 없습니다', '전체 보기']],
   ['settings equip 일괄 적용 패널', { tab: 'settings', setSection: 'equip',
     equipCls: { [eq0.id]: 'III' }, equipRpm: { [eq0.id]: '3600' }, equipBearing: { [eq0.id]: '6205' },
@@ -384,8 +412,14 @@ const cases = [
      일이 되면 읽지 않고 누르게 된다. 되돌릴 수 없는 초기화는 여기 두지 않는다. */
   /* 회차보다 짧은 주기는 고를 수 없어야 한다 — 고르면 회차가 겹쳐 표가 영영 비는데
      화면 어디에도 이유가 안 나온다(실제로 겪었다). 태그가 적으면 1분도 멀쩡하므로 규모로 판단한다. */
+  /* 이 주기는 계산 부하(하한)만이 아니라 등급 확정의 회차 길이도 정한다.
+     확정 흐름 자체는 알람 설정의 회차 표가 보여주므로, 여기서는 그 사실만 알린다
+     (선택지 라벨에 "확정 20분"을 넣어 봤는데 "확정하는 데 20분"과 "20분간 확정"으로 둘 다 읽혔다). */
+  /* 알람 설정의 "판정 기준에서 변경"이 이 칸으로 스크롤한다 — id가 사라지면 섹션 맨 위로 떨어져
+     어느 칸을 고쳐야 하는지 알 수 없게 된다(실제로 그 상태였다). */
+  ['settings criteria 추출 주기 칸에 앵커', { tab: 'settings', setSection: 'criteria' }, ['id="band-iv"']],
   ['settings criteria 대역 주기 — 회차보다 짧으면 잠금', { tab: 'settings', setSection: 'criteria', bandOn: true },
-    ['한 회차 약', '회차가 겹쳐 아무것도 쌓이지 않습니다']],
+    ['한 회차 약', '겹쳐서 아무것도 쌓이지 않습니다', '등급 확정의 회차 길이도 정합니다']],
   ['settings criteria 확인 대기 일괄', { tab: 'settings', setSection: 'criteria',
     revived: Object.fromEntries(sorted.slice(0, 3).map((e) => [e.table + ':' + e.name, { at: d.now }])),
     baselines: Object.fromEntries(sorted.slice(0, 3).map((e) => [e.table + ':' + e.name, { mu: 1, sigma: 0.05, k: 3, n: 130, at: d.now }])) },
@@ -449,9 +483,33 @@ const cases = [
   // RMS 구간 < 판정 주기는 데이터에 구멍을 만든다 — 화면에서 경고하고 선택지도 잠근다
   ['settings monitor RMS구간 부족 경고', { tab: 'settings', setSection: 'monitor', monitorInterval: '30s', evalWindow: '3s' },
     ['RMS 구간이 판정 주기보다 짧습니다', '주기보다 짧음']],
-  // 이벤트 유형 필터는 실제 생성되는 6종이어야 한다(spectrum은 항상 0건이었음)
+  /* 이벤트 유형 필터는 **지금 실제로 발화하는 7종**만이어야 한다.
+     고를 수 있는데 절대 안 나오는 항목은 "0건"을 감시 문제로 오독하게 한다(옛 'spectrum'이 그랬다).
+     베이스라인·대역은 이벤트를 안 내므로 빠진다 — 지난 이력의 라벨은 TYPEKO에 남아 목록에서 그대로 렌더된다. */
   ['monitor 이벤트 유형 필터', { tab: 'monitor' },
-    ['임계 초과', '상태 지속', '정상 복귀', '베이스라인 이탈', '대역 이탈', '대역 복귀', '!스펙트럼 변화']],
+    /* 베이스라인·대역은 부재로 확인할 수 없다 — 목데이터의 **지난 이벤트 행**에 그 이름이 실제로 찍히고,
+       그게 의도한 동작이다(라벨은 남기고 필터에서만 뺐다). 필터에만 있는 '대역 복귀'로 부재를 본다. */
+    ['임계 초과', '상태 지속', '상태 개선', '정상 복귀', '계측 이상', '계측 복귀', '신호 두절',
+      '!스펙트럼 변화', '!대역 복귀']],
+  /* 확정 시간은 판정 기준의 추출 주기가 정하는데, 알람이 언제 오는지 궁금한 사람은 알람 설정을 본다.
+     설정은 한 곳에 두고 결과만 양쪽에서 보이게 한다 — 값이 두 곳이면 어긋난다. */
+  ['settings monitor 확정 흐름 표시', { tab: 'settings', setSection: 'monitor', bandInterval: '30m' },
+    ['이상 진입', '정상 복귀', '1회차', '2회차', '이후',
+      '확정 표시', '해제', '보내지 않음', '발송', '재알림 주기마다 다시 알림',
+      /* 규칙·회차 길이·결과를 한 문장으로 잇는다 — 세 줄로 나누면 같은 사실을 세 번 말하게 된다.
+         값은 <b>로 감싸 렌더되므로 문구와 값을 따로 본다. 30분 주기면 알림은 1시간이 되어야 한다. */
+      /* 한 문장이 규칙·주기·결과를 다 담는다 — 위에 요약 제목을 얹으면 같은 말을 두 번 하게 된다.
+         "지속되면"이 아니라 "다음 판정에서도"라야 한다: 확정은 시간이 아니라 **회차**로 세므로
+         지속 표현을 쓰면 오늘 바꾼 프레이밍이 도로 시간으로 읽힌다. 앞 절의 "판정"을 그대로 받아 이어진다.
+         20분은 실제 발생 시점부터의 **최악값**이라(첫 감지→알림은 10분) "최대"를 붙인다. */
+      /* "등급이 바뀐 뒤"가 빠지면 양호 → 양호도 "같은 등급"이라 정상 설비도 매 회차 알림이 가야 한다.
+         규칙은 등급 **변화**에만 걸린다는 전제라, 문장에 없으면 읽는 사람이 스스로 채워야 한다. */
+      '>30분<', '마다 판정하고,', '등급이 바뀐 뒤 다음 판정에서도 같으면', '알림이 갑니다', '최대', '>1시간<', '주기 변경',
+      /* 블록 바닥은 테마별 실색 토큰이라야 한다 — --bg-input은 흰색 오버레이라 다크에서
+         카드보다 밝은 판이 되고 그 위 글자 대비가 2:1대로 무너진다(라이트에서는 차이가 안 보인다). */
+      'var(--bg-inset)',
+      // 없어진 설정을 가리키던 문구가 되살아나지 않게
+      '!진입·복귀 시간이 걸러냅니다']],
   ['settings llm+테스트중', { tab: 'settings', setSection: 'llm', llmTesting: true }],
   ['settings llm ollama+테스트결과', { tab: 'settings', setSection: 'llm', llmProvider: 'ollama', llmTest: { ok: true, msg: 'ok' } }],
   ['이벤트 미확인만', { tab: 'monitor', evtNewOnly: true }],

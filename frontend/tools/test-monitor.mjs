@@ -26,6 +26,18 @@ if (!seeded) {
   console.log('monitor-tql live: 건너뜀(픽스처 없음)');
   process.exit(0);
 }
+/* 행은 있는데 **오래된** 경우도 순회 0건이 된다 — 판정 TQL은 now 기준 창만 조회하기 때문이다.
+   시드 생성기가 멈춰 있으면 코드가 멀쩡해도 실패로 보고돼, 진짜 회귀와 구분이 안 된다.
+   (실제로 이 함정에 걸렸다: 데이터가 12:02에 끊긴 상태로 13:08에 돌려 "순회 0건"이 나왔다.) */
+const lastMs = await fetch(NEO + '/db/query?format=csv&timeformat=ns&q='
+  + encodeURIComponent("select max(TIME) from VIBE_TEST where NAME in ('" + spec.tags.map((t) => t.tag).join("','") + "')"))
+  .then((r) => r.text()).then((t) => Number((t.trim().split(String.fromCharCode(10))[1] || '0')) / 1e6).catch(() => 0);
+const staleMs = Date.now() - lastMs;
+if (!(lastMs > 0) || staleMs > 5 * 60000) {
+  console.log('건너뜀 — VIBE_TEST 최신 데이터가 ' + Math.round(staleMs / 60000) + '분 전입니다(시드 생성기 정지).');
+  console.log('monitor-tql live: 건너뜀(데이터 정지)');
+  process.exit(0);
+}
 
 const tql = buildMonitorTql(spec);
 console.log('--- 생성 TQL 길이:', tql.length, '자 · judgeTick 임베드:', tql.includes('function judgeTick'));

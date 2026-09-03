@@ -13,11 +13,11 @@ const appSrc = await readFile(new URL('../src/app.js', import.meta.url), 'utf8')
 const harSrc = await readFile(new URL('./verify-summary.mjs', import.meta.url), 'utf8');
 
 // ── 1. 단일 소스: 앱과 하네스 모두 같은 메서드를 부른다 ────────────────────
-chk(/^\s{2}_reportMeta\(eq, det, ev, rptSat\) \{/m.test(appSrc), '_reportMeta 메서드 존재');
+chk(/^\s{2}_reportMeta\(eq, det, ev, rptSat, dx\) \{/m.test(appSrc), '_reportMeta 메서드 존재');
 chk(/^\s{2}_reportBuild\(eq, det, docNo, llmName\) \{/m.test(appSrc), '_reportBuild 메서드 존재');
-chk(/self\._reportMeta\(eq, det, _ev, _rptSat\)/.test(appSrc), '_genOne이 _reportMeta 사용');
+chk(/self\._reportMeta\(eq, det, _ev, _rptSat, dx\)/.test(appSrc), '_genOne이 _reportMeta 사용');
 chk(/self\._reportBuild\(eq, det, docNo,/.test(appSrc), '_genOne이 _reportBuild 사용');
-chk(/app\._reportMeta\(eq, det, _ev, _rptSat\)/.test(harSrc), '하네스가 _reportMeta 사용');
+chk(/app\._reportMeta\(eq, det, _ev, _rptSat, dx\)/.test(harSrc), '하네스가 _reportMeta 사용');
 chk(/app\._reportBuild\(eq, det, /.test(harSrc), '하네스가 _reportBuild 사용');
 
 // ── 2. 손복사 재발 방지: 하네스 "조립부"에 요약 조립이 다시 생기면 잡는다 ──
@@ -40,14 +40,14 @@ const extra = harKeys.filter((k) => !CHART_ONLY.includes(k));
 chk(extra.length === 0, '하네스 자체 조립은 차트 계열로 한정', extra.length ? '초과: ' + extra.join(',') : harKeys.join(','));
 
 // ── 4. 요약 8블록 필드가 _reportMeta 안에 모두 있다 ────────────────────────
-const metaBody = appSrc.slice(appSrc.indexOf('_reportMeta(eq, det, ev, rptSat) {'), appSrc.indexOf('_reportBuild(eq, det, docNo, llmName) {'));
+const metaBody = appSrc.slice(appSrc.indexOf('_reportMeta(eq, det, ev, rptSat, dx) {'), appSrc.indexOf('_reportBuild(eq, det, docNo, llmName) {'));
 const NEED = ['gate:', 'gateReason:', 'gateCap:', 'cands:', 'unmeasurable:', 'rpmTxt:', 'obsTxt:', 'action:', 'bias:', 'winNote:',
   'iso:', 'levelsOk:', 'parsevalOk:', 'mon:', 'rpmMeas:', 'evidence:', 'negatives:', 'unexplained:', 'missing:', 'acq:'];
 const missing = NEED.filter((k) => !metaBody.includes(k));
 chk(missing.length === 0, '요약·ISO·근거 필드가 _reportMeta에 모두 존재', missing.length ? '누락: ' + missing.join(',') : NEED.length + '종');
 
 // ── 5. _genOne에 옛 인라인 조립이 남아 있지 않다 ───────────────────────────
-const genOne = appSrc.slice(appSrc.indexOf('_genOne'), appSrc.indexOf('_reportMeta(eq, det, ev, rptSat) {'));
+const genOne = appSrc.slice(appSrc.indexOf('_genOne'), appSrc.indexOf('_reportMeta(eq, det, ev, rptSat, dx) {'));
 chk(!/summary: \(function \(\)/.test(genOne), '_genOne에 인라인 summary 조립 없음');
 chk(!/_dataOld/.test(appSrc), '임시 비교용 코드(_dataOld) 제거됨');
 

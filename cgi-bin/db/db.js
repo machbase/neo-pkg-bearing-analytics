@@ -210,7 +210,7 @@
     'source.json': ['srcSel'], // DB 접속 정보는 UI가 아니라 cgi-bin/config/neo-auth.json으로 관리
     'equipment.json': ['equipCls', 'equipRpm', 'equipBearing', 'equipGeo', 'equipUnit', 'equipMeta', 'lineHz', 'aliases', 'cardOrder', 'knownTags', 'revived'],
     'criteria.json': ['machineClass', 'classThresh', 'unitThresh'],
-    'monitor.json': ['monitorOn', 'evalWindow', 'notifCh', 'notifTo', 'routes', 'monitorInterval', 'monMode', 'escHold', 'recHold', 'renotify', 'bandOn', 'bandInterval', 'bandWin'],
+    'monitor.json': ['monitorOn', 'evalWindow', 'notifCh', 'notifTo', 'routes', 'monitorInterval', 'monMode', 'renotify', 'bandOn', 'bandInterval', 'bandWin'],
     'llm.json': ['llmProvider', 'llmKeys', 'llmModels', 'ollamaUrl', 'genLLM'],
   };
   function configDir() { return pkgBase() + '/cgi-bin/config'; }
@@ -225,6 +225,21 @@
   }
 
   var _jwt = { token: '', exp: 0 };
+  /* 만료 여유 — 서버 exp는 **발급 시각** 기준인데 클라이언트는 **응답을 받은 시각**부터 센다.
+     그래서 여유가 0이면 마지막 왕복 동안 "클라이언트는 유효, 서버는 만료"가 되어 401이 나고,
+     그 틱의 타이머 조회가 통째로 실패해 "상태를 확인할 수 없습니다" 배너가 뜬다. 시계 오차도
+     같은 방향으로 쌓인다. 토큰 수명이 5분이라 이 경계가 5분마다 돌아온다. */
+  var JWT_SKEW_MS = 30000;
+  /* 수명은 토큰이 말하게 한다 — 상수로 가정하면 서버 설정이 바뀔 때 조용히 어긋난다.
+     못 읽으면 종전 가정으로 물러선다(여유는 그때도 뺀다). */
+  function jwtExp(tok) {
+    try {
+      var b = String(tok).split('.')[1].replace(/-/g, '+').replace(/_/g, '/');
+      var p = JSON.parse(atob(b));
+      if (p && p.exp > 0) return p.exp * 1000;
+    } catch (e) { /* 형식이 다르면 가정으로 */ }
+    return Date.now() + 5 * 60 * 1000;
+  }
   function login(user, pass) {
     if (_jwt.token && Date.now() < _jwt.exp) return Promise.resolve(_jwt.token);
     return fetch('/web/api/login', {
@@ -232,7 +247,7 @@
       body: JSON.stringify({ loginName: user || 'SYS', password: pass || '' }),
     }).then(function (r) { return r.json(); }).then(function (j) {
       if (!j.success || !j.accessToken) throw new Error('Neo 로그인 실패 — DB 연결 카드의 사용자/비밀번호를 확인하세요');
-      _jwt = { token: j.accessToken, exp: Date.now() + 5 * 60 * 1000 };
+      _jwt = { token: j.accessToken, exp: jwtExp(j.accessToken) - JWT_SKEW_MS };
       return _jwt.token;
     });
   }
@@ -498,6 +513,7 @@
   function saveBaseline(key, obj) { return kvUpsert('NEO_VIBE_BASELINE', key, obj); }
   function deleteBaseline(key) { return q(SQL.kvDelete('NEO_VIBE_BASELINE', key)); }
   function insertEvent(e) { return q(SQL.eventInsert(e)); }
+  function insertBandPoint(key, ms, v) { return q(SQL.bandInsert(key, ms, v)); }
   function loadMonState() {
     return q(SQL.kvSelect('NEO_VIBE_MONSTATE')).then(function (rows) {
       var m = {};
@@ -646,7 +662,8 @@
     loadConfig: loadConfig, saveConfig: saveConfig, saveConfigPartial: saveConfigPartial,
     ensureMonTables: ensureMonTables, loadEvents: loadEvents, loadEventsRange: loadEventsRange, countEvents: countEvents,
     loadBaselines: loadBaselines, saveBaseline: saveBaseline, deleteBaseline: deleteBaseline,
-    insertEvent: insertEvent, loadMonState: loadMonState, saveMonState: saveMonState,
+    insertEvent: insertEvent,
+    insertBandPoint: insertBandPoint, loadMonState: loadMonState, saveMonState: saveMonState,
     usageStats: usageStats, countRange: countRange, tagUsage: tagUsage,
     deleteEventsOfTag: deleteEventsOfTag, deleteEventsRange: deleteEventsRange, migrateEventsToTag: migrateEventsToTag,
     deleteBandRange: deleteBandRange, deleteBandOfTag: deleteBandOfTag, deleteMonState: deleteMonState

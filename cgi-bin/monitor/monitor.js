@@ -14,7 +14,7 @@
   //         bandSrc(bandJudgeSrc() — 상수 포함 자체 완결형), bandWinMs(대역값 룩백, 기본 2h),
   //         patSrc(patSrc() — 포락선·격자 자체 완결형), patTtlMs(패턴 재계산 최소 간격, 기본 10분),
   //         tags:[{tbl,tag,alias,unit,zones:[z0,z1,z2],bl:{mu,sigma,k}|null,bb:{sub:{mu,sigma,k},...}|null}],
-  //         cfg:{escHold,recHold,reno:{1,2,3}}(ms), secWinNs(최신 sec 버킷 조회 룩백, 기본 10s),
+  //         cfg:{escHold,recHold,reno:{1,2,3}}(ms),
   //         notify:{src(notify.serverSrc()), cfg:{channels,routes}}, dryRun }
   // dryRun=true면 INSERT/UPSERT/발송 대신 $.yield로 결정만 방출(테스트용, 실테이블·외부 무영향).
   /* 임베드할 소스가 TQL 안에서 실제로 돌아가는지 미리 확인한다.
@@ -34,6 +34,7 @@
       spec.isoSrc || 'var isoRms = function(){return null;}; var isoNeeded = function(){return false;}; var isoSkippable = function(){return false;};',
       spec.gateSrc || 'var gateFromBuckets = function(){return null;}; var gateFromRaw = function(){return null;}; var sensorTick = function(p,b,n,c){return {on:false,next:{},events:[]};};',
       spec.refSrc ? 'var runRef = ' + spec.refSrc + ';' : 'var runRef = function(){return 0;};',
+      spec.detailSrc || 'var judgeDetail = function(){return "";};',
       spec.notify && spec.notify.src ? spec.notify.src : 'function eventMessage(){return{}} function shouldNotify(){return true}',
     ];
     // 각 함수를 한 번씩 실제로 호출한다 — 선언만 해서는 몸통 안 자유 식별자가 드러나지 않는다
@@ -45,6 +46,7 @@
       'isRunning(1, runRef({ mu: 1, sigma: 0.1, k: 3 }, [1, 1]));',
       'isoNeeded(25600); isoRms([1,2,3,4,5,6,7,8], 25600); isoSkippable([{rms:1,cnt:10}], 1.12);',
       'gateFromBuckets([{cnt:10,rms:1,sum:0,mn:-1,mx:1}], 1); sensorTick(null, null, 0, { escHold: 0, recHold: 0 });',
+      'judgeDetail({ etype: "recovery", epMs: 1000 }, { r: 4, key: "외륜(BPFO)" }, { crest: 9, kurt: 5 });',
       'var _e = { etype: "threshold", tag: "T", grade: "위험", val: 1, lim: 1, ts: 0, tbl: "T" };',
       'eventMessage(_e); shouldNotify(_e, { channels: {}, routes: {} });',
     ]).join('\n');
@@ -81,7 +83,6 @@
        잠금이 남았을 때 언제 무시하고 재개할까"만 정한다. 짧으면 느린 회차를 죽은 것으로
        오인해 다시 겹치고, 길면 복구가 늦다. 두절 기준과 같은 눈금을 쓴다. */
     var lockTtlMs = Math.max(60000, tickMs * 6);
-    var secWinNs = spec.secWinNs || 10000000000; // (구버전 호환 — 미사용)
     // 대역값은 별도 타이머가 주기(기본 10분)로 적재하므로 룩백이 넉넉해야 한다.
     // 추출 주기의 몇 배를 잡아 한두 번 걸러도 마지막 값을 놓치지 않게 한다.
     var bandWinMs = spec.bandWinMs || 7200000; // 2시간
@@ -109,16 +110,22 @@
       'function dec(s){try{return JSON.parse(decodeURIComponent(s));}catch(e){return null;}}',
       'function esc(s){return String(s).replace(/\'/g,"\'\'");}',
       'var GW=["\\uC591\\uD638","\\uC8FC\\uC758","\\uC704\\uD5D8","\\uC2EC\\uAC01"];', // 양호/주의/위험/심각
-      'var db=$.db(), now=Date.now(), nDone=0, roll={};',
+      'var db=$.db(), now=Date.now(), nDone=0, nPat=0, roll={};',
       'function rollupOk(tbl){ if(roll[tbl]===undefined){ var n=0; db.query("select count(*) from M$SYS_TABLES where NAME like \'_"+tbl+"_ROLLUP_%\'").forEach(function(r){n=r[0];}); roll[tbl]=n>0; } return roll[tbl]; }',
       'var CFG=' + JSON.stringify(cfg) + ';',
       'var TAGS=' + JSON.stringify(tags) + ';',
       // ── 알림 발송 (앱과 동일한 notify 소스를 인라인) ──
       nf ? nf.src : '',
       'var NOTIFY=' + JSON.stringify(nf ? (nf.cfg || {}) : {}) + ';',
-      'var TYPEKO=' + JSON.stringify({ threshold: '임계 초과', sustained: '상태 지속', recovery: '정상 복귀', improve: '상태 개선', signal_lost: '신호 두절', sensor_fault: '계측 이상', sensor_ok: '계측 복귀', baseline: '베이스라인 이탈', band: '대역 이탈', bandrec: '대역 복귀' }) + ';',
-      'var BORDER=' + JSON.stringify(spec.bandOrder || ['sub', 'one', 'fault', 'high', 'vh1', 'vh2', 'vh3', 'vh4']) + ';',
-      /* 대역 추출 타이머가 적재한 최신 대역값을 읽는다. 5개 대역이 같은 시각에 한 묶음으로
+      // ⚠ 앱의 TYPEKO(app.js)와 키가 같아야 한다 — 빠진 키는 폴백으로 영문 코드가 샌다. test-eventdetail이 대조한다.
+      'var TYPEKO=' + JSON.stringify({ observe: '관찰', threshold: '임계 초과', sustained: '상태 지속', recovery: '정상 복귀', improve: '상태 개선', signal_lost: '신호 두절', sensor_fault: '계측 이상', sensor_ok: '계측 복귀', baseline: '베이스라인 이탈', band: '대역 이탈', bandrec: '대역 복귀' }) + ';',
+      /* ⚠ 예비 목록은 calc의 BAND_ORDER와 항상 같아야 한다. BORDER는 NEO_VIBE_BAND를 읽는
+         NAME IN 목록을 만들므로, 여기서 빠진 계열은 값을 읽지도 못한다 — 적재·학습이 멀쩡해도
+         그 축만 조용히 사라지고 에러는 안 난다. 뒤 4개(포락선)가 베어링 근거 계열이다.
+         test-bandevent가 이 예비값을 정본과 대조한다. */
+      'var BORDER=' + JSON.stringify(spec.bandOrder
+        || ['sub', 'one', 'fault', 'high', 'vh1', 'vh2', 'vh3', 'vh4', 'envPkRel', 'envBPFO', 'envBPFI', 'envBSF']) + ';',
+      /* 대역 추출 타이머가 적재한 최신 대역값을 읽는다. 한 앵커의 계열들이 같은 시각에 한 묶음으로
          들어가므로 TIME 역순 몇 줄이면 전부 잡힌다(이름별 첫 등장만 취함).
          NEO_VIBE_BAND가 아직 없을 수 있어(추출 미사용) try로 감싼다 — 없으면 대역 판정만 건너뛴다. */
       'function bandNow(t){',
@@ -164,17 +171,36 @@
          patTtlMs(기본 10분) 안이면 직전 값을 그대로 쓴다 — 판정은 10초마다 도는데 포락선은
          태그당 수백 ms라 매 틱 돌릴 수 없다. 베어링 열화는 며칠 단위라 10분이면 충분하고,
          급변은 ISO·베이스라인 축이 10초로 따로 본다.
-         회전수·기하가 없거나 샘플레이트가 낮아 고정 대역이 안 서면 null — 그건 "정상"이 아니라
-         "판정 못 함"이고, 등급이 안 오르는 대신 커버리지가 화면에 드러낸다. */
+         회전수·기하가 없으면 null — 그건 "정상"이 아니라 "판정 못 함"이고, 등급이 안 오르는
+         대신 커버리지가 화면에 드러낸다.
+         샘플레이트가 낮아 고정 대역(1~5 kHz)이 안 서면 대역통과 없이 전대역으로 복조한다 —
+         앱(monPattern)·상세분석과 같은 규칙이다. 세 경로가 갈리면 같은 태그가 화면마다
+         다른 등급을 갖는다. 반환의 wide로 알려 화면이 근거를 낮춰 적게 한다. */
       'function patValue(t, prev, key){',
-      '  if(prev && prev.pat!=null && (now-(prev.patAt||0)) < ' + patTtlMs + ') return {on:!!prev.pat, r:prev.patR, iso:prev.patIso, cached:true};',
+      /* at = 이 값을 **잰 시각**. 판정 상태기가 회차를 세는 기준이라 캐시 히트에도 원래 측정 시각을 돌려준다
+         (지금 시각을 주면 10초 틱마다 새 회차로 세어져 "2회차 연속"이 20초가 된다). */
+      '  if(prev && prev.pat!=null && (now-(prev.patAt||0)) < ' + patTtlMs + ') return {on:!!prev.pat, r:prev.patR, iso:prev.patIso, key:prev.patK||"", wide:!!prev.patW, cached:true, at:prev.patAt||0};',
       '  if(!t.rpm || !t.geo || !t.geo.n) return null;',
       '  var fr = t.rpm/60; if(!(fr>0)) return null;',
-      '  var band = demodFixed(t.fs); if(!band) return null;',
+      '  var band = demodFixed(t.fs) || null;',
       '  var bf = bearingFreqs(t.rpm, t.geo); if(!bf) return null;',
-      '  var secs = Math.min(22, MON_REV/fr), end = LAST[key]||now, vals=[];',
-      '  try{ db.query("select VALUE from "+t.tbl+" where NAME=\'"+esc(t.tag)+"\' and TIME between to_date(\'"+dtms(end-Math.round(secs*1000))+"\') and to_date(\'"+dtms(end)+"\') order by TIME")',
-      '    .forEach(function(r){ vals.push(+r[0]); }); }catch(e){ return null; }',
+      /* 창을 시간으로만 잡으면 밀도가 낮은 태그에서 표본이 모자라 판정이 통째로 건너뛰어진다
+         (적재 시 타임스탬프가 퍼진 데이터·재생 데이터가 그렇다). 앱 monPattern과 같은 규칙으로
+         모자라면 창을 넓혀 다시 읽는다 — 두 번까지, 600초 상한. 무한정 넓히지 않는 이유는
+         창이 길어질수록 서로 다른 운전 상태가 섞여 정상상태 전제가 깨지기 때문이다.
+         ⚠ 앱만 되짚으면 같은 신호에 앱은 재고 서버는 못 재, 화면엔 등급이 뜨는데 알람은 안 난다. */
+      '  var need = Math.max(4096, Math.round(t.fs * MON_REV / fr));',
+      '  var secs = Math.min(22, MON_REV/fr), end = LAST[key]||now;',
+      '  function grab(sec){ var out=[];',
+      '    try{ db.query("select VALUE from "+t.tbl+" where NAME=\'"+esc(t.tag)+"\' and TIME between to_date(\'"+dtms(end-Math.round(sec*1000))+"\') and to_date(\'"+dtms(end)+"\') order by TIME")',
+      '      .forEach(function(r){ out.push(+r[0]); }); }catch(e){ return null; }',
+      '    return out; }',
+      '  var vals = grab(secs); if(!vals) return null;',
+      '  for(var _wk=0; _wk<2 && vals.length && vals.length<need; _wk++){',
+      '    var _ws = Math.min(600, secs * Math.ceil(need/Math.max(1,vals.length)) * 1.2);',
+      '    var _wv = grab(_ws); if(!_wv || _wv.length <= vals.length) break;',
+      '    vals = _wv;',
+      '  }',
       '  if(vals.length < 4096) return null;',
       '  var env = envelopeSpectrum(vals, t.fs, envMaxFor(bf, fr, t.fs), band);',
       '  var m = targetedMatch(env, bf, fr, env.resTrue||env.res);',
@@ -182,7 +208,7 @@
       /* 등급 높이를 정할 ISO도 같은 파형에서 잰다 — 10초 축 값을 쓰면 등급이 10초마다 움직여
          10분 주기인 패턴과 시간축이 어긋난다. 한 등급은 한 시점에서 나와야 한다. */
       '  var _iv = null; try{ _iv = isoRms(vals, t.fs); }catch(e){}',
-      '  return {on: r2 >= MON_ADOPT, r: r2, iso: _iv, fresh:true};',
+      '  return {on: patternGrade(r2, false, MON_ADOPT) > 0, r: r2, key: m?(m.key||""):"", iso: _iv, fresh:true, wide: !band, at: now};',
       '}',
       // 화면의 durKo와 같은 규칙 — 같은 사건을 이벤트와 화면이 다르게 적으면 같은 것인지 알 수 없다
       'function durAgo(ms){ if(ms<60000) return Math.round(ms/1000)+"초";'
@@ -190,15 +216,31 @@
       + ' if(ms<86400000){ var h=Math.floor(ms/3600000), hm=Math.round((ms%3600000)/60000); if(hm===60){h++;hm=0;} return h+"시간"+(hm?" "+hm+"분":""); }'
       + ' var d=Math.floor(ms/86400000), dh=Math.round((ms%86400000)/3600000); if(dh===24){d++;dh=0;} return d+"일"+(dh?" "+dh+"시간":""); }',
       'function fmtTs(ms){ var d=new Date(ms); function p(n){return (n<10?"0":"")+n;} return d.getFullYear()+"-"+p(d.getMonth()+1)+"-"+p(d.getDate())+" "+p(d.getHours())+":"+p(d.getMinutes())+":"+p(d.getSeconds()); }',
+      /* 이벤트 사유 문구 — 앱과 같은 함수를 자체 완결형으로 받는다(durKo를 같이 묶은 embedSrc 출력).
+         toString 하나만 받으면 압축된 바깥 이름을 못 찾아 서버에서만 죽는다. */
+      spec.detailSrc || 'var judgeDetail = function(){return "";};',
+      /* 발송은 회차 끝에 몰아서 한다(flushNotify) — 태그별로 즉시 보내면 묶을 기회가 없다.
+         수집이 끊기면 전 태그가 같은 회차에 두절을 내는데(실측 91건·60건), 하나씩 보내면
+         채널 한도(Slack 초당 1건)에 걸려 임의의 일부만 도착한다. 거르기·묶기 규칙은
+         planNotifications 하나가 정하고 앱과 서버가 그 함수를 공유한다. */
+      'var NQ=[];',
       'function notifyEvent(t, ev, v, l, d){',
       '  if(!NOTIFY.channels) return;',
       '  var gradeKo=GW[ev.gi];',
-      '  if(!shouldNotify(gradeKo, ev.etype, "webhook", NOTIFY)) return;',
       '  var to=NOTIFY.channels.webhook.to;',
-      '  var msg=eventMessage({alias:t.alias||t.tag, tag:t.tag, table:t.tbl, typeKo:TYPEKO[ev.etype]||ev.etype, gradeKo:gradeKo, etype:ev.etype, detail:d||"", val:v, lim:l, unit:t.unit||"", timeText:fmtTs(now)});',
+      '  NQ.push({alias:t.alias||t.tag, tag:t.tag, table:t.tbl, typeKo:TYPEKO[ev.etype]||ev.etype, gradeKo:gradeKo, etype:ev.etype, detail:d||"", val:v, lim:l, unit:t.unit||"", timeText:fmtTs(now)});',
       dry
         ? '  $.yield("notify", t.tbl+":"+t.tag, ev.etype, gradeKo);'
-        : '  try{ $.request(to,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payloadFor(msg,to))}).do(function(r){}); }catch(e){}',
+        : '  if(!to) NQ.pop();',
+      '}',
+      // 회차 발송 — 거르기·묶기는 planNotifications가 정한다(앱과 같은 함수)
+      'function flushNotify(now){',
+      '  if(!NQ.length || !NOTIFY.channels || !NOTIFY.channels.webhook) { NQ=[]; return; }',
+      '  var to=NOTIFY.channels.webhook.to; if(!to){ NQ=[]; return; }',
+      '  var msgs=planNotifications(NQ, NOTIFY, "webhook", fmtTs(now)); NQ=[];',
+      dry
+        ? '  msgs.forEach(function(m){ $.yield("notifyMsg", m.subject, (m.event&&m.event.n)||1); });'
+        : '  msgs.forEach(function(m){ try{ $.request(to,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payloadFor(m,to))}).do(function(r){}); }catch(e){} });',
       '}',
       /* 판정값 일괄 수집 — 테이블당 한 번의 NAME IN 조회로 전 태그의 구간 버킷을 받는다(태그별 개별 조회보다 훨씬 싸다). */
       'var WVAL={};',
@@ -306,6 +348,9 @@
          ISO를 독립 축으로 두면 검증 풀에서 단독 오탐 69%가 그대로 등급이 된다(게이트로 4%). */
       '  var _isoG = _hold ? (prev?(prev.g||0):0) : (val<z[0]?0:val<z[1]?1:val<z[2]?2:3);',
       '  var _pv = patValue(t, prev, key);',
+      /* 판정한 태그 수를 따로 센다 — nDone은 "훑은 수"라 결함 패턴 축이 통째로 비어 있어도 줄지 않는다.
+         타이머는 RUNNING·심박도 정상인데 등급이 오를 수 없는 상태를, 이 값 없이는 화면이 못 알아챈다. */
+      '  if(_pv) nPat++;',
       '  var _hG = (_pv && _pv.iso!=null) ? (_pv.iso<z[0]?0:_pv.iso<z[1]?1:_pv.iso<z[2]?2:3) : _isoG;',
       '  var rg = patternGate(!!(_pv && _pv.on), _hG);',
       '  var lim = baselineLimit(t.bl);',
@@ -332,7 +377,7 @@
       '  var run = isRunning(wide, runRef(t.bl, recent));',   // 정지 여부는 주파수와 무관
       '  if(sens.on) run=false;',   // 계측을 못 믿는 동안은 판정 동결
       '  if(lost) run=false;',
-      '  var res=judgeTick(prev,rg,breach,now,CFG,bj,run);',
+      '  var res=judgeTick(prev,rg,breach,now,CFG,bj,run,(_pv&&_pv.at)||null);',   // 회차 식별자 = 패턴을 잰 시각
       '  res.next.lost = lost?1:0;',
       '  sens.events.forEach(function(e){ res.events.push(e); });',
       '  if(_elat && Object.keys(_elat).length) res.next.elat=_elat;',
@@ -341,28 +386,36 @@
          그 자리에서 딱지가 떨어진다. 안 본 틱은 유효기간 안에서 직전 판정을 그대로 물려준다. */
       '  if(_iso.fresh){ if(GRAW[key]) res.next.gr={v:GRAW[key], at:now}; }',
       '  else if(prev && prev.gr && (now-(prev.gr.at||0)) < 60000) res.next.gr=prev.gr;',
-      '  if(_iso.fresh){ if(IMP[key]) res.next.im={v:IMP[key], at:now}; }',
+      /* 상태에는 **숫자만** 남긴다 — 읽는 곳(judgeDetail)이 crest·kurt만 쓰는데 text·kind까지
+         저장하면 문장 하나가 인코딩 259자를 먹는다. MONSTATE.VAL은 VARCHAR(1000)이라
+         게이트가 걸린 태그(gr의 긴 한글 사유까지 실린다)에서 상한을 넘어 **잘린다** —
+         잘린 값은 dec()가 null로 떨어뜨려 그 태그만 직전 상태를 영영 못 쌓는다(에러는 안 난다). */
+      '  if(_iso.fresh){ if(IMP[key]) res.next.im={v:{crest:IMP[key].crest, kurt:IMP[key].kurt}, at:now}; }',
       '  else if(prev && prev.im && (now-(prev.im.at||0)) < 60000) res.next.im=prev.im;',
       // 실제로 잰 틱에만 시각을 찍는다 — 캐시·폴백값에 찍으면 TTL이 영원히 만료되지 않는다
       '  if(_iso.fresh){ res.next.iso=val; res.next.isoAt=now; } else if(prev&&prev.iso!=null){ res.next.iso=prev.iso; res.next.isoAt=prev.isoAt; }',
       /* 패턴 결과도 상태에 실어 나른다 — TQL은 매 실행 새로 시작하므로 캐시가 여기 말고는 없다.
          못 잰 틱(회전수 미입력·표본 부족)에는 직전 값을 그대로 넘겨 TTL이 살아 있게 한다. */
-      '  if(_pv && _pv.fresh){ res.next.pat=_pv.on?1:0; res.next.patR=_pv.r; res.next.patIso=_pv.iso; res.next.patAt=now; }',
-      '  else if(prev && prev.pat!=null){ res.next.pat=prev.pat; res.next.patR=prev.patR; res.next.patIso=prev.patIso; res.next.patAt=prev.patAt; }',
+      '  if(_pv && _pv.fresh){ res.next.pat=_pv.on?1:0; res.next.patR=_pv.r; res.next.patK=_pv.key||""; res.next.patIso=_pv.iso; res.next.patAt=now; res.next.patW=_pv.wide?1:0;',
+      /* 격자 점수를 시계열로 남긴다 — 이벤트는 "달라진 순간"만 담으므로, 확정에 못 간 단발이나
+         점수가 채택선 근처에서 노는 구간은 이력 어디에도 안 남았다(감시가 뭘 봤는지 흔적이 없었다).
+         대역·포락선과 같은 표에 넣어야 한 차트에 겹쳐 그린다 — 따로 두면 조회·정리 경로가 두 벌이 된다. */
+      dry
+        ? '    $.yield("pattern", t.tbl+":"+t.tag, _pv.r);'
+        : '    try{ db.exec("insert into NEO_VIBE_BAND values(\'"+esc(t.tbl+":"+t.tag+":pattern")+"\', to_date(\'"+dtms(now)+"\'), "+(+_pv.r||0)+")"); }catch(e){}',
+      '  }',
+      '  else if(prev && prev.pat!=null){ res.next.pat=prev.pat; res.next.patR=prev.patR; res.next.patK=prev.patK; res.next.patIso=prev.patIso; res.next.patAt=prev.patAt; res.next.patW=prev.patW; }',
       '  var _im = IMP[key] || ((prev && prev.im && (now-(prev.im.at||0)) < 60000) ? prev.im.v : null);',
       '  res.events.forEach(function(ev){',
-      // 대역 이벤트는 값이 "한계 대비 배수"라 단위가 다르다 — val=배수, lim=1(=한계). 앱과 동일.
-      '    var isB = ev.etype=="band"||ev.etype=="bandrec";',
+      /* 계측 이상만 지표값이 없다 — val/lim의 0은 자리를 비울 수 없어 넣은 값이지 측정이 아니다. */
       '    var isS = ev.etype=="sensor_fault"||ev.etype=="sensor_ok";',
-      '    var v2 = isB ? (bj?bj.maxR:0) : isS ? 0 : (ev.etype=="baseline" ? wide : val);',
-      '    var l2 = isB ? 1 : (ev.etype=="baseline"?lim:(ev.etype=="recovery"?z[0]:(ev.gi>0?z[ev.gi-1]:z[0])));',
+      '    var v2 = isS ? 0 : val;',
+      '    var l2 = ev.etype=="recovery" ? z[0] : (ev.gi>0 ? z[ev.gi-1] : z[0]);',
       '    l2 = (l2==null?0:l2);',
-      /* 대역·베이스라인 이벤트에 충격성 근거를 덧붙인다 — 같은 에너지 상승이라도 임펄스인지
-         광대역 잡음인지에 따라 볼 곳이 다르다(베어링·기어 vs 유동·부착 이완).
-         원본을 못 본 틱이면 직전 근거를 유효기간 안에서 쓴다. */
-      '    var _imTxt = _im ? _im.text : "";',
-      '    var dt = ev.etype=="band" ? [(bj?bj.detail:""), _imTxt].filter(function(x){return !!x;}).join(" · ")',
-      '      : ev.etype=="baseline" ? _imTxt : (isS ? (ev.detail||"") : "");',
+      /* 등급 이벤트의 사유는 앱과 같은 함수가 짓는다 — 격자 점수·부위·확정 근거에 충격성 근거를 더한다.
+         _im은 원본을 본 틱의 근거이고, 못 본 틱이면 유효기간 안에서 직전 것을 쓴다(위에서 정해 둔다).
+         계측 이상은 그 판정이 실은 문구를 그대로 쓴다. */
+      '    var dt = isS ? (ev.detail||"") : judgeDetail(ev, _pv, _im);',
       dry
         ? '    $.yield("evt", key, ev.etype, GW[ev.gi], v2, l2, dt);'
         : '    var eid=key+":"+now+":"+ev.etype;\n    db.exec("insert into NEO_VIBE_EVENTS values(\'"+esc(key)+"\', to_date(\'"+dtms(now)+"\'), "+v2+", \'"+ev.etype+"\', \'"+GW[ev.gi]+"\', "+l2+", \'"+esc(dt)+"\', \'"+esc(eid)+"\')");',
@@ -373,6 +426,8 @@
         : '  putState(key, res.next);',
       '  nDone++;',
       '});',
+      // 전 태그를 다 본 뒤가 "같은 순간"의 경계다 — 여기서 묶어 보낸다
+      'flushNotify(now);',
       /* 심박 — 이번 실행이 언제, 몇 개를 판정했는지 한 행에 남긴다.
          타이머 상태만 보면 "RUNNING인데 실제로는 아무것도 안 하는" 경우를 놓친다
          (감시 대상 태그의 데이터가 끊기면 전부 건너뛰어 nDone=0이 된다).
@@ -380,7 +435,7 @@
       /* 회차 소요도 남긴다 — 감시 대상 상한을 상수로 짐작하는 대신, 그 설치에서 한 회차가
          실제로 얼마나 걸리는지를 보고 판단하게 한다. 주기에 근접하면 회차가 겹치기 시작한다
          (그때 무슨 일이 나는지가 이 잠금이 생긴 이유다). */
-      dry ? '' : 'putState("__hb",{t:now,n:nDone,ms:Date.now()-now});',
+      dry ? '' : 'putState("__hb",{t:now,n:nDone,pat:nPat,ms:Date.now()-now});',
       dry ? '' : 'putState("__lock",{t:0});',   // 해제 — 다음 회차가 바로 이어받는다
       '$.yield("done", now, nDone);',
       '} else { $.yield("skip", now, 0); }',

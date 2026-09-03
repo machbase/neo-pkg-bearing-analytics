@@ -244,9 +244,24 @@ const mkRoll = (n, f, cnt = 25600, stepMs = 1000) =>
   chk(_cv.n === 2 && _cv.total === 2, '필수 2축이 다 살아있으면 완전', JSON.stringify(_cv));
   chk(_cv.extra.length === 2, '학습된 보강 축은 미달이 아니라 "더해진 것"으로 센다', JSON.stringify(_cv.extra));
 
-  // 패턴 축이 원인을 지목하면 진폭이 양호여도 등급이 오른다
+  /* 저샘플 폴백으로 얻은 "없음"은 고정 대역의 "없음"보다 약하다 — 조기 베어링 결함은 kHz대
+     공진을 때리는 충격으로만 드러나는데 그 대역이 Nyquist 밖이다. 같은 문장으로 두면 이 설비가
+     갖지 않은 근거를 주장하게 된다. 반대로 등급이 선 뒤에는 붙이지 않는다(이미 이상을 말한다). */
+  const detW = Object.assign({}, detF, { demodSrc: 'wideband' });
+  chk(/전대역 복조/.test(app._dx(eq, detW, calm).verdict),
+    '전대역 복조였으면 "정상 운전"으로 끝내지 않는다', app._dx(eq, detW, calm).verdict);
+  chk(/뚜렷한 결함 징후 없음/.test(app._dx(eq, detW, calm).verdict),
+    '판정 자체는 그대로 — 문구만 한계를 덧붙인다');
+  chk(!/전대역 복조/.test(app._dx(eq, detF, calm).verdict),
+    '고정 대역이면 덧붙이지 않는다', app._dx(eq, detF, calm).verdict);
+
+  /* 패턴 축이 잡히면 진폭이 양호여도 등급이 오른다.
+     게이트를 여는 것은 격자 배수(det.sideband = targetedMatch 결과)이고 — 감시와 같은 검출기다 —
+     근거 점수(_evidence)는 원인 **이름**을 정한다. 둘을 같이 준 이유가 그것이다. */
   app._evidence = () => ({ top: { f: '베어링 외륜(BPFO)', score: 80 }, gate: false, conf: [], block: '', confLines: '' });
-  const dxP = app._dx(eq, detF, calm);
+  const sbOn = { r: VC.TGT_ADOPT + 1, key: 'BPFO', adopted: true };
+  const detP = Object.assign({}, detF, { sideband: sbOn });
+  const dxP = app._dx(eq, detP, calm);
   chk(dxP.patGi === 1 && dxP.gi === 1, '진폭 양호 + 결함 패턴 → 주의', JSON.stringify({ pat: dxP.patGi, gi: dxP.gi }));
   chk(/베어링/.test(dxP.verdict) && !/징후 없음/.test(dxP.verdict),
     '원인을 지목했으면 "징후 없음"이라고 쓰지 않는다', dxP.verdict);
@@ -263,10 +278,14 @@ const mkRoll = (n, f, cnt = 25600, stepMs = 1000) =>
     '판정문이 "양호"로 끝내지 않고 진동 수준을 밝힌다 — 원인이 베어링 밖일 수 있다', dxIso.verdict);
   /* 결함 패턴이 켜지면 ISO가 높이를 정한다 — 베이스라인 축과 같은 관용구(max(1, isoGi)). */
   app._evidence = () => ({ top: { f: '베어링 외륜(BPFO)', score: 80 }, gate: false, conf: [], block: '', confLines: '' });
-  const dxBoth = app._dx(eq, Object.assign({}, detF, { isoRms: 8.0 }), calm);
+  const dxBoth = app._dx(eq, Object.assign({}, detF, { isoRms: 8.0, sideband: sbOn }), calm);
   chk(dxBoth.gi === 3, '패턴 채택 + ISO D존 → 심각 (ISO가 높이를 정한다)', String(dxBoth.gi));
-  const dxLow = app._dx(eq, Object.assign({}, detF, { isoRms: 0.2 }), calm);
+  const dxLow = app._dx(eq, Object.assign({}, detF, { isoRms: 0.2, sideband: sbOn }), calm);
   chk(dxLow.gi === 1, '패턴 채택 + ISO 양호 → 주의 (최소 한 칸은 올린다)', String(dxLow.gi));
+  /* 근거 점수가 높아도 격자 배수가 창 임계 아래면 게이트는 안 열린다 — 감시와 같은 기준이라야
+     카드에서 상세로 넘어갈 때 등급이 안 바뀐다. 여기가 두 화면이 갈려 있던 자리다. */
+  const dxWeak = app._dx(eq, Object.assign({}, detF, { sideband: { r: VC.TGT_ADOPT - 0.5, key: 'BPFO' } }), calm);
+  chk(dxWeak.gi === 0, '근거 점수가 높아도 격자 배수가 임계 아래면 등급을 안 올린다', JSON.stringify({ gi: dxWeak.gi }));
   /* 상세분석의 게이트는 결함 패턴 하나다 — 베이스라인·대역이 켜져도 등급을 안 올린다.
      같은 태그가 학습 여부로 다른 등급을 내면 일회성 분석 도구로 못 쓴다(학습 전 3% → 후 15%였다). */
   app._evidence = () => ({ top: { score: 0 }, gate: false, conf: [], block: '', confLines: '' });
@@ -307,13 +326,19 @@ const mkRoll = (n, f, cnt = 25600, stepMs = 1000) =>
 
 // ── 결함 패턴 축 — 학습 없이 등급을 올린다 ────────────────────────────────
 /* 진폭에 안 나타나는 초기 베어링 결함이 있다: 실측에서 베어링4 롤러결함이 ISO A존
-   0.44 mm/s인데 포락선엔 BPFO가 서 있었다. 근거 점수는 스펙트럼 하나로 나오므로
-   학습이 없어도 이 축은 돌아야 하고, 원인을 지목하는 점수면 등급도 따라야 한다. */
+   0.44 mm/s인데 포락선엔 BPFO가 서 있었다. 격자 배수는 스펙트럼 하나로 나오므로
+   학습이 없어도 이 축은 돌아야 한다. */
 {
-  chk(VC.patternGrade(VC.EVID_ADOPT, false) === 1, '원인 채택 점수면 주의', String(VC.patternGrade(VC.EVID_ADOPT, false)));
-  chk(VC.patternGrade(VC.EVID_ADOPT - 1, false) === 0, '그 아래는 등급 없음', String(VC.patternGrade(VC.EVID_ADOPT - 1, false)));
-  chk(VC.patternGrade(95, false) === 1, '아무리 강해도 상한은 주의 — 급한지는 진폭 축이 말한다', String(VC.patternGrade(95, false)));
-  chk(VC.patternGrade(95, true) === 0, '계측 게이트 중에는 스펙트럼을 못 믿으므로 축을 비운다', String(VC.patternGrade(95, true)));
+  const T = VC.TGT_ADOPT;
+  chk(VC.patternGrade(T, false, T) === 1, '창의 임계에 닿으면 주의', String(VC.patternGrade(T, false, T)));
+  chk(VC.patternGrade(T - 0.01, false, T) === 0, '그 아래는 등급 없음', String(VC.patternGrade(T - 0.01, false, T)));
+  chk(VC.patternGrade(95, false, T) === 1, '아무리 강해도 상한은 주의 — 급한지는 진폭 축이 말한다', String(VC.patternGrade(95, false, T)));
+  chk(VC.patternGrade(95, true, T) === 0, '계측 게이트 중에는 스펙트럼을 못 믿으므로 축을 비운다', String(VC.patternGrade(95, true, T)));
+  /* 임계를 안 밝히면 판정하지 않는다 — 기본값을 두면 창이 바뀔 때 조용히 틀린 임계로 간다.
+     이 축이 감시/상세로 갈라졌던 자리라, 임계 누락이 통과하면 그 사고가 그대로 재발한다. */
+  chk(VC.patternGrade(95, false, undefined) === 0, '창 임계 없이는 게이트를 열지 않는다', String(VC.patternGrade(95, false, undefined)));
+  chk(VC.MON_ADOPT < VC.TGT_ADOPT, '짧은 창(감시)의 임계가 더 낮다 — 점수 분포가 내려가므로',
+    VC.MON_ADOPT + ' < ' + VC.TGT_ADOPT);
 
   // worstGrade 4번째 축 — 진폭 세 축이 전부 0이어도 패턴이 등급을 만든다
   const w = VC.worstGrade(0, 0, 0, 1);

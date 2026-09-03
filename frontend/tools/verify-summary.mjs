@@ -39,7 +39,7 @@ const gate = !!(det.quality && det.quality.gate); // 아래 검사 목록의 조
 
 // ⚠data 조립은 app.js _reportMeta()가 단일 소스 — 하네스가 손으로 베끼지 않는다.
 //   여기서 만드는 건 차트 계열(롤업 의존)뿐이고, 요약·ISO·재현성 바는 앱과 같은 코드가 만든다.
-const meta = app._reportMeta(eq, det, _ev, _rptSat);
+const meta = app._reportMeta(eq, det, _ev, _rptSat, dx);   // dx=판정 결과(조치 카드가 화면과 같은 등급으로 갈린다)
 const data = Object.assign({
   refs: eq.zones.map((z, i) => ({ val: z, color: ['#3aa76d', '#d99a2b', '#e07b39'][i], label: ['A/B ', 'B/C ', 'C/D '][i] + E.fmt(z) })),
   xL: roll.map(r => E.fmtMD(r.ms)), xT: roll.map(r => E.fmtDT(r.ms)), kxl: roll.map(r => E.fmtMD(r.ms)),

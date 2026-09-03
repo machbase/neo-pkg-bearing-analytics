@@ -171,6 +171,23 @@ const NOW = 1_700_000_000_000;
   a._wdSpec('wd').targets.forEach((t) => { tg[t.peer] = t.stale; });
   chk(tg.NEO_VIBE_MONITOR === 6 * 60000, '감시 기준 = 주기의 6배', String(tg.NEO_VIBE_MONITOR));
   chk(tg.NEO_VIBE_BAND === 1800000, '대역 기준 = 3배와 30분 중 큰 쪽', String(tg.NEO_VIBE_BAND));
+
+  /* 켜 두어도 대상 태그가 없으면(RPM 미설정 등) 앱은 대역 타이머를 굽지 않는다. 감시자가
+     그걸 모르고 지키면 없는 이름에 start를 던지다 시도 횟수만 소진하고 포기한다 —
+     감시자는 start만 하고 create는 못 하므로 영원히 되살아나지 않는다. */
+  a = mk({ bandOn: true });
+  a._bandNoTarget = true;
+  chk(peers(a._wdSpec('wd')) === 'NEO_VIBE_MONITOR', '대상이 없어 안 구워진 대역은 감시하지 않는다', peers(a._wdSpec('wd')));
+  a._bandNoTarget = false;
+  chk(peers(a._wdSpec('wd')) === 'NEO_VIBE_BAND,NEO_VIBE_MONITOR', '대상이 생기면 다시 감시한다', peers(a._wdSpec('wd')));
+  a = mk({ bandOn: true });
+  chk(peers(a._wdSpec('wd')) === 'NEO_VIBE_BAND,NEO_VIBE_MONITOR', '아직 한 번도 안 구운 상태는 지켜본다', peers(a._wdSpec('wd')));
+
+  // 사유 문구 — 화면과 배너가 같은 함수를 쓴다
+  const why = (sk) => mk({})._bandNoTargetWhy({ skipped: sk });
+  chk(why([{ label: 'a', why: 'RPM 미설정' }, { label: 'b', why: 'RPM 미설정' }]) === 'RPM 미설정 2개', '같은 사유는 묶어 센다', why([{ label: 'a', why: 'RPM 미설정' }, { label: 'b', why: 'RPM 미설정' }]));
+  chk(why([{ label: 'a', why: 'RPM 미설정' }, { label: 'b', why: '샘플레이트 불명' }]) === 'RPM 미설정 1개 · 샘플레이트 불명 1개', '사유가 섞이면 둘 다 적는다', why([{ label: 'a', why: 'RPM 미설정' }, { label: 'b', why: '샘플레이트 불명' }]));
+  chk(why([]) === '선택된 태그가 없습니다', '거를 것도 없으면 선택이 비어 있다는 뜻', why([]));
 }
 
 // ── 5. Neo 포트 확정 ───────────────────────────────────────────────────────

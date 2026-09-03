@@ -13,7 +13,7 @@
 globalThis.window = globalThis;
 const VC = (await import('../../cgi-bin/calc/calc.js')).default;
 const Notify = (await import('../../cgi-bin/notify/notify.js')).default;
-const { judgeTick } = await import('../src/app.js');
+const { judgeTick, detailSrc } = await import('../src/app.js');
 
 let fail = 0;
 const chk = (label, fn) => {
@@ -25,6 +25,16 @@ function isolate(decls, call) {
   return new Function(decls + '\nreturn (' + call + ');')();
 }
 
+chk('judgeDetail 격리 실행 — durKo까지 자체 완결인가', () => {
+  /* judgeDetail은 durKo를 이름으로 부른다. 압축이 그 이름을 바꾸므로 toString 하나만 넘기면
+     서버에서 복귀 이벤트가 ReferenceError로 죽는다(앱은 멀쩡해 발견이 늦다).
+     복귀 경로를 반드시 태운다 — durKo를 부르는 유일한 분기다. */
+  const out = isolate(detailSrc(),
+    'judgeDetail({ etype: "recovery", epMs: 4 * 3600000 }, { r: 4.2, key: "외륜(BPFO)" }, { crest: 9.1, kurt: 5.2 })');
+  if (!/만에 복귀/.test(out)) throw new Error('복귀 문구가 없다: ' + out);
+  if (!/판정 창 Crest 9.1/.test(out)) throw new Error('충격성 근거가 없다: ' + out);
+});
+
 const S = {
   judge: judgeTick.toString(),
   limit: VC.baselineLimit.toString(),
@@ -33,9 +43,14 @@ const S = {
 };
 
 chk('judgeTick 격리 실행', () => {
+  /* 확정은 두 회차가 필요하므로 회차를 두 번 먹인다(cyc를 바꿔서) — 한 번만 부르면 조짐만 난다.
+     격리 실행의 목적은 임베드 소스가 바깥 이름 없이 도는지 보는 것이라, 확정까지 가야 전 경로를 탄다. */
+  const CFG = "{ escHold: 0, recHold: 0, reno: {} }";
   const r = isolate('var judgeTick = ' + S.judge + ';',
-    'judgeTick(null, 2, false, 1000, { escHold: 0, recHold: 0, reno: {} }, null, true)');
+    '(function(){ var a = judgeTick(null, 2, false, 0, ' + CFG + ', null, true, 0);'
+    + ' return judgeTick(a.next, 2, false, 600000, ' + CFG + ', null, true, 600000); })()');
   if (!r || !r.next || r.next.g !== 2) throw new Error('결과 이상: ' + JSON.stringify(r));
+  if (!r.events.some((e) => e.etype === 'threshold')) throw new Error('확정 이벤트 없음: ' + JSON.stringify(r.events));
 });
 
 chk('baselineLimit 격리 실행', () => {
@@ -127,6 +142,98 @@ chk('isRunning의 정지 기준이 BL_IDLE_FRAC과 일치', () => {
     if (!/\.mu\+\(.{1,4}\.k\|\|3\)\*/.test(near)) throw new Error('한계식이 함수 밖에 있다 — 자체 완결이 깨졌다');
   });
 }
+
+/* 압축본 검사 — 여기가 실제 사고가 나는 자리다. 위의 격리 실행은 개발 소스를 보므로
+   "몸통이 바깥 이름을 참조한다"는 사실은 잡아도, 임베드가 그 이름을 **소스 이름으로**
+   선언해 두면 개발 소스에서는 이어져 통과한다. 압축이 몸통 안 이름만 바꾸면 그 선언과
+   어긋나 서버에서만 죽는다. 그래서 배포와 같은 압축을 걸어 다시 돌린다.
+   호출까지 하는 이유는 자유 식별자가 실행되는 경로에서만 드러나기 때문이다 — 단락 평가
+   뒤에 숨은 참조는 그 가지를 타야 나온다(envAmbig가 그랬다). */
+{
+  const esbuild = (await import('esbuild')).default;
+  const { writeFile, rm } = await import('node:fs/promises');
+  const path = (await import('node:path')).default;
+  const { fileURLToPath, pathToFileURL } = await import('node:url');
+  const here = path.dirname(fileURLToPath(import.meta.url));
+  const minPath = path.join(here, '_calc.min.test.mjs');
+
+  const out = await esbuild.build({
+    entryPoints: [path.join(here, '../../cgi-bin/calc/calc.js')],
+    bundle: true, minify: true, format: 'esm', write: false,
+  });
+  await writeFile(minPath, out.outputFiles[0].text);
+  const MIN = (await import(pathToFileURL(minPath).href)).default;
+
+  // 결함 주파수가 실린 합성 신호 — 격자·채택 임계까지 실제로 타게 한다
+  const GEO = { n: 9, Bd: 12.7, Pd: 65, phi: 0 }, RPM = 1800, FS = 20000, N = 8192;
+  const bfA = VC.bearingFreqs(RPM, GEO);
+  const sig = [];
+  for (let i = 0; i < N; i++) {
+    const t = i / FS;
+    let v = Math.sin(2 * Math.PI * 30 * t);
+    const ph = (t * bfA.BPFO) % 1;
+    v += 3 * Math.exp(-ph * 60) * Math.sin(2 * Math.PI * 3000 * t);
+    sig.push(v);
+  }
+
+  const patCall = 'var band=demodFixed(' + FS + ');'
+    + 'var bf=bearingFreqs(' + RPM + ',' + JSON.stringify(GEO) + ');'
+    + 'var env=envelopeSpectrum(SIG,' + FS + ',envMaxFor(bf,' + (RPM / 60) + ',' + FS + '),band);'
+    + 'var m=targetedMatch(env,bf,' + (RPM / 60) + ',env.resTrue||env.res);'
+    + 'return {band:band,m:m,gate:patternGate(true,2)};';
+
+  const isolateMin = (decls, body) => new Function('SIG', decls + '\n' + body)(sig);
+
+  chk('압축본 patSrc 격리 실행 — 상수가 클로저 안까지 따라간다', () => {
+    const r = isolateMin(MIN.patSrc(), patCall);
+    if (!r.band || r.band.hiHz !== 5000) throw new Error('demodFixed 결과 이상: ' + JSON.stringify(r.band));
+    if (!r.m || !(r.m.r > 0)) throw new Error('targetedMatch가 격자를 못 탐: ' + JSON.stringify(r.m));
+    if (r.gate !== 2) throw new Error('patternGate 결과 이상: ' + r.gate);
+  });
+
+  chk('압축본 patSrc가 앱과 같은 값을 낸다', () => {
+    const got = isolateMin(MIN.patSrc(), patCall);
+    const bf = VC.bearingFreqs(RPM, GEO);
+    const env = VC.envelopeSpectrum(sig, FS, VC.envMaxFor(bf, RPM / 60, FS), VC.demodFixed(FS));
+    const want = VC.targetedMatch(env, bf, RPM / 60, env.resTrue || env.res);
+    if (JSON.stringify(got.m) !== JSON.stringify(want)) {
+      throw new Error('앱/서버 판정 불일치\n  서버: ' + JSON.stringify(got.m) + '\n  앱  : ' + JSON.stringify(want));
+    }
+  });
+
+  chk('압축본 isoSrc·gateSrc 격리 실행', () => {
+    const iso = isolateMin(MIN.isoSrc(), 'return {rms:isoRms(SIG,' + FS + '),need:isoNeeded(' + FS + ')};');
+    if (!(iso.rms > 0)) throw new Error('isoRms 결과 이상: ' + JSON.stringify(iso));
+    const g = isolateMin(MIN.gateSrc(), 'return {raw:gateFromRaw(SIG),imp:impactEvidence(SIG)};');
+    if (g.imp == null) throw new Error('impactEvidence가 null');
+  });
+
+  /* 포락선 1·2순위가 접전인 입력 — envAmbig 가지를 타야 그 안의 상수 참조가 드러난다.
+     이 가지를 안 태우면 단락 평가에 가려 압축본에서도 통과한다. */
+  const AMB_NOW = { envBPFO: 1.0, envBPFI: 0.95 };
+  const AMB_BLS = { envBPFO: { mu: 0.1, sigma: 0.01, k: 3 }, envBPFI: { mu: 0.1, sigma: 0.01, k: 3 } };
+  chk('압축본 bandJudge 격리 실행 — 접전(envAmbig) 가지까지', () => {
+    const r = isolateMin('var bandJudge=' + MIN.bandJudgeSrc() + ';',
+      'return bandJudge(' + JSON.stringify(AMB_NOW) + ',' + JSON.stringify(AMB_BLS) + ',false);');
+    const want = VC.bandJudge(AMB_NOW, AMB_BLS, false);
+    if (JSON.stringify(r) !== JSON.stringify(want)) {
+      throw new Error('앱/서버 판정 불일치\n  서버: ' + JSON.stringify(r) + '\n  앱  : ' + JSON.stringify(want));
+    }
+    if (!r.envAlt) throw new Error('접전인데 종류를 단정했다 — envAmbig 가지를 안 탔다');
+  });
+
+  await rm(minPath, { force: true });
+}
+
+/* bandJudge가 안에 다시 들고 있는 접전 여유(ETM)가 모듈 정의와 갈라지면 앱과 서버가
+   같은 입력에서 한쪽만 종류를 단정한다. */
+chk('bandJudge 내부 접전 여유가 ENV_TYPE_MARGIN과 일치', () => {
+  const bls = { envBPFO: { mu: 0.1, sigma: 0.01, k: 3 }, envBPFI: { mu: 0.1, sigma: 0.01, k: 3 } };
+  const at = (ratio) => VC.bandJudge({ envBPFO: 1.0, envBPFI: ratio }, bls, false).envAlt;
+  const m = VC.ENV_TYPE_MARGIN;
+  if (!at(1.0 * m + 0.01)) throw new Error('여유 안쪽인데 단정했다 — 상수가 갈라졌다');
+  if (at(1.0 * m - 0.02)) throw new Error('여유 밖인데 단정을 안 했다 — 상수가 갈라졌다');
+});
 
 console.log(fail ? '=== 실패 ' + fail + '건 ===' : '=== 전부 통과 ===');
 process.exit(fail ? 1 : 0);

@@ -40,7 +40,7 @@ Monitoring runs on **two cadences**. One is fast and cheap; the other is slow an
                     │                                  │
                     └──── freeze judgment ─────────────┤
                           (stopped · lost · bad signal) ▼
-                                              entry / recovery hold
+                                          two consecutive cycles
                                                        │
                                                        ▼
                                                 event → alert
@@ -264,7 +264,8 @@ Only **moments where the state changed** are recorded. Nothing is written while 
 
 | Type | When | Which axis |
 | :--- | :--- | :--- |
-| **Threshold** | the grade got worse | 10 min (pattern) |
+| **Observation** | first cycle out of the good zone — **before confirmation, no alert** | 10 min (pattern) |
+| **Threshold** | the same grade held for **two consecutive cycles** | 10 min (pattern) |
 | **Sustained** | a bad state persists, every re-notification interval | 10 min (pattern) |
 | **Improved** | out of alarm level but not yet good | 10 min (pattern) |
 | **Recovered** | fully back to good | 10 min (pattern) |
@@ -297,23 +298,71 @@ Each stage is recorded **once per episode**. Even stepping down severe → warni
 
 ### Reading event values
 
-| Type | Value | Reference |
-| :--- | :--- | :--- |
-| Threshold · sustained · improved · recovered | ISO value of the waveform the pattern was measured on | the zone boundary crossed |
-| Instrumentation fault · signal lost | — | — |
+| Type | Value | Reference | Detail |
+| :--- | :--- | :--- | :--- |
+| Observation · threshold · sustained · recovered | ISO value of the waveform the pattern was measured on | the zone boundary crossed | **grid score · site · confirmation basis** |
+| Instrumentation fault · signal lost | — | — | reason · time without data |
 
-## ⑦ When the alarm does not fire immediately
+**The detail column answers "why this grade".** The ISO value is not the axis that produced the grade (the gate is the fault pattern), so the number alone misleads.
 
-An alarm does not go out the moment the grade changes. A hold is required, direction-dependent.
+```
+observation   grid 3.2 · outer race (BPFO) · cycle 1 — not confirmed
+threshold     grid 3.2 · outer race (BPFO) · confirmed on two consecutive cycles
+sustained     grid 4.1 · re-notification
+recovered     grid 2.2 · cleared after 4 h 20 min
+```
 
-| | Setting | Purpose |
-| :--- | :--- | :--- |
-| Getting worse | entry hold | ignore transient variation |
-| Getting better | recovery hold | prevent flapping at a boundary |
+### Every cycle's judgment goes to a time series
 
-> **The meaning of this setting changed when judgment moved to a 10-minute cadence.** An entry hold shorter than 10 minutes effectively means "confirmed on the next cycle" — no judgment happens in between. To get a real delay, use **multiples of 10 minutes** (20 min = two consecutive cycles).
->
-> The recovery hold still matters: it stops recovery events repeating when the grade oscillates across a boundary.
+Events record only **what changed**. Isolated hits that never reach confirmation, and stretches where the score hovers near the adoption line, live in the **grid score series** instead — one point per 10 minutes in the same table as the band values (`NEO_VIBE_BAND`).
+
+On the trend chart that reads:
+
+```
+grid score
+ 6 ┤                                    ╭────────
+ 3 ┼━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┿━━━ adoption line
+   │  ▲        ▲                        │
+ 0 ┤──┴────────┴────────────────────────╯
+      isolated  isolated              confirmed
+```
+
+## ⑦ Confirmation — two consecutive cycles
+
+An alarm does not go out the moment the grade changes. **The same judgment must hold for two consecutive cycles** — going up and coming down alike.
+
+```
+cycle 1   grid 3.2 → caution   observation event · no alert
+cycle 2   grid 3.2 → caution   threshold · alert sent
+cycle 3   grid 2.1 → good      (not recovered yet)
+cycle 4   grid 2.0 → good      recovered · alert sent
+```
+
+One cycle back the other way breaks the run and the count restarts.
+
+### Why cycles, not minutes
+
+This used to be a minute-based setting (`entry hold`), but judgment runs on the extraction interval (10 minutes), so **1, 2 and 5 minutes all collapsed to "next cycle"** — the choice meant nothing. The setting was removed and the rule fixed to cycles.
+
+### Why two
+
+Measured by replaying NASA IMS at the real cadence (7 healthy points over 158 days, 3 faults).
+
+| Rule | False alarms (per point-month) | Faults detected |
+| :--- | ---: | ---: |
+| Isolated hit confirms | 14.6 | 3/3 |
+| **Two consecutive** | **5.3** | **2/3** |
+| Three consecutive | 3.0 | 2/3 |
+
+**All three faults had the same shape: one isolated hit → a long gap → a sustained run.** Going to the machine on that first hit finds nothing (a 2.6-day gap followed it on the outer race, 7 days on the rolling element), and hits of the same character occurred 77 times on healthy bearings.
+
+Discarding isolated hits sounds like it costs lead time; it is the **opposite** — confirmation marks where the real signal begins, giving 3.1 days on the outer race and 25 days on the rolling element.
+
+> **Isolated hits still leave a trace.** They are recorded as `observation` events, and the grid score for every cycle accumulates as a time series shown on the trend chart. Only the alert is withheld.
+
+### Instrumentation faults stay time-based
+
+Signal loss, clipping and DC drift are judged on the **10-second axis**, where cycles do not apply. A single spike must not send "sensor failure", so a 1-minute persistence is required, and 5 minutes to clear. Neither is exposed as a setting — measured, instrumentation faults occurred 4 times in 22 days, too rare to be worth tuning.
 
 ## Stopped machines and lost signal
 

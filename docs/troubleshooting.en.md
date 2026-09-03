@@ -133,6 +133,8 @@ Server monitoring **runs with the settings as of your last save.** After changin
 4. If delivery is **No notification**, the event is recorded but nothing is sent.
 5. Webhook is the only delivery channel. For email or SMS, relay through an automation tool such as n8n — see [Alarms and events](./alarms.en.md).
 6. If it still does not arrive, check whether **an event was recorded at all**. No event means this is a judgment problem, not a delivery one — go to "No events are being recorded" above.
+7. **If only signal-loss and instrumentation faults are missing**, check the **Monitoring fault** row in the severity table — it is a separate switch from the three grade rows.
+8. If many points went dark but only **one** alert arrived, that is correct — more than five events of the same type in one cycle are bundled. Every individual event is still in the event list.
 
 ## Older events are missing from the event list
 

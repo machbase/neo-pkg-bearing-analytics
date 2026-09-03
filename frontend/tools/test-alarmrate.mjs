@@ -31,13 +31,15 @@ function evalAt(vals, i, winMs) {
 }
 
 // 1초 간격 값 계열을 10초마다 판정 — 서버·앱이 실제로 하는 것과 같은 샘플링
-function run(vals, { escHold = 0, recHold = 300000, winMs = 0 } = {}) {
+/* cycMs = 등급 입력(결함 패턴)이 갱신되는 주기. 판정 틱보다 훨씬 느리다(실제 기본 10분).
+   확정을 막는 것은 시간 홀드가 아니라 **회차**이므로, 이 값이 스파이크 방어의 핵심이다. */
+function run(vals, { escHold = 0, recHold = 300000, winMs = 0, cycMs = IV } = {}) {
   const cfg = { escHold, recHold, reno: { 1: 0, 2: 3600000, 3: 1800000 } };
   let prev = null, out = {};
   for (let i = 0; i < vals.length; i += IV / 1000) {
     const t = i * 1000;
     const v = evalAt(vals, i, winMs);
-    const r = judgeTick(prev, VC.gradeFor(v, ZONES), v > LIM, t, cfg, null);
+    const r = judgeTick(prev, VC.gradeFor(v, ZONES), v > LIM, t, cfg, null, true, Math.floor(t / cycMs) * cycMs);
     r.events.forEach((e) => { out[e.etype] = (out[e.etype] || 0) + 1; });
     /* 베이스라인은 이벤트를 내지 않으므로(이벤트는 10분 패턴 축 전용) 상태 온셋을 센다 —
        재무장 히스테리시스는 그대로 살아 있고, 근거표·카드가 그 상태를 읽는다. */
@@ -70,24 +72,29 @@ for (const [k, v] of Object.entries(cur)) console.log('  %s → %s', k.padEnd(30
 // 현재 규칙이 실제로 폭주하는지 — 이게 확인 안 되면 고칠 근거가 없다
 /* 존 전이는 recHold가 재무장을 막아 스파이크에 안 흔들린다 — 기본값 5분이면 1건.
    그 값을 30초 이하로 내리면 61건이 되므로, recHold가 유일한 방어선이라는 점을 함께 고정한다. */
-chk((cur['① 짧은 스파이크(경계 위 25%)'].threshold || 0) === 1,
-  '① 존 전이는 recHold(기본 5분)가 스파이크를 흡수 — 1건', 'threshold ' + cur['① 짧은 스파이크(경계 위 25%)'].threshold);
-chk((run(spikes, { recHold: 30000 }).threshold || 0) > 50,
-  '① recHold를 30초로 내리면 폭주 — recHold가 유일한 방어선', 'threshold ' + run(spikes, { recHold: 30000 }).threshold);
+{
+  const slow = run(spikes, { cycMs: 600000 });   // 실제 감시와 같게 등급 입력을 10분마다 갱신
+  chk((slow.threshold || 0) <= 1, '① 회차가 10분이면 초 단위 스파이크는 확정으로 안 간다', 'threshold ' + (slow.threshold || 0));
+  chk((cur['① 짧은 스파이크(경계 위 25%)'].threshold || 0) > 10,
+    '① 회차를 판정 주기와 같게 두면 스파이크가 그대로 확정된다 — 회차가 방어선임을 못 박는다',
+    'threshold ' + cur['① 짧은 스파이크(경계 위 25%)'].threshold);
+}
 chk((cur['② 베이스라인 한계 근처 진동'].baseline || 0) <= 2,
   '② 베이스라인도 재무장에 recHold를 요구 — 한계 근처 진동에 1건(온셋)', 'baseline ' + cur['② 베이스라인 한계 근처 진동'].baseline);
 // 초기 관측(등급 1)에서 1건 + 위험 승격에서 1건 = 2건이 정상이다
-chk((cur['③ 진짜 지속 이탈'].threshold || 0) === 2, '③ 진짜 이탈: 초기 관측 + 승격 = 2건', 'threshold ' + cur['③ 진짜 지속 이탈'].threshold);
+chk((cur['③ 진짜 지속 이탈'].threshold || 0) === 2, '③ 진짜 이탈: 주의 확정 + 위험 승격 = 2건', 'threshold ' + cur['③ 진짜 지속 이탈'].threshold);
+chk((cur['③ 진짜 지속 이탈'].observe || 0) === 1, '③ 진짜 이탈: 조짐은 양호 이탈 때 1건', 'observe ' + cur['③ 진짜 지속 이탈'].observe);
 chk((cur['③ 진짜 지속 이탈'].baseline || 0) === 1, '③ 진짜 이탈의 베이스라인 온셋은 1건(억제되지 않음)', 'baseline ' + cur['③ 진짜 지속 이탈'].baseline);
 chk((cur['④ 단조 상승'].threshold || 0) === 3, '④ 단조 상승은 존마다 1건씩 3건', 'threshold ' + cur['④ 단조 상승'].threshold);
 
 /* recHold를 0으로 두면 두 경로가 함께 폭주한다 — 이 설정이 유일한 방어선임을 못 박는다.
    recHoldOptions에 '즉시'가 있어 사용자가 고를 수 있으므로, 그 대가를 수치로 남긴다. */
 {
-  const bad = { recHold: 0 };
-  const a = run(spikes, bad).threshold || 0, b = run(hover, bad).baseline || 0;
-  console.log('\n■ recHold 0(즉시)으로 내리면: ①스파이크 threshold %d · ②한계진동 baseline %d', a, b);
-  chk(a > 50 && b > 50, 'recHold 0은 두 경로 모두 폭주 — 기본값을 낮추면 안 된다(존 전이=이벤트 · 베이스라인=상태)', `${a} / ${b}`);
+  const b = run(hover, { recHold: 0 }).baseline || 0;
+  console.log('  베이스라인 재무장을 즉시로 내리면 — 한계 근처 진동 온셋 ' + b + '건');
+  /* 등급 쪽 방어선은 회차로 옮겨갔지만, 베이스라인 이탈 상태는 여전히 10초 축·시간 기준이다.
+     재무장(recHold)을 즉시로 내리면 한계 근처를 오가는 신호가 매번 새 이탈로 잡힌다. */
+  chk(b > 50, '베이스라인 재무장이 유일한 방어선 — 즉시로 내리면 폭주', String(b));
 }
 
 /* 재무장 대기 중 다시 이탈해도 중복 이벤트가 나지 않아야 한다(해제 후보가 취소되는 경로).

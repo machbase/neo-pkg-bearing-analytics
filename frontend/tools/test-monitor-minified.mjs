@@ -28,7 +28,11 @@ const check = (n, c) => { if (c) pass++; else { fail++; console.log('  ✗ ' + n
 
 check('judgeTick을 var로 바인딩(축약명 무관)', /var judgeTick = function ie\(/.test(tql));
 check('notify는 IIFE로 스코프 격리(esc 충돌 방지)', tql.includes('var __NF=(function(){'));
-check('notify 함수 고정 이름 재노출', /var eventMessage=__NF\.em, payloadFor=__NF\.pf, shouldNotify=__NF\.sn;/.test(tql));
+/* 압축이 함수 이름을 갈아도 서버가 부를 이름은 고정이어야 한다.
+   묶음 두 함수(planNotifications·bundleMessage)도 같이 재노출되지 않으면 서버만 ReferenceError가 난다. */
+check('notify 함수 고정 이름 재노출',
+  /var eventMessage=__NF\.em, payloadFor=__NF\.pf, shouldNotify=__NF\.sn,/.test(tql)
+  && /planNotifications=__NF\.pn, bundleMessage=__NF\.bm;/.test(tql));
 
 const res = await fetch(NEO + '/db/tql', { method: 'POST', headers: { 'Content-Type': 'text/plain' }, body: tql });
 const text = (await res.text()).trim();

@@ -4,7 +4,7 @@ import { Component } from 'preact/compat';
 import { view } from './view.js';
 import { pickerOpen } from './daterange.js';
 import { listTagTables, tagSchemas, listTags, tagStats, rollupTrend, loadConfig, saveConfig, saveConfigPartial, buildLiveData, liveDetail, sweepAnchors, monPattern, emptyDet, rollupBatch, loadTrendChunks , timerStates, MON_TIMER, BAND_TIMER, WD_TIMER, createWdTimer, deleteWdTimer, rawWindow, CAPS, pkgBase} from './data/live.js';
-import { ensureMonTables, loadEventsRange, countEvents, loadBaselines, saveBaseline, deleteBaseline, insertEvent, loadMonState, saveMonState, createMonitorTimer, deleteMonitorTimer, createBandTimer, deleteBandTimer, bandRaw, bandLatest, bandTrend, bandBackfill, bandTimes } from './data/live.js';
+import { ensureMonTables, loadEventsRange, countEvents, loadBaselines, saveBaseline, deleteBaseline, insertEvent, insertBandPoint, loadMonState, saveMonState, createMonitorTimer, deleteMonitorTimer, createBandTimer, deleteBandTimer, bandRaw, bandLatest, bandTrend, bandBackfill, bandTimes } from './data/live.js';
 import { usageStats, countRange, tagUsage, deleteEventsRange, deleteEventsOfTag, deleteBandRange, deleteBandOfTag, deleteMonState } from './data/live.js';
 import { runTql } from './data/live.js';
 import Monitor from '../../cgi-bin/monitor/monitor.js';
@@ -47,6 +47,14 @@ var BAND_TAG_SEC = 0.9 + 0.35;
 var SIG_NONE = '(none)';
 var WD_TICK_MS = 300000;
 var WD_SCHED = '@every 5m';
+/* 건강 배너도 지속을 요구한다 — 판정(2회차)·계측(1분/5분)·대역(×0.9)이 전부 홀드를 쓰는데
+   "감시가 살아 있나"만 순간값을 그리면, 한 번 튄 것과 진짜 끊긴 것이 같은 얼굴이 된다. */
+var TIMER_MISS_MIN = 3;   // 타이머 조회가 이만큼 연속 실패해야 "모른다"고 말한다(그전엔 직전 상태 유지)
+var PAT_ZERO_MS = 900000; // 결함 패턴을 잰 태그가 0인 채로 이만큼 지나면 알린다(패턴 주기 10분보다 넉넉히)
+var SLOW_WIN_N = 7;       // 회차 소요 표본 창
+var SLOW_MIN_N = 3;       // 이만큼 모이기 전에는 판단하지 않는다
+var SLOW_ON = 0.7;        // 주기 대비 — 켜는 문턱
+var SLOW_OFF = 0.55;      //            끄는 문턱(히스테리시스)
 var RECOVER_MAX = 3;
 var RECOVER_GAP_MS = 120000;      // 시도 간격 — 등록 직후엔 아직 첫 회차가 안 돌았을 수 있다
 var RECOVER_CALM_MS = 1800000;    // 이만큼 조용하면 처음부터 다시 센다
@@ -58,7 +66,7 @@ var CFG_KEYS = ['srcSel', 'machineClass', 'classThresh', 'unitThresh',
   'equipCls', 'equipRpm', 'equipBearing', 'equipGeo', 'equipUnit', 'equipMeta', 'lineHz', 'cardOrder',
   'knownTags', 'revived',
   'evalWindow', 'monitorOn', 'notifCh', 'notifTo', 'routes', 'aliases',
-  'monitorInterval', 'monMode', 'escHold', 'recHold', 'renotify', 'bandOn', 'bandInterval', 'bandWin',
+  'monitorInterval', 'monMode', 'renotify', 'bandOn', 'bandInterval', 'bandWin',
   'llmProvider', 'llmKeys', 'llmModels', 'ollamaUrl', 'genLLM'];
 /* 일괄 적용 항목 ↔ 설정 입력칸 — 칩 하나가 입력칸 하나다(뷰모델과 적용이 같은 표를 쓴다).
    형상·벨트는 값마다 칸이 따로라 여기서도 따로 다룬다. */
@@ -105,7 +113,15 @@ function agoStale(ms) { return ms > 0 && Date.now() - ms > 30 * 86400000; }
 var BAND_PER_MS = 1250;   // 앵커 하나 예상 소요
 var BAND_CHUNK = 20;      // 한 요청에 담는 앵커 수 (약 25초 — 타임아웃 여유 안에서 왕복 낭비를 줄인다)
 var BAND_CHUNK_GAP = 400; // 청크 사이 쉼 — 감시 타이머에 자리를 내준다
-var TYPEKO = { threshold: '임계 초과', sustained: '상태 지속', recovery: '정상 복귀', improve: '상태 개선', signal_lost: '신호 두절', sensor_fault: '계측 이상', sensor_ok: '계측 복귀', baseline: '베이스라인 이탈', band: '대역 이탈', bandrec: '대역 복귀' };
+/* 지금 실제로 발화하는 유형 — 필터 목록의 출처.
+   등급 이벤트는 10분 패턴 축에서, 계측 이벤트는 10초 축에서 난다.
+   베이스라인·대역은 상태만 추적하고 이벤트를 내지 않으므로 여기 없다(옛 이력의 라벨은 TYPEKO에 남는다). */
+var EVT_LIVE_TYPES = ['observe', 'threshold', 'sustained', 'improve', 'recovery', 'sensor_fault', 'sensor_ok', 'signal_lost'];
+/* 등급을 올린 축의 표시 이름 — **한 곳에서만** 정한다.
+   사본을 두면 축이 늘 때 한쪽만 뒤처져, 모르는 키가 폴백으로 빠지고 배지가 조용히 빈칸이나
+   엉뚱한 축 이름이 된다. 축이 늘거나 이름이 바뀌면 여기만 고친다. */
+var GRADE_SRC_KO = { iso: 'ISO 존', baseline: '베이스라인', band: '대역·포락선', pattern: '결함 패턴' };
+var TYPEKO = { observe: '관찰', threshold: '임계 초과', sustained: '상태 지속', recovery: '정상 복귀', improve: '상태 개선', signal_lost: '신호 두절', sensor_fault: '계측 이상', sensor_ok: '계측 복귀', baseline: '베이스라인 이탈', band: '대역 이탈', bandrec: '대역 복귀' };
 /* 생성된 TQL의 짧은 지문(FNV-1a) — 서버 타이머 재굽기 판단에 쓴다.
    길이만 비교하면 같은 길이의 다른 코드를 놓친다. 충돌 확률보다 "안 구워지는 것"이 위험하다. */
 function srcSig(s) {
@@ -115,9 +131,19 @@ function srcSig(s) {
 }
 // 심각도별 기본 라우팅 — 채널만 켜면 위험·심각은 바로 알림이 가야 한다(주의는 소음이라 기본 꺼짐).
 // 사용자가 한 번이라도 건드린 심각도는 저장된 값이 그대로 우선한다.
-var ROUTE_ORDER = ['주의', '위험', '심각'];
-/* 심각도별 기본 알림 방식 — 발송 여부는 timing 하나로만 정한다(채널이 웹훅 하나라 별도 체크박스는 이중 부정이 된다). */
-var ROUTE_DEFAULT_TIMING = { '주의': '알림 안 함', '위험': '즉시', '심각': '즉시' };
+/* 라우팅 행 — 앞 셋은 설비 등급, 마지막은 **감시 건강**(두절·계측 이상)이다.
+   감시 이상을 등급 표에 섞지 않는 이유: "이 설비가 얼마나 나쁜가"와 "이 값을 믿을 수 있는가"는 다른 질문이고,
+   섞으면 두절이 gi=1이라 '주의' 행을 타고, 그 행이 꺼져 있으면 한 건도 안 나간다 —
+   감시가 눈을 감아도 아무도 모르는 상태가 최악의 실패 모드다.
+   ⚠ '감시 이상' 문자열은 notify.js shouldNotify의 HEALTH_KEY와 일치해야 한다(서버 TQL에 임베드되는 값). */
+var GRADE_ROUTES = ['주의', '위험', '심각'];
+var HEALTH_ROUTE = '감시 이상';
+var ROUTE_ORDER = GRADE_ROUTES.concat([HEALTH_ROUTE]);
+/* 기본 알림 방식 — 발송 여부는 timing 하나로만 정한다(채널이 웹훅 하나라 별도 체크박스는 이중 부정이 된다).
+   '주의'가 즉시인 이유: 게이트 구조에서 주의는 **결함 패턴이 잡혔다**는 뜻이다(4축 시절엔 ISO 존 B였다).
+   실측 이력에서 threshold 1339건 중 1336건이 주의라, 끄면 이 도구가 잡는 것의 99.8%가 알림 없이 묻힌다.
+   섀도 검증 기준 측정점·월당 0.92건이므로 켜도 소음이 되지 않는다. */
+var ROUTE_DEFAULT_TIMING = { '주의': '즉시', '위험': '즉시', '심각': '즉시', '감시 이상': '즉시' };
 function routesWithDefaults(routes) {
   var out = {};
   ROUTE_ORDER.forEach(function (k) {
@@ -164,11 +190,52 @@ var CAT_TICK_MS = 10000;   // 카탈로그(태그 증감) 확인 주기
 /* RMS 구간의 끝을 지금으로 잡으면 마지막 버킷이 아직 적재 중이다.
    여유를 두고 조회하고, 미완성 버킷은 windowRms가 cnt로 걸러낸다. */
 var WIN_LAG_MS = 4000;
-// 순수 판정 상태머신 — 한 태그의 한 틱. 앱·서버 타이머 공통 규칙의 단일 출처(서버 TQL도 이 로직을 미러링).
-//  prev: 직전 MONSTATE(없으면 null·falsy) · rg: 원시 등급(0~3) · breach: 베이스라인 이탈 · now: ms
-//  cfg: { escHold, recHold, reno:{1:ms,2:ms,3:ms} }  (전부 ms · reno 0=끔)
-//  반환: { next, events:[{etype, gi}] } — etype: threshold(악화)·sustained(지속)·recovery(정상복귀)·baseline
-function judgeTick(prev, rg, breach, now, cfg, bandState, run) {
+/* 순수 판정 상태머신 — 한 태그의 한 틱. 앱·서버 타이머 공통 규칙의 단일 출처(서버 TQL도 이 로직을 미러링).
+   prev: 직전 MONSTATE(없으면 null·falsy) · rg: 원시 등급(0~3) · breach: 베이스라인 이탈 · now: ms
+   cfg: { reno:{1:ms,2:ms,3:ms} } (재알림 주기 · 0=끔)
+   반환: { next, events:[{etype, gi, ...}] }
+     observe(조짐) · threshold(확정) · sustained(지속) · improve(완화) · recovery(정상복귀)
+
+   확정은 **시간이 아니라 회차**로 센다. 판정이 추출 주기(기본 10분)로 도는데 진입 확인을 분 단위로
+   두면 1분·2분·5분이 전부 "다음 회차"가 되어 고르는 뜻이 없다 — 그래서 시간 설정을 두지 않는다.
+
+   왜 2회차인가 — NASA IMS를 실제 주기로 돌려 잰 결과다(건전 7측정점 158일 · 결함 3):
+     · 결함 셋 다 "첫 단발 → 긴 공백 → 연속 구간" 모양이었다. 첫 단발은 전부 헛것이고
+       (외륜 1.11일 뒤 2.6일 공백 · 구름체 0.1일 뒤 7일 공백) 진짜는 연속이 시작되는 지점이다.
+     · 단발을 다 받으면 오탐 14.6건/월, 2회 연속만 받으면 5.3건/월이고 리드타임은 오히려 길어진다
+       (외륜 3.1일 전 · 구름체 25일 전 — 단발이 만든 "더 이른" 경보는 현장에 가면 아무것도 없다).
+   단발도 버리지 않는다: observe 이벤트로 남고, 매 회차 격자 점수는 시계열로 따로 쌓인다. */
+/* 계측 이상은 10초 축에서 판정하므로 시간 기준이 그대로 유효하다(스파이크 한 번에 "센서 고장"이 나가면 안 된다).
+   설정으로 노출하지 않는 이유: 22일간 계측 이상이 4건이라 튜닝할 만한 빈도가 아니다. */
+var SENSOR_HOLD_MS = 60000;    // 계측 이상 확정
+var SENSOR_CLEAR_MS = 300000;  // 계측 복귀
+/* cyc = 이 rg를 만든 **패턴 측정의 시각**. 회차를 세는 기준이 이것이어야 한다.
+   판정 틱은 10초마다 돌지만 결함 패턴은 10분마다 갱신되므로, 틱을 세면 "2회차"가 20초가 된다.
+   같은 cyc가 다시 들어오면 등급 입력이 안 바뀐 것이므로 전이 판단을 건너뛰고 상태를 그대로 들고 간다
+   (지속 재알림·베이스라인·계측은 시간 기준이라 매 틱 그대로 평가한다). */
+/* 등급 이벤트의 사유 문구 — 이게 비면 이력만 보고 "왜 이 등급인가"를 알 수 없다.
+   VALUE에 들어가는 ISO 값은 등급을 만든 축이 아니므로(게이트는 결함 패턴이다) 그것만으로는 오해를 준다.
+   격자 점수와 부위를 함께 적으면 목록 한 줄로 근거가 읽힌다. */
+function judgeDetail(ev, pat, imp) {
+  var p = [];
+  if (pat && pat.r != null) p.push('격자 ' + Number(pat.r).toFixed(1));
+  if (pat && pat.key) p.push(pat.key);
+  if (ev.etype === 'observe') p.push('1회차 — 확정 전');
+  else if (ev.etype === 'threshold') p.push('2회 연속 확정');
+  else if (ev.etype === 'sustained') p.push('지속 재알림');
+  else if (ev.etype === 'recovery' && ev.epMs > 0) p.push(durKo(ev.epMs) + ' 만에 복귀');
+  /* 충격성은 값만 싣고 판정 단어(충격성·광대역)는 쓰지 않는다 — 상세분석이 같은 말을 다른 창·
+     다른 임계로 쓴다(Crest P95>15 · 밴드 첨도>4.5). 세 번째 임계를 더하면 화면마다 다른 답이 된다.
+     값은 어느 창에서 재도 사실이라 충돌하지 않으므로 값만 싣고 어느 창인지를 밝힌다 —
+     기간 카드의 Crest P95는 롤업 버킷 분포이고 이쪽은 판정한 그 파형이다.
+     sevMetrics가 Crest에 값·기준만 싣고 등급 주장을 내려놓은 것과 같은 이유다. */
+  if (imp) p.push('판정 창 Crest ' + imp.crest.toFixed(1) + ' · 첨도 ' + imp.kurt.toFixed(1));
+  return p.join(' · ');
+}
+function judgeTick(prev, rg, breach, now, cfg, bandState, run, cyc) {
+  /* ⚠ 함수 안에 둔다 — 이 함수는 서버 TQL에 문자열로 임베드되어 바깥 이름을 볼 수 없다.
+     밖에 두면 앱·테스트는 멀쩡한데 서버에서만 ReferenceError가 난다(계측 게이트의 BLOCK 배열과 같은 이유). */
+  var CONFIRM_N = 2;   // 확정에 필요한 연속 회차 — 악화·복귀 양방향에 같이 적용한다(대칭)
   var events = [], next;
   /* run=false면 판정을 얼린다 — 설비 정지·센서 이상으로 값이 떨어진 것을 "개선"으로 읽으면 안 된다.
      진동 결함은 스스로 낫지 않으므로, 설명되지 않는 하락은 대개 측정 대상을 잃은 것이다.
@@ -176,34 +243,61 @@ function judgeTick(prev, rg, breach, now, cfg, bandState, run) {
   if (run === false) {
     next = prev ? {
       g: prev.g, since: prev.since != null ? prev.since : now, cand: prev.g, candSince: prev.candSince != null ? prev.candSince : now,
+      candN: prev.candN, epAt: prev.epAt, cyc: prev.cyc,
       lastRe: prev.lastRe != null ? prev.lastRe : now, b: prev.b, bb: prev.bb, alarmG: prev.alarmG, imp: prev.imp,
     } : { g: 0, since: now, cand: 0, candSince: now, lastRe: now, b: false };
     if (prev && prev.bcs != null) next.bcs = prev.bcs;
     return { next: next, events: events, frozen: true };
   }
-  if (!prev) {
-    // 최초 관측 — 즉시 확정. 이미 나쁘면 현재 나쁨을 알려야 하므로 기록
-    next = { g: rg, since: now, cand: rg, candSince: now, lastRe: now, b: breach };
-    if (rg > 0) { events.push({ etype: 'threshold', gi: rg }); next.alarmG = rg; }
+  var stale = !!(prev && cyc != null && prev.cyc != null && prev.cyc === cyc);
+  if (stale) {
+    // 같은 패턴 측정 — 등급 전이는 다시 판단하지 않고, 시간 기준인 지속 재알림만 본다
+    next = {
+      g: prev.g, since: prev.since != null ? prev.since : now, cand: prev.cand, candSince: prev.candSince,
+      candN: prev.candN, epAt: prev.epAt, cyc: prev.cyc, lastRe: prev.lastRe != null ? prev.lastRe : now,
+      b: breach, bb: prev.bb, alarmG: prev.alarmG, imp: prev.imp,
+    };
+    if (prev.g > 0) {
+      var ivrS = cfg.reno[prev.g] || 0;
+      if (ivrS > 0 && now - next.lastRe >= ivrS) { events.push({ etype: 'sustained', gi: prev.g }); next.lastRe = now; }
+    }
+  } else if (!prev) {
+    /* 최초 관측 — 나쁘면 조짐만 남기고 확정은 다음 회차에 한다.
+       즉시 확정하면 감시를 처음 켜는 순간 나쁜 태그 전부가 한꺼번에 알람을 낸다(91태그면 91건).
+       그것들이 진짜인지는 다음 회차에도 같은지로 갈린다 — 판단 근거가 하나뿐인 시점이다. */
+    next = { g: 0, since: now, cand: rg, candSince: now, candN: 1, cyc: cyc, lastRe: now, b: breach };
+    if (rg > 0) events.push({ etype: 'observe', gi: rg });
   } else if (rg === prev.g) {
     // 확정 등급 유지 — 후보 해제, 지속 재알림 검사
     var lastRe = prev.lastRe != null ? prev.lastRe : (prev.since != null ? prev.since : now);
-    next = { g: prev.g, since: prev.since != null ? prev.since : now, cand: prev.g, candSince: prev.since || now, lastRe: lastRe, b: breach, alarmG: prev.alarmG, imp: prev.imp };
+    next = { g: prev.g, since: prev.since != null ? prev.since : now, cand: prev.g, candSince: prev.since || now, candN: 0, epAt: prev.epAt, cyc: cyc, lastRe: lastRe, b: breach, alarmG: prev.alarmG, imp: prev.imp };
     if (prev.g > 0) {
       var ivr = cfg.reno[prev.g] || 0;
       if (ivr > 0 && now - lastRe >= ivr) { events.push({ etype: 'sustained', gi: prev.g }); next.lastRe = now; }
     }
   } else {
-    // 후보 전이 (rg != prev.g) — 방향별 지속시간 요구(악화=진입 확인, 개선=복귀 유지)
-    var hold = rg > prev.g ? cfg.escHold : cfg.recHold;
-    /* 개선 방향으로 계속 내려가는 중에는 후보 시각을 유지한다 — 등급이 매 틱 달라진다고 리셋하면
-       심각→위험→주의→양호처럼 단계적으로 좋아질 때 recHold를 영영 못 채워 복귀가 안 난다.
+    /* 후보 전이 (rg != prev.g) — 같은 후보가 CONFIRM_N 회차 연속이면 확정한다.
+       개선 방향으로 계속 내려가는 중에는 후보를 이어서 센다 — 등급이 매 회차 달라진다고 리셋하면
+       심각→위험→주의→양호처럼 단계적으로 좋아질 때 회차를 영영 못 채워 복귀가 안 난다.
        "더 나빠졌을 때"만 후보를 새로 잡는다(악화는 확인이 필요하므로). */
     var down = rg < prev.g && prev.cand != null && rg <= prev.cand;
-    var candSince = (prev.cand === rg || down) ? (prev.candSince != null ? prev.candSince : now) : now;
-    if (now - candSince >= hold) {
-      next = { g: rg, since: now, cand: rg, candSince: now, lastRe: now, b: breach, alarmG: prev.alarmG, imp: prev.imp };
-      if (rg > prev.g) { events.push({ etype: 'threshold', gi: rg }); next.alarmG = rg; next.imp = 0; }   // 악화 — 새 에피소드
+    var same = prev.cand === rg || down;
+    var candSince = same ? (prev.candSince != null ? prev.candSince : now) : now;
+    // candN 0 = 후보 없음(확정 등급 유지 중). ||1로 쓰면 0이 falsy라 첫 회차가 2로 세어져 즉시 확정된다.
+    var candN = same ? ((prev.candN || 0) + 1) : 1;
+    /* 조짐 — 양호에서 처음 벗어나려는 회차. 확정 전이라 웹훅은 안 나가고 이력·화면에만 남는다.
+       에피소드 안의 추가 악화(주의→위험)에는 안 붙인다: 이미 알람이 나간 건에 조짐을 또 다는 셈이라
+       "무엇이 새로 잡혔나"라는 뜻이 흐려진다. */
+    if (candN === 1 && prev.g === 0 && rg > 0) events.push({ etype: 'observe', gi: rg });
+    if (candN >= CONFIRM_N) {
+      next = { g: rg, since: now, cand: rg, candSince: now, candN: 0, cyc: cyc, lastRe: now, b: breach, alarmG: prev.alarmG, imp: prev.imp };
+      if (rg > prev.g) {   // 악화
+        events.push({ etype: 'threshold', gi: rg });
+        /* 에피소드 시작은 **양호를 벗어난 시각**이다. since는 지금 등급이 된 시각이라
+           주의→위험으로 승격하면 리셋되어, 복귀 때 재는 길이가 마지막 승격 이후가 되어 버린다. */
+        next.epAt = prev.alarmG ? (prev.epAt != null ? prev.epAt : now) : now;
+        next.alarmG = rg; next.imp = 0;
+      }
       else {
         /* 개선을 두 순간으로 나눈다 — 운영자에게 의미가 다르기 때문이다.
              improve  : 알람 수준에서 벗어남 → 우선순위 하향, 긴급 대응 해제
@@ -213,7 +307,9 @@ function judgeTick(prev, rg, breach, now, cfg, bandState, run) {
            양호 도달만 복귀로 보면 존 경계 위에 상주하는 설비는 영영 해제되지 않는다 — improve가 그걸 메운다. */
         var aG = prev.alarmG || 0;
         if (rg === 0 && aG > 0) {
-          events.push({ etype: 'recovery', gi: 0 });
+          /* 에피소드가 얼마나 갔는지를 이벤트에 실어 둔다 — 복귀 행 하나만 봐도 길이가 읽힌다.
+             목록에서 확정 행을 찾아 시각을 빼는 것은 사람이 할 일이 아니다. */
+          events.push({ etype: 'recovery', gi: 0, epMs: prev.epAt != null ? (now - prev.epAt) : 0 });
           next.alarmG = 0; next.imp = 0;
         } else if (aG > 0 && rg < aG && !prev.imp) {
           events.push({ etype: 'improve', gi: rg });
@@ -221,8 +317,8 @@ function judgeTick(prev, rg, breach, now, cfg, bandState, run) {
         }
       }
     } else {
-      // 유지 시간 미달 — 확정 등급 유지, 후보만 추적
-      next = { g: prev.g, since: prev.since != null ? prev.since : now, cand: rg, candSince: candSince, lastRe: prev.lastRe != null ? prev.lastRe : (prev.since != null ? prev.since : now), b: breach, alarmG: prev.alarmG, imp: prev.imp };
+      // 회차 미달 — 확정 등급 유지, 후보만 추적(candN을 들고 가야 다음 회차에 이어 센다)
+      next = { g: prev.g, since: prev.since != null ? prev.since : now, cand: rg, candSince: candSince, candN: candN, epAt: prev.epAt, cyc: cyc, lastRe: prev.lastRe != null ? prev.lastRe : (prev.since != null ? prev.since : now), b: breach, alarmG: prev.alarmG, imp: prev.imp };
     }
   }
   /* 베이스라인 이탈 — 등급 전이와 독립. 진입은 escHold, 해제(재무장)는 recHold를 요구한다.
@@ -258,7 +354,7 @@ function judgeTick(prev, rg, breach, now, cfg, bandState, run) {
      상관된 대역(fault+high+vhigh 등)은 한 결함의 세 표현이라 따로 알리면 알람이 3배가 된다.
      시간 홀드를 걸지 않는 이유: 대역 추출이 이미 분 단위 주기라 여기서 더 늦추면 반응이 30분을 넘는다.
      대신 복귀 판정에 히스테리시스(×0.9)를 둬서 한계 근처 진동으로 이벤트가 반복되지 않게 한다. */
-  /* 대역은 **이벤트를 내지 않는다**(2026-08-21) — 8개 계열을 각각 한계와 대보고 하나라도 넘으면
+  /* 대역은 **이벤트를 내지 않는다** — 8개 계열을 각각 한계와 대보고 하나라도 넘으면
      켜는 구조라 그 자체가 작은 다중비교다(단독 오탐 13% · 베이스라인 0%와 대조된다).
      대역이 움직이면 대개 베이스라인도 같이 움직이므로(둘 다 "평소 대비") 알림은 그쪽이 낸다.
      대역 값은 근거표에 남아 "어느 계열이 움직였나"로 원인을 좁히는 데 쓴다 — 상태는 계속 추적한다. */
@@ -266,7 +362,13 @@ function judgeTick(prev, rg, breach, now, cfg, bandState, run) {
   else if (prev) next.bb = prev.bb;
   return { next: next, events: events };
 }
-export { judgeTick, durMs }; // 테스트·서버 타이머 재사용
+/* 서버 임베드용 자체 완결 소스 — durKo를 한 스코프에 같이 묶는다.
+   toString 하나만 넘기면 압축이 durKo의 이름을 바꿔(→tr) 서버에서만 복귀 이벤트가
+   ReferenceError로 죽는다. 앱·소스 테스트는 멀쩡해서 늦게 발견된다.
+   calc의 isoSrc·gateSrc·patSrc와 같은 방식이다. */
+function detailSrc() { return VC.embedSrc([durKo, judgeDetail], { judgeDetail: judgeDetail }); }
+
+export { judgeTick, durMs, detailSrc }; // 테스트·서버 타이머 재사용
 import VC from '../../cgi-bin/calc/calc.js';
 import LLM from '../../cgi-bin/llm/llm.js';
 import Report from '../../cgi-bin/report/report.js';
@@ -321,13 +423,14 @@ export class App extends Component {
          그 사실을 배너로 남긴다(고른 사람도 몇 주 뒤엔 잊는다). */
       monMode: 'app', // 감시 방식: 'app'(앱 열린 동안만) | 'server'(Neo 타이머 상시)
       // 알람 시나리오 파라미터 (앱·서버 타이머 공통 규칙)
-      escHold: '1m',  // 진입 확인 시간 — 이상이 이만큼 이어져야 알린다(단발 스파이크 차단)
-      recHold: '5m',  // 복귀 유지 시간 — '정상 복귀' 알람 전 정상 지속 요구
       /* 지속 재알림은 기본 끔 — 진동 결함은 정비 전까지 몇 주 이어지므로 시간 기반 반복은
          같은 사실을 수백 번 통지한다(위험 1시간 주기면 7일에 168회, 30일이면 720회).
          새 정보가 없는 통지가 쌓이면 정작 봐야 할 새 이벤트가 묻힌다.
          "지금 무엇이 나쁜가"는 모니터링 탭이 답하고, 반복이 필요하면 묶음 알림이 맞는 형태다. */
-      renotify: { '주의': '0', '위험': '0', '심각': '0' }, // 심각도별 지속 재알림 주기 (0=끔)
+      /* 지속 재알림 — 확정 뒤 침묵하면 "아까 그거 단발이었나"를 알 수 없다(복귀 전까지 소식이 없다).
+         등급이 급할수록 짧게: 정상 설비는 확정 자체가 월 1.1건이라 여기서 늘어나는 양이 거의 없고,
+         쌓이는 것은 진짜 결함이 이어질 때뿐이다. */
+      renotify: { '주의': '2h', '위험': '1h', '심각': '30m' },
       aliases: {}, // 태그 별칭 {"TABLE:TAG": 별칭}
       srcSel: [], evalWindow: '10s', // 소스 기본값 = 미선택 · evalWindow=RMS 구간(판정 주기 이상)
       srcNotice: '', // 데이터 소스 변동(테이블/태그 제거) 감지 배너 문구
@@ -408,7 +511,6 @@ export class App extends Component {
         // 옛 설정의 1분·5분은 추출 창보다 짧을 수 있어 10분으로 올린다(IV_KO 주석 참조)
         if (cfg.bandInterval === '1m' || cfg.bandInterval === '5m') cfg.bandInterval = '10m';
         // 옛 기본값(진입 즉시)과 정확히 같을 때만 새 기본으로 올린다 — 사용자가 일부러 고른 값은 건드리지 않는다.
-        if (cfg.escHold === '0') cfg.escHold = '1m';
         /* 라우팅 이관 — 옛 저장본의 webhook:false·'무시'는 전부 '알림 안 함'으로 옮긴다
            (꺼둔 의도가 보존되어야 이관 후 조용히 켜지는 일이 없다). */
         if (cfg.routes) Object.keys(cfg.routes).forEach(function (k) {
@@ -626,12 +728,15 @@ export class App extends Component {
       if (_dk && (_g0 && _g0.label) !== (_g1 && _g1.label)) this.forceUpdate();
     }
     /* 서버 모드는 _judgeLive가 즉시 리턴하므로 표시 등급을 계산할 곳이 여기밖에 없다.
-       안 하면 카드·KPI·필터가 폴백(전대역 존 등급)으로 떨어져, ISO 대역제한도 세 판정 합성도
+       안 하면 카드·KPI·필터가 폴백(전대역 존 등급)으로 떨어져, ISO 대역제한도 게이트 판정도
        화면에 반영되지 않는다 — 서버 모드가 실사용 모드이므로 그러면 작업이 통째로 안 보인다.
        앱 모드에서는 _judgeLive가 홀드까지 반영한 등급을 쓰므로 여기서 덮지 않는다. */
-    if (this.state.monMode === 'server' && this.state.monitorOn) this._refreshDisplayGrade();
+    /* 표시 등급은 _judgeLive가 채우는데 그건 앱 모드 + 알람 켜짐일 때만 돈다.
+       나머지 경우(서버 모드 · 알람 꺼짐)에도 카드는 등급을 보여줘야 하므로 여기서 같은 규칙으로 채운다.
+       안 채우면 _severityOf가 폴백으로 떨어져 게이트 없는 ISO 등급이 화면에 나온다. */
+    if (this.state.monMode === 'server' || !this.state.monitorOn) this._refreshDisplayGrade();
   }
-  /* 이벤트를 내지 않고 표시 등급만 구한다 — 판정과 같은 세 축, 같은 값.
+  /* 이벤트를 내지 않고 표시 등급만 구한다 — 판정과 같은 규칙(결함 패턴 게이트), 같은 값.
      이벤트 발화는 서버 타이머가 하고, 앱은 같은 규칙으로 화면만 맞춘다. */
   _refreshDisplayGrade() {
     var self = this, S = this.state;
@@ -652,21 +757,22 @@ export class App extends Component {
       var isoUsable = eq.unit === 'mm/s' || iso.basis === 'iso';
       var zg = isoUsable ? VC.gradeFor(isoV, self._isoZones(eq)) : 0;
       var lim = revived ? null : VC.baselineLimit(b);
-      var bg = (lim != null && wide > lim) ? Math.max(1, zg) : 0;
       var bnow = (self._bandNow || {})[key];
       var bj = (bnow && !revived) ? VC.bandJudge(bnow, self._bandBaselines(eq), false, self._softBands(eq),
         (self._monState || {})[key] && self._monState[key].elat, Date.now()) : null;
       /* 서버 모드에서도 게이트 규칙은 같다 — 결함 패턴이 켜고 ISO가 높이를 정한다.
-         전에는 여기서 ISO·베이스라인·대역을 최댓값으로 얹어, 서버가 쓴 등급과 카드가 갈렸다. */
+         여기서 ISO·베이스라인·대역을 최댓값으로 얹으면 서버가 쓴 등급과 카드가 갈린다. */
       var _p = (self._patNow || {})[key] || null;
       var _hz = (_p && _p.iso != null) ? VC.gradeFor(_p.iso, self._isoZones(eq)) : zg;
       var wg = VC.worstGrade(0, 0, 0, VC.patternGate(!!(_p && _p.on), _hz));
-      /* 카드가 세 축을 한 줄로 보여주려면 각 축의 "값"이 필요하다 — 등급만으로는
-         왜 그 등급인지 설명이 안 된다. 베이스라인은 한계 대비 배수, 대역은 최대 배수. */
+      /* 카드가 네 축을 한 줄로 보여주려면 각 축의 "값"이 필요하다 — 등급만으로는
+         왜 그 등급인지 설명이 안 된다. 베이스라인은 한계 대비 배수, 대역은 최대 배수,
+         결함 패턴은 격자 배수다. 등급을 만드는 것은 패턴 하나이고 나머지 셋은 근거로만 실린다. */
       wg.iso = isoV; wg.wide = wide; wg.limited = VC.isoNeeded(eq.fs); wg.basis = iso.basis || 'wide';
       wg.isoOk = isoUsable; wg.isoUnit = isoUsable ? 'mm/s' : eq.unit;
       wg.blOk = lim != null; wg.bandOk = !!bj;
       wg.patOk = !!_p; wg.patOn = !!(_p && _p.on); wg.patR = _p ? _p.r : null;
+      wg.patWide = !!(_p && _p.demodSrc === 'wideband');   // 저샘플 전대역 복조 — 화면이 근거를 낮춰 적는다
       wg.blR = (lim != null && lim > 0) ? wide / lim : null;
       wg.bandR = bj ? bj.maxR : null;
       self._gradeState[key] = wg;
@@ -696,8 +802,44 @@ export class App extends Component {
     return Promise.all([
       timerStates(),
       srv ? loadMonState().catch(function () { return null; }) : Promise.resolve(null),
-    ]).then(function (r) { self._applyHealth(r[0], (r[1] || {}).__hb || null); })
-      .catch(function () {});
+    ]).then(function (r) {
+      /* 조회 실패 한 번으로 배너를 뒤집지 않는다 — 실패한 틱은 _applyHealth에서 복구 배너까지
+         통째로 건너뛰므로 "확인할 수 없습니다"와 "복구됐습니다"가 번갈아 뜬다. 못 읽은 틱에는
+         아무것도 새로 말하지 않고 화면을 그대로 둔다(모르는 것을 살아났다고도 멈췄다고도 적지 않는다).
+         연속 TIMER_MISS_MIN회부터 넘겨서 "모른다"고 말하게 한다.
+         ⚠ 여기서 세는 이유: 위쪽 "볼 것이 없음" 경로도 _applyHealth(null,null)로 배너를 지우는데,
+         안에서 세면 그 경로까지 막혀 꺼둔 기능의 옛 배너가 남는다. */
+      if (r[0]) self._timersMiss = 0;
+      else if ((self._timersMiss = (self._timersMiss || 0) + 1) < TIMER_MISS_MIN) return;
+      self._applyHealth(r[0], (r[1] || {}).__hb || null);
+    }).catch(function () {});
+  }
+  /* 최근 회차 소요의 중앙값 — 헬스 틱이 판정보다 자주 도니 같은 회차를 여러 번 읽는다.
+     시각(hb.t)이 바뀐 것만 새 표본으로 세고, 표본이 모이기 전에는 판단하지 않는다. */
+  _tickMsMedian(hb) {
+    if (!hb || hb.ms == null) return null;
+    var h = this._msHist || (this._msHist = []);
+    if (!h.length || h[h.length - 1].t !== hb.t) {
+      h.push({ t: hb.t, ms: hb.ms });
+      if (h.length > SLOW_WIN_N) h.shift();
+    }
+    if (h.length < SLOW_MIN_N) return null;
+    var a = h.map(function (x) { return x.ms; }).sort(function (x, y) { return x - y; });
+    return a[Math.floor(a.length / 2)];
+  }
+  /* 결함 패턴 축을 못 세우는 태그 — 회전수와 베어링 기하가 **둘 다** 있어야 격자를 긋는다
+     (서버 patValue·앱 monPattern이 같은 조건으로 먼저 걸러낸다). 미끄럼 베어링은 구름체가
+     없어 n=0이라 여기 걸린다 — 이 게이트 구조에서는 등급이 설 수 없는 설비다. */
+  _patBlocked() {
+    var eqs = this.data ? this._activeEqs() : [];
+    var noRpm = 0, noGeo = 0;
+    eqs.forEach(function (e) {
+      if (!(e.rpm > 0)) noRpm++;
+      else if (!(e.bearing && e.bearing.n > 0)) noGeo++;
+    });
+    return { n: noRpm + noGeo, total: eqs.length, noRpm: noRpm, noGeo: noGeo,
+      why: (noRpm && noGeo) ? '회전수 ' + noRpm + '대 · 베어링 형식 ' + noGeo + '대 미입력'
+        : noRpm ? '회전수 미입력' : '베어링 형식 미입력' };
   }
   _applyHealth(timers, hb) {
     var self = this, S = this.state, now = Date.now();
@@ -707,7 +849,7 @@ export class App extends Component {
     var reBand = function () { self._toast('대역 추출을 다시 등록합니다'); self._bandSig = null; self._syncBandTimer(); };
     /* 자동 복구 대상 — 켜둔 설정인데 스스로 멈춘 타이머는 둘 다 같은 처지다.
        복구 후 문구만 다르다: 감시가 없던 구간은 판정이 통째로 없고, 대역 추출이 없던 구간은
-       대역 값이 안 쌓여 세 축 중 하나가 조용히 빠진다. 어느 쪽이든 그 시간의 침묵은 근거가 아니다. */
+       대역 값이 안 쌓여 근거 축 하나가 조용히 빠진다. 어느 쪽이든 그 시간의 침묵은 근거가 아니다. */
     var MON_T = { key: 'mon', recK: 'recovered', toast: '서버 감시가 멈춰 자동으로 다시 등록합니다',
       sync: function () { self._specSig = null; self._syncMonitorTimer(true); },
       rec: function (ago, why) { return '서버 감시가 ' + ago + ' 전 멈췄다가 자동으로 복구됐습니다 — ' + why
@@ -732,22 +874,45 @@ export class App extends Component {
       // 심박 — 판정 주기의 6배를 넘겼으면 타이머가 RUNNING이어도 실제로는 돌지 않는 것이다
       if (hb && hb.t) {
         var age = now - hb.t;
+        // 한 번이라도 판정했으면 홀드를 푼다 — 안 풀면 옛 0구간이 남아 다음 0에 즉시 뜬다
+        if (hb.pat > 0) this._patZeroAt = 0;
         if (age > Math.max(60000, iv * 6)) {
           // 타이머는 RUNNING인데 판정이 안 도는 경우 — STOP과 같은 조치(재등록)를 쓴다
           var _st = '마지막 판정이 ' + durKo(age) + ' 전입니다 (주기 ' + S.monitorInterval + ')';
           if (!dead) dead = { k: 'stale', text: _st, why: _st };
+        } else if (hb.pat != null && hb.n > 0 && hb.pat === 0) {
+          /* 훑기는 하는데 결함 패턴을 잰 태그가 하나도 없는 상태 — 등급을 켜는 축이 통째로 비어
+             알람이 날 수가 없다. 타이머·심박·두절 검사는 전부 통과하므로 이 값 없이는 화면이 조용하다.
+             홀드를 두는 이유: 패턴은 주기(기본 10분)마다 재므로 기동 직후엔 정상적으로 0이다.
+             pat 필드가 없는 옛 TQL은 건드리지 않는다(재등록 전까지 오경보가 된다). */
+          if (!this._patZeroAt) this._patZeroAt = now;
+          if (now - this._patZeroAt > PAT_ZERO_MS) {
+            warns.push({ k: 'nopat', lv: 'warn',
+              text: hb.n + '대를 훑었지만 결함 패턴을 잰 태그가 0입니다 — 등급을 켜는 축이 비어 알람이 날 수 없습니다'
+                + '. 회전수·베어링 기하가 없거나, 판정 창에 표본이 모자랍니다',
+              act: '설비 정보 열기', onAct: function () { self.setState({ tab: 'settings', setSection: 'equip' }); } });
+          }
         } else if (hb.n === 0) {
           warns.push({ k: 'nodata', lv: 'warn', text: '판정 대상이 0개입니다 — 감시 태그에 새 데이터가 들어오는지 확인하세요' });
         }
         /* 회차가 주기에 근접하면 곧 겹친다 — 겹친 회차는 잠금에 막혀 통째로 건너뛰므로,
            타이머는 RUNNING인데 실제 판정 주기만 조용히 2배·3배로 늘어난다. 그 전에 알린다. */
-        if (hb.ms != null && hb.ms > iv * 0.7) {
-          warns.push({
-            k: 'slowtick', lv: hb.ms >= iv ? 'err' : 'warn',
-            text: '서버 감시 1회차가 ' + (hb.ms / 1000).toFixed(1) + '초 걸립니다 (주기 ' + S.monitorInterval + ' · 태그 ' + hb.n + '개)'
-              + (hb.ms >= iv ? ' — 회차가 겹쳐 일부 주기를 건너뜁니다. 주기를 늘리거나 감시 태그를 줄이세요.' : ' — 주기를 늘리는 것을 권합니다.'),
-            act: '설정 열기', onAct: function () { self.setState({ tab: 'settings', setSection: 'monitor' }); },
-          });
+        /* 직전 한 회차로 판단하지 않는다 — 회차마다 하는 일이 달라(캐시를 쓴 틱 vs 원본을 새로
+           받는 틱) 소요가 2배 넘게 흔들려서, 임계 근처면 배너가 떴다 사라졌다 한다.
+           중앙값으로 보고 끄는 문턱을 켜는 문턱보다 낮게 둔다. */
+        var _med = this._tickMsMedian(hb);
+        if (_med != null) {
+          this._slowOn = this._slowOn ? (_med > iv * SLOW_OFF) : (_med > iv * SLOW_ON);
+          if (this._slowOn) {
+            var _over = _med >= iv;
+            warns.push({
+              k: 'slowtick', lv: _over ? 'err' : 'warn',
+              text: '서버 감시 1회차가 ' + (_med / 1000).toFixed(1) + '초 걸립니다 (최근 회차 중앙값 · 주기 '
+                + S.monitorInterval + ' · 태그 ' + hb.n + '개)'
+                + (_over ? ' — 회차가 겹쳐 일부 주기를 건너뜁니다. 주기를 늘리거나 감시 태그를 줄이세요.' : ' — 주기를 늘리는 것을 권합니다.'),
+              act: '설정 열기', onAct: function () { self.setState({ tab: 'settings', setSection: 'monitor' }); },
+            });
+          }
         }
       }
       /* 타이머 상태를 못 읽었으면(timers null) 복구도 "복구됐다"는 말도 하지 않는다 —
@@ -766,10 +931,18 @@ export class App extends Component {
     }
     /* 대역 추출은 감시 모드를 안 가린다 — 서버 감시를 꺼도 알람이 켜져 있으면 계속 돈다.
        그래서 확인·복구도 모드 분기 밖에 둔다. 서버 분기 안에 두면 앱 모드 사용자는 대역이
-       죽어도 모른 채, 세 축 중 하나가 빠진 판정을 "이상 없음"으로 보게 된다. */
+       죽어도 모른 채, 근거 축 하나가 빠진 화면을 "이상 없음"으로 보게 된다. */
     if (S.bandOn && timers) {
       var b = timers[BAND_TIMER];
-      if (!b) warns.push({ k: 'noband', lv: 'warn', text: '대역 추출 타이머가 등록되어 있지 않습니다', act: '다시 등록', onAct: reBand });
+      /* 없는 이유를 갈라 말한다. 대상 태그가 0이면 앱이 스스로 안 구운 것이라 '다시 등록'을
+         눌러도 같은 자리에서 또 지워진다 — 버튼이 아무것도 못 고치면서 사용자를 붙잡는다.
+         그럴 때는 고칠 수 있는 곳(설비 정보의 RPM)으로 보낸다. */
+      if (!b && this._bandNoTarget) {
+        warns.push({ k: 'bandnotarget', lv: 'warn',
+          text: '대역 추출이 켜져 있지만 조건을 갖춘 태그가 없어 돌지 않습니다 — ' + (this._bandSkipWhy || '대상 없음')
+            + '. 대역 경계가 회전주파수의 배수로 정의되므로 RPM 없이는 대역을 나눌 수 없습니다',
+          act: '설비 정보 열기', onAct: function () { self.setState({ tab: 'settings', setSection: 'equip' }); } });
+      } else if (!b) warns.push({ k: 'noband', lv: 'warn', text: '대역 추출 타이머가 등록되어 있지 않습니다', act: '다시 등록', onAct: reBand });
       else if (!/^RUNNING/.test(b.state || '')) dband = { k: 'bandstop', text: '대역 추출이 멈춰 있습니다 — ' + (b.state || '상태 불명'), why: b.state || '상태 불명' };
       var _bw = this._recoverWarn(BAND_T, dband, now, reBand);
       if (_bw) warns.push(_bw);
@@ -801,6 +974,16 @@ export class App extends Component {
     var sig = warns.map(function (w) { return w.k + ':' + w.text; }).join('|');
     if (sig === this._healthSig) return;      // 같은 상태면 리렌더하지 않는다
     this._healthSig = sig;
+    /* 결함 패턴 축을 세울 수 없는 태그 — 다른 보류 사유(정지·두절·계측·대기)는 시간이 풀지만
+       이건 사람이 설비 정보를 채워야만 풀린다. 그래서 카드 호버가 아니라 배너로 올린다:
+       그 태그들은 등급이 영원히 서지 않는데 화면은 조용하다. 사라지지 않는 것이 이 배너의 일이다. */
+    var _blk = this._patBlocked();
+    if (_blk.n) {
+      warns.push({ k: 'nogeo', lv: 'warn',
+        text: _blk.total + '대 중 ' + _blk.n + '대가 결함 패턴을 못 재 등급이 서지 않습니다 — ' + _blk.why
+          + '. 이 설비들의 "이상 없음"은 확인된 것이 아닙니다',
+        act: '설비 정보 열기', onAct: function () { self.setState({ tab: 'settings', setSection: 'equip' }); } });
+    }
     this.setState({ health: warns.length ? warns : null });
   }
   /* 죽었으면 다시 등록하고, 살아났으면 "죽었었다"는 사실을 남긴다.
@@ -944,6 +1127,7 @@ export class App extends Component {
     });
     return {
       judgeSrc: judgeTick.toString(), // 앱과 동일 규칙을 서버에 그대로 임베드 (드리프트 0)
+      detailSrc: detailSrc(), // 이벤트 사유 문구도 같은 함수 — 두 모드의 이력이 갈리지 않게(durKo 포함 자체 완결형)
       limitSrc: VC.baselineLimit.toString(), // 한계식(클램프 포함)도 같은 방식 — 앱/서버 판정식 단일 소스
       bandSrc: VC.bandJudgeSrc(), // 대역 판정도 동일 소스(상수 포함 자체 완결형)
       winSrc: VC.windowRms.toString(), // 구간 RMS도 같은 함수 — 앱/서버 판정값 단일 소스
@@ -968,7 +1152,7 @@ export class App extends Component {
       // 대역 추출 주기의 4배를 룩백으로 — 한두 번 걸러도 마지막 값을 놓치지 않는다
       bandWinMs: Math.max(3600000, durMs(S.bandInterval) * 4),
       tags: tags,
-      cfg: { escHold: durMs(S.escHold), recHold: durMs(S.recHold),
+      cfg: { escHold: SENSOR_HOLD_MS, recHold: SENSOR_CLEAR_MS,
         reno: { 1: durMs((S.renotify || {})['주의']), 2: durMs((S.renotify || {})['위험']), 3: durMs((S.renotify || {})['심각']) } },
       notify: { src: Notify.serverSrc(), cfg: this._notifyCfg() }, // 발송도 앱과 같은 함수로
       wd: this._wdSpec('mon'),   // 대역 추출이 멎으면 여기서 되살린다
@@ -1009,7 +1193,10 @@ export class App extends Component {
     var S = this.state;
     if (!S.monitorOn) return null;
     var srv = S.monMode === 'server';
-    var band = !!S.bandOn;
+    /* 켜짐 여부가 아니라 "실제로 구워졌는가"를 본다 — 대상 태그가 없어 앱이 스스로 지운
+       타이머를 감시자가 죽은 것으로 보면, 되살릴 수 없는 이름에 start를 세 번 던지고 포기한다
+       (감시자는 start만 하고 create는 못 한다). */
+    var band = this._bandLive();
     if (who === 'wd') {
       if (!srv && !band) return null;
       var tg = [];
@@ -1097,14 +1284,15 @@ export class App extends Component {
      이벤트·판정상태·베이스라인은 LOOKUP에 저장되어 세션 간 연속 — 재시작 시 마지막 상태와 비교해
      닫혀 있던 사이의 순변화를 따라잡기 판정으로 소급한다(닫힌 사이의 일시 스파이크는 미포착). */
   // 판정: 심각도 평가와 동일한 값(_evalValue: 평가 윈도우+집계) 기준. 지속시간 개념을 넣은 상태머신.
-  //  · 악화(등급 상승)  — escHold(진입 확인) 이상 지속되면 확정 → 'threshold' 이벤트
-  //    ⚠ 등급은 결함 패턴이 켜고 그 축은 추출 주기(기본 10분)로 도므로, escHold가 1분이어도
+  //  · 조짐(양호 이탈)  — 첫 회차 → 'observe' 이벤트 (확정 전이라 웹훅은 안 나간다)
+  //  · 악화(등급 상승)  — 같은 후보가 CONFIRM_N회차 연속이면 확정 → 'threshold' 이벤트
+  //    ⚠ 등급은 결함 패턴이 켜고 그 축은 추출 주기(기본 10분)로 도므로, 확정은
   //      실제 확정은 두 번째 판정(10~20분)에 난다. 진폭·정지·계측 이벤트는 10초 축이라 설정 그대로다.
   //      리드타임이 며칠~2주라 이 지연은 무의미해서 상태기를 따로 두지 않는다(분기가 늘면 규칙이 갈린다).
   //  · 지속(같은 등급)  — renotify[등급] 주기마다 → 'sustained' 이벤트 (0=끔)
-  //  · 복귀(→ 양호)     — recHold(복귀 유지) 이상 정상 지속되면 확정 → 'recovery' 이벤트
-  //  · 완화(나쁨→덜나쁨) — recHold 후 조용히 상태만 갱신 (알림 없음)
-  //  · 베이스라인 이탈(μ+kσ) — 학습 태그에 온셋 시 'baseline' 이벤트 (등급 전이와 독립)
+  //  · 복귀(→ 양호)     — CONFIRM_N회차 연속 정상이면 확정 → 'recovery' 이벤트(에피소드 길이 포함)
+  //  · 완화(나쁨→덜나쁨) — 확정 후 조용히 상태만 갱신 (알림 없음)
+  //  · 베이스라인 이탈(μ+kσ) — 상태만 추적(next.b). 이벤트는 내지 않는다(이벤트는 10분 패턴 축 전용)
   //  MONSTATE에 후보(cand/candSince)·마지막 알림(lastRe)까지 저장 → 서버 타이머(무상태 실행)와 규칙 동일.
   _judgeLive(force) {
     var self = this, S = this.state;
@@ -1114,8 +1302,10 @@ export class App extends Component {
     var nowW = Date.now();   // 주기는 _startTimers의 타이머가 정한다 — 여기서 다시 스로틀하지 않는다
     var iv = durMs(S.monitorInterval) || 3000;
     if (!this._monState) this._monState = {};
+    /* 확정은 회차로 세므로 진입·복귀 시간이 필요 없다 — 설정에도 그 항목을 두지 않는다.
+       계측 이상(sensorTick)은 10초 축이라 시간 기준이 그대로 유효하다 — 거기만 상수를 준다. */
     var cfg = {
-      escHold: durMs(S.escHold), recHold: durMs(S.recHold),
+      escHold: SENSOR_HOLD_MS, recHold: SENSOR_CLEAR_MS,
       reno: { 1: durMs((S.renotify || {})['주의']), 2: durMs((S.renotify || {})['위험']), 3: durMs((S.renotify || {})['심각']) },
     };
     var jobs = [], nEv = 0;
@@ -1191,7 +1381,9 @@ export class App extends Component {
          신호가 묻혀도 유지한다 — 되살아난 태그는 옛 설비 이력이라 넘기지 않는다. */
       if (bnow && !revived && !sens.on) bj = VC.bandJudge(bnow, self._bandBaselines(eq), !!(prev && prev.bb),
         self._softBands(eq), revived ? null : (prev && prev.elat), nowW);
-      var r = judgeTick(prev, rg, breach, nowW, cfg, bj, run);
+      /* 회차 식별자 = 패턴을 잰 시각. 패턴을 못 잰 태그는 null이라 매 틱이 새 회차로 취급되는데,
+         그 경우 rg가 0으로 고정이라 전이가 없어 문제가 되지 않는다. */
+      var r = judgeTick(prev, rg, breach, nowW, cfg, bj, run, _pat ? _pat.at : null);
       // 계측 이상·복귀는 진동 이벤트와 별개 축이라 그대로 이어 붙인다
       sens.events.forEach(function (ev) { r.events.push(ev); });
       // 대역 판정을 못 한 틱(추출 지연·계측 이상)에서 이력을 잃으면 latch의 뜻이 없어진다
@@ -1205,40 +1397,40 @@ export class App extends Component {
       if (lost && !(prev && prev.lost)) r.events.push({ etype: 'signal_lost', gi: 1 });
       r.next.lost = lost ? 1 : 0;
       nEv += r.events.length;
-      var _imp = self._impactOf(key), _impTxt = _imp ? _imp.text : '';
       r.events.forEach(function (ev) {
-        var isBand = ev.etype === 'band' || ev.etype === 'bandrec';
         // 이벤트에 실린 값은 그 판정이 실제로 본 값이어야 한다 — 나중에 왜 났는지 설명할 수 있게
         var isSens = ev.etype === 'sensor_fault' || ev.etype === 'sensor_ok';
-        var ev_val = isBand ? (bj ? bj.maxR : 0) : isSens ? 0 : ev.etype === 'baseline' ? cur : (val != null ? val : wide);
-        var ev_lim = isBand ? 1 : isSens ? 0 : ev.etype === 'baseline' ? lim : ev.etype === 'recovery' ? eq.zones[0] : zoneLim(eq, ev.gi);
+        var ev_val = isSens ? 0 : (val != null ? val : wide);
+        var ev_lim = isSens ? 0 : ev.etype === 'recovery' ? eq.zones[0] : zoneLim(eq, ev.gi);
         jobs.push(insertEvent({
           eid: key + ':' + nowW + ':' + ev.etype, ts: nowW, tbl: eq.table, tag: eq.name, etype: ev.etype,
           grade: GRADE_WORDS[ev.gi], val: ev_val, lim: ev_lim,
           /* 두절은 지표값이 없다 — val/lim에 들어가는 0은 자리를 비울 수 없어 넣은 값이지 측정값이 아니다.
              무엇이 일어났는지는 "얼마나 안 들어왔나"뿐이라 그것을 DETAIL에 적는다(서버 판정기와 같은 문구). */
-          /* 대역·베이스라인 이벤트에는 충격성 근거를 덧붙인다 — 같은 에너지 상승이라도
-             임펄스인지 광대역 잡음인지에 따라 볼 곳이 다르다(베어링 vs 유동·부착). */
-          detail: ev._detail = (ev.etype === 'band' ? [(bj ? bj.detail : ''), _impTxt].filter(Boolean).join(' · ')
-            : ev.etype === 'baseline' ? _impTxt
-            : isSens ? (ev.detail || '')
-            : ev.etype === 'signal_lost' ? durKo(nowW - eq.lastSeen) + ' 무수신' : ''),
+          detail: ev._detail = (isSens ? (ev.detail || '')
+            : ev.etype === 'signal_lost' ? durKo(nowW - eq.lastSeen) + ' 무수신'
+              : judgeDetail(ev, _pat, self._rawImp(key))),
         }).catch(function () {}));
-        self._notifyEvent(eq, ev, ev_val, ev_lim, nowW); // 라우팅에 걸리면 알림 발송(_detail 포함 — 이벤트와 같은 사유)
+        /* 즉시 보내지 않고 회차 큐에 담는다 — 같은 회차에 수십~수백 건이 동시에 나는 경우가 있어
+           (수집 끊김 시 전 태그가 함께 두절) 하나씩 보내면 채널 한도에 걸려 임의의 일부만 도착한다.
+           묶음 여부는 발송 직전에 notify.planNotifications가 정한다. */
+        self._queueNotify(eq, ev, ev_val, ev_lim, nowW);
       });
-      /* 표시 등급 — 세 판정 중 가장 나쁜 것과 그 원인. 카드·KPI·필터가 이걸 쓴다.
-         존만 쓰면 고주파가 지배하는 센서에서 베어링이 나빠져도 화면이 양호로 남는다. */
+      /* 표시 등급 — 결함 패턴이 켜고 ISO가 높이를 정한 판정 등급, 그리고 그 원인.
+         카드·KPI·필터가 이걸 쓴다. 존만 쓰면 고주파가 지배하는 센서에서 베어링이
+         나빠져도 화면이 양호로 남는다. */
       if (!self._gradeState) self._gradeState = {};
-      /* 카드 등급은 판정 등급 그대로다 — 전에는 여기서 베이스라인·대역을 최댓값으로 얹어
-         카드와 알람이 다른 값을 보였다(카드 69% vs 알람 ISO 단독). 축은 아래 필드로 따로 보여준다. */
+      /* 카드 등급은 판정 등급 그대로다 — 여기서 베이스라인·대역을 최댓값으로 얹으면
+         카드와 알람이 다른 값을 보인다(카드 69% vs 알람 ISO 단독). 축은 아래 필드로 따로 보여준다. */
       var _wg = VC.worstGrade(0, 0, 0, r.next.g);
-      // 화면이 판정값과 세 축을 그대로 보여주도록 — 등급을 만든 축이 어느 것인지도 함께
+      // 화면이 판정값과 네 축을 그대로 보여주도록 — 등급을 만든 축이 어느 것인지도 함께
       _wg.iso = val; _wg.wide = wide; _wg.limited = VC.isoNeeded(eq.fs); _wg.basis = iso.basis || 'wide';
       _wg.isoOk = isoUsableW && !iso.pending; _wg.isoUnit = isoUsableW ? 'mm/s' : eq.unit;
       _wg.blOk = lim != null; _wg.bandOk = !!bj;
       /* 등급을 켠 축이 패턴이므로 그 값을 화면에 내린다 — "왜 이 등급인가"의 답이다.
          패턴을 못 잰 태그(회전수·기하 미입력·저샘플)는 patOk=false로 커버리지에 드러난다. */
       _wg.patOk = !!_pat; _wg.patOn = !!(_pat && _pat.on); _wg.patR = _pat ? _pat.r : null;
+      _wg.patWide = !!(_pat && _pat.demodSrc === 'wideband');
       _wg.blR = (lim != null && lim > 0) ? wide / lim : null;
       _wg.bandR = bj ? bj.maxR : null;
       self._gradeState[key] = _wg;
@@ -1250,6 +1442,9 @@ export class App extends Component {
       if (!same) jobs.push(saveMonState(key, next).catch(function () {}));
     });
     this._refreshFlap();
+    /* 회차의 모든 태그를 다 본 뒤에 발송한다 — 여기가 "같은 순간"의 경계다.
+       태그별로 즉시 보내면 묶을 기회 자체가 없다(수집 끊김 시 91건이 각각 나간다). */
+    self._flushNotify(nowW);
     return Promise.all(jobs).then(function () { return nEv; });
   }
   _loadEventsLive() {
@@ -1602,7 +1797,11 @@ export class App extends Component {
      베어링 열화는 며칠 단위라 10분이면 충분하고, 급변은 10초 축(ISO·베이스라인)이 따로 본다. */
   _refreshPatNow() {
     var self = this, S = this.state;
-    if (!S.monitorOn) { this._patNow = null; return; }
+    /* 알람 여부로 막지 않는다 — 카드 등급은 알람과 무관하게 게이트 규칙이어야 한다.
+       막아 두면 알람을 끈 동안 _gradeState가 비고, 카드가 폴백으로 **게이트 없는 ISO 존 등급**을
+       보여준다(그 축은 이 검증 풀에서 단독 오탐 69%다) — 알람만 끄면 옛 판정이 되살아나는 셈이다.
+       대신 감시 화면을 보고 있지도 않고 알람도 꺼져 있으면 돌 이유가 없다(조회가 원시 파형이라 비싸다). */
+    if (!S.monitorOn && S.tab !== 'monitor') { this._patNow = null; return; }
     var iv = durMs(S.bandInterval || '10m') || 600000;   // 대역과 같은 주기를 쓴다 — 둘 다 원시 파형이라
     var now = Date.now();
     if (this._patNowAt && now - this._patNowAt < iv / 2) return;
@@ -1618,6 +1817,15 @@ export class App extends Component {
       var m = {};
       res.forEach(function (r) { if (r.pat) m[r.key] = r.pat; });
       self._patNow = m;
+      /* 격자 점수를 시계열로 남긴다 — 이벤트는 "달라진 순간"만 담으므로, 확정에 못 간 단발이나
+         점수가 채택선 근처에서 노는 구간은 이력 어디에도 안 남았다.
+         대역·포락선과 같은 표에 넣어야 한 차트에 겹쳐 그린다(따로 두면 조회·정리가 두 벌이 된다).
+         서버 감시 모드에서는 판정 타이머가 같은 키로 쓴다 — 둘 다 돌지는 않는다. */
+      if (S.monMode !== 'server') {
+        res.forEach(function (r) {
+          if (r.pat && r.pat.r != null) insertBandPoint(r.key + ':pattern', r.pat.at || Date.now(), r.pat.r).catch(function () {});
+        });
+      }
       self._patTickMs = Date.now() - t0;   // 회차 소요 — 설정 화면이 주기 하한을 실측으로 경고한다
       self._patNowBusy = false;
     }).catch(function () { self._patNowBusy = false; });
@@ -1692,7 +1900,9 @@ export class App extends Component {
     if (!model || model === 'sleeve') return null;
     return VC.BEARINGS[model] || Object.assign({}, eq.bearing, (S.equipGeo || {})[eq.id] || {});
   }
-  _bandSpec() {
+  /* 대역 추출 대상 태그 선별만 떼어 둔다 — _bandSpec은 감시자 스펙(wd)을 물고, 감시자는
+     "대역이 실제로 돌 수 있는가"를 물어야 해서 한 함수로 두면 서로를 부른다. */
+  _bandTags() {
     var self = this;
     var all = this._activeEqs().map(function (eq) {
       var det = (self._detailCache[eq.id] || {}).det;
@@ -1707,7 +1917,25 @@ export class App extends Component {
     });
     var skipped = all.filter(function (t) { return !(t.fs > 0 && t.fr > 0); })
       .map(function (t) { return { label: t.label, why: !(t.fr > 0) ? 'RPM 미설정' : '샘플레이트 불명' }; });
-    return { tags: all.filter(function (t) { return t.fs > 0 && t.fr > 0; }), skipped: skipped, total: all.length, wd: this._wdSpec('band') };
+    return { tags: all.filter(function (t) { return t.fs > 0 && t.fr > 0; }), skipped: skipped, total: all.length };
+  }
+  _bandSpec() {
+    var t = this._bandTags();
+    return { tags: t.tags, skipped: t.skipped, total: t.total, wd: this._wdSpec('band') };
+  }
+  /* 대역 추출이 실제로 도는 상태인가 — 켜 두어도 조건을 갖춘 태그가 하나도 없으면 타이머를
+     굽지 않는다. 감시자도 이 답을 봐야 없는 타이머를 되살리려 들지 않는다.
+     여기서 다시 세지 않고 _syncBandTimer가 내린 결론(_bandNoTarget)을 본다 — 굽는 쪽과
+     지키는 쪽이 각자 계산하면 한쪽만 옛 상태로 남는다. 아직 한 번도 안 돌았으면 '모름'이고,
+     모르는 동안은 지켜본다(있는데 안 지키는 쪽이 없는 걸 지키는 쪽보다 나쁘다). */
+  _bandLive() { return !!this.state.bandOn && !this._bandNoTarget; }
+  /* 대상이 0인 이유 — 사유가 하나면 그것, 섞여 있으면 둘 다 적는다. */
+  _bandNoTargetWhy(spec) {
+    var why = {}, n = 0;
+    (spec.skipped || []).forEach(function (s2) { if (!why[s2.why]) { why[s2.why] = 0; n++; } why[s2.why]++; });
+    var keys = Object.keys(why);
+    if (!keys.length) return '선택된 태그가 없습니다';
+    return keys.map(function (k) { return k + ' ' + why[k] + '개'; }).join(' · ');
   }
   /* 과거 채우기(백필) 계획 — 어디까지 채울지와 얼마나 걸릴지를 먼저 계산한다.
      상한은 학습 창이다. 그보다 긴 구간은 지금 소비처가 없다(추세 차트가 생기면 그때 올린다).
@@ -1716,7 +1944,7 @@ export class App extends Component {
      그대로 계획을 세우면 "24시간으로 바꿨는데 표본 칩은 /432(3일 기준)"처럼 한 박자 늦는다.
      렌더 콜백에 기대지 않고 새 값을 직접 넘겨 타이밍 의존을 없앤다. */
   _bandPlan(ov) {
-    var S = this.state, spec = this._bandSpec();
+    var S = this.state, spec = this._bandTags();
     ov = ov || {};
     var iv = durMs(ov.bandInterval || S.bandInterval) || 600000;
     var H = BAND_WIN_H[ov.bandWin || S.bandWin] || 24;   // 채울 구간도 대역 학습 기간에 맞춘다
@@ -1907,8 +2135,18 @@ export class App extends Component {
     // 대역 추출은 서버 감시 여부와 무관하게 "알람이 켜져 있으면" 돈다 — 추세는 앱이 닫혀도 이어져야 한다
     if (!S.monitorOn || !S.bandOn) return this._dropTimer('_bandSig', deleteBandTimer, BAND_TIMER);
     var spec = this._bandSpec();
+    /* 대상 유무를 먼저 기록한다 — 감시자 동기화가 곧바로 뒤따르는데(체인이 아니라 같은 틱),
+       비동기 삭제가 끝난 뒤에 남기면 감시자가 한 박자 옛 결론으로 구워진다. */
+    this._bandNoTarget = !spec.tags.length;
+    this._bandSkipWhy = this._bandNoTarget ? this._bandNoTargetWhy(spec) : '';
     var sched = '@every ' + (S.bandInterval || '10m');
-    if (!spec.tags.length) return this._dropTimer('_bandSig', deleteBandTimer, BAND_TIMER);
+    /* 대상이 하나도 없으면 지운다 — 다만 조용히 지우지 않는다. 설정은 '켜짐'인데 타이머만
+       없는 상태가 되므로, 왜 안 도는지 말하지 않으면 사용자는 고장으로 읽는다. */
+    if (!spec.tags.length) {
+      var why = this._bandNoTargetWhy(spec);
+      if (!silent) this._toast('대역 추출을 켤 수 없습니다 — ' + why, 'warn');
+      return this._dropTimer('_bandSig', deleteBandTimer, BAND_TIMER);
+    }
     // 판정 타이머와 같은 이유로 생성된 TQL을 서명에 넣는다 — 코드가 바뀌면 다시 구워야 한다
     var tql = Band.buildBandTql(spec);
     var sig = JSON.stringify(spec.tags) + '|' + sched + '|' + srcSig(tql);
@@ -2193,9 +2431,13 @@ export class App extends Component {
        등급(worstGrade)에는 태우지 않는다 — 저진폭 구간의 Crest는 분모가 작아 오경보가 쏟아진다.
        대신 문구로 남긴다: 빨간 Crest 카드 옆에 "정상 운전"이라고 쓰면 화면이 스스로 모순된다. */
     /* 결함 패턴 축 — 학습 없이 스펙트럼만으로 나온 절대 판정이다. 진폭이 정상이어도 패턴이
-       확실하면 등급이 올라가야 한다: 이전에는 grade===0이면 원인을 이미 지목해 놓고도
-       "징후 없음"으로 덮었다(진폭에 안 나타나는 초기 베어링 결함이 정확히 그 구간이다). */
-    var _patOn = VC.patternGrade(evx && evx.top ? evx.top.score : 0, !!(evx && evx.gate)) > 0;
+       확실하면 등급이 올라가야 한다(진폭에 안 나타나는 초기 베어링 결함이 그 구간이다).
+       감시와 **같은 검출기**를 쓴다: det.sideband는 targetedMatch를 이 창에서 돌린 결과이고,
+       복조 대역·envMaxFor·명판 fr까지 monPattern과 같은 방식으로 만들어진다. 창만 100회전이라
+       임계도 그 창의 짝(TGT_ADOPT)을 쓴다 — 근거 점수(EVID_ADOPT)로 게이트를 열면 검출기가
+       달라 같은 신호에 감시는 주의, 상세는 양호가 나온다. */
+    var _patOn = VC.patternGrade(det.sideband ? (det.sideband.r || 0) : 0,
+      !!(det.quality && det.quality.gate), VC.TGT_ADOPT) > 0;
     /* ISO 축은 이 화면이 앵커 시점에서 직접 계산해 둔 값(det.isoRms, 이미 mm/s)을 쓴다.
        감시 판정 상태를 기다리면 감시 대상이 아닌 태그(정적 데이터셋 등)는 ISO를 계산해 놓고도
        "미적용"으로 남고, 등급도 옛 원본 단위 판정에 묶인다. 학습이 필요 없는 축이라 즉시 쓸 수 있다. */
@@ -2223,8 +2465,11 @@ export class App extends Component {
        게이트로 바꾸면 오탐 69%→3%, 검출 72%→65%다. 그리고 머신 클래스를 잘못 잡아도
        오탐이 안 흔들린다(Class I·II·III 전부 3%) — ISO가 경보를 켜지 않으니까.
        ⚠ 대신 베어링이 아닌 원인(불평형·정렬불량·풀림)으로 진동만 높은 경우는 등급이 안 오른다.
-       그건 등급이 아니라 아래 isoOnly 문구가 밝힌다 — 숨기지는 않는다. */
-    var patGi = _patOn ? Math.max(1, isoGi || 0) : 0;
+       그건 등급이 아니라 판정문이 밝힌다(isoOnly) — 숨기지는 않는다. */
+    /* 규칙은 정본 함수가 갖는다 — 같은 식을 여기 옮겨 적으면 규칙을 고칠 때
+       감시 두 곳만 따라오고 상세만 옛 규칙에 남아, 같은 신호에 카드와 화면이 다른 등급을 낸다.
+       인자는 이 화면 것을 넘긴다: isoGi는 앵커 시점 ISO, _patOn은 100회전 창(TGT_ADOPT) 판정이다. */
+    var patGi = VC.patternGate(_patOn, isoGi);
     /* 상세분석의 게이트는 **결함 패턴 하나**다. 베이스라인·대역은 학습이 있어야 살아나는 축이라,
        게이트에 넣으면 **같은 태그가 학습 여부로 다른 등급**을 낸다(실측: 학습 전 오탐 3% → 후 15%).
        일회성 분석은 "지금 이 신호가 무엇처럼 보이나"에 답하는 도구이므로 학습 상태에 매이면 안 된다.
@@ -2279,6 +2524,13 @@ export class App extends Component {
       : covN >= coreAx.length ? '뚜렷한 결함 징후 없음 — 정상 운전'
         : '관측 범위 내 이상 없음 — 판정 기준 ' + covN + '/' + coreAx.length;
     else verdict = (cause || '이상 진동 — 다축 정밀 측정 권장') + ' — ' + (gi >= 3 ? '심각 단계' : gi === 2 ? '진행 단계' : '초기 징후');
+    /* 전대역 복조로 얻은 "없음"은 고정 대역의 "없음"보다 약하다 — 조기 결함은 kHz대 공진을
+       때리는 충격으로만 드러나는데 그 대역이 Nyquist 밖이다. 같은 문장으로 두면 이 설비가
+       갖지 않은 근거를 주장하게 된다. 등급이 선 뒤(gi>0)에는 붙이지 않는다 — 이미 이상을
+       말하고 있어 "못 봤을 수 있다"가 덧붙을 자리가 아니다. */
+    if (gi === 0 && det.demodSrc === 'wideband') {
+      verdict += ' · 전대역 복조(샘플레이트 ' + Math.round(eq.fs || 0) + ' Hz — 1~5 kHz 대역 불성립)이므로 조기 베어링 결함은 이 판정에 포함되지 않습니다';
+    }
     // 계측 게이트: 계측 문제로 보이는 파형은 결함이 아닐 수 있음 — 진단보다 검증이 먼저.
     // 사유를 문구에 넣는다(클리핑·DC·스파이크는 값이 틀리는 방향이 서로 다르다).
     var _gr = VC.gateReason(det.quality, null);
@@ -2428,6 +2680,17 @@ export class App extends Component {
   }
   // 설비 정보 미설정 여부 — 하나도 지정이 없으면 true(전부 기본값으로 도는 중)
   // 마운팅은 포함하되 구동·날개수는 뺀다: 해당 없는 설비가 많아 전부 넣으면 점이 안 꺼져 잔소리가 된다.
+  /* 등급을 켜는 축(결함 패턴)을 세울 수 있는가 — 회전수와 베어링 기하가 **둘 다** 있어야 한다.
+     _equipUnset과 다르다: 그쪽은 "아무것도 안 넣음"(OR)이라 RPM 하나만 넣어도 빠지는데,
+     그 태그도 격자를 못 그어 판정은 안 된다. 미설정은 이것의 부분집합이다.
+     구워진 equipment가 아니라 state를 보는 이유: 설정 화면에서 방금 고른 값이 바로 반영되어야 한다. */
+  _patBlockedId(id) {
+    var S = this.state;
+    var rpm = Number((S.equipRpm || {})[id]) || 0;
+    var model = (S.equipBearing || {})[id] || '';
+    var geo = model ? (VC.BEARINGS[model] || (S.equipGeo || {})[id] || {}) : {};
+    return !(rpm > 0) || !(geo.n > 0);
+  }
   _equipUnset(id) {
     var S = this.state;
     return !((S.equipCls || {})[id] || (S.equipRpm || {})[id] || (S.equipBearing || {})[id] || (S.equipUnit || {})[id]
@@ -2888,9 +3151,15 @@ export class App extends Component {
       eq.zones.forEach(function (z, zi) { if (Math.abs(det.isoRms - z) / z < 0.10) nearZ = ['A/B', 'B/C', 'C/D'][zi]; });
       L.push('[ISO 10816 판정 — 규격 기준] 대역제한(10–1000 Hz) 속도 RMS ' + E.fmt(det.isoRms) + ' mm/s(' + (det.isoBlocks || 1) + '블록 에너지 평균 · 총 ' + (det.anaSec ? det.anaSec.toFixed(1) : '?') + '초' + (Math.round((det.isoSpread || 1) * 100) / 100 >= 1.5 ? ' · ⚠블록간 변동 ×' + det.isoSpread.toFixed(2) + ' — 정상상태 전제 미충족, 존 판정 잠정' : ' · 블록간 변동 ×' + (det.isoSpread || 1).toFixed(2)) + ') → Zone ' + ['A(양호)', 'B(주의)', 'C(위험)', 'D(심각)'][isoG] + ' · 존 경계 A/B ' + E.fmt(eq.zones[0]) + ', B/C ' + E.fmt(eq.zones[1]) + ', C/D ' + E.fmt(eq.zones[2]) + ' — ISO 상태 판정은 이 값으로 하세요'
         + (nearZ ? ' ⚠' + nearZ + ' 경계 대비 여유 10% 미만 — 불확도 안이라 존을 단정하지 말고 "경계 근접"으로 쓰고 정상상태 다중 평균 재측정을 권하세요' : ''));
-      L.push('[실시간 감시 — 알람 기준(규격 판정 아님)] 광대역 최신 1초 RMS ' + E.fmt(eq.rms) + ' ' + u + ' → 감시 등급 ' + E.STATUS[eq.grade].ko + ' — 고주파 포함 광대역이라 ISO 값보다 클 수 있음. 알람·추세 감시용');
+      /* 감시 등급의 출처를 명시한다 — 옆에 적힌 RMS가 등급을 만든 값으로 읽히면 소견이 통째로 어긋난다.
+         등급은 결함주파수 격자가 켜야 오르고, ISO는 그 높이만 정한다. */
+      L.push('[실시간 감시 — 알람 기준(규격 판정 아님)] 감시 등급 ' + E.STATUS[eq.grade].ko
+        + ' — 등급은 결함주파수 격자가 켤 때만 오르고 ISO 값이 그 높이를 정합니다. 아래 광대역 RMS는 등급을 만든 값이 아닙니다'
+        + ' · 참고 광대역 최신 1초 RMS ' + E.fmt(eq.rms) + ' ' + u + '(고주파 포함이라 ISO 값보다 클 수 있음)');
     } else {
-      L.push('[현재 심각도] 심각도 판정 RMS = 최신 1초 RMS(현재 시점, 롤업 마지막 버킷) ' + E.fmt(eq.rms) + ' ' + u + ' — 등급을 정하는 값(평균/최대와 별개). 존 경계 A/B ' + E.fmt(eq.zones[0]) + ', B/C ' + E.fmt(eq.zones[1]) + ', C/D ' + E.fmt(eq.zones[2]) + ' ' + u + ' · 등급 ' + E.STATUS[eq.grade].ko);
+      L.push('[현재 심각도] 등급 ' + E.STATUS[eq.grade].ko
+        + ' — 등급은 결함주파수 격자가 켤 때만 오르고 ISO 존이 그 높이를 정합니다. 아래 RMS는 등급을 만든 값이 아닙니다'
+        + ' · 참고 최신 1초 RMS ' + E.fmt(eq.rms) + ' ' + u + ' · 존 경계 A/B ' + E.fmt(eq.zones[0]) + ', B/C ' + E.fmt(eq.zones[1]) + ', C/D ' + E.fmt(eq.zones[2]) + ' ' + u);
     }
     if (det.levels) {
       // 가속도는 미분 이득이 f에 비례해 고주파 양자화 잡음을 증폭한다 → 대역 분포로 계산한 물리 상한을
@@ -2929,7 +3198,7 @@ export class App extends Component {
     S.push('[엔진 판정 상태 — 이 값들은 이미 결정된 결과입니다. 재해석·재계산하지 말고 그대로 인용하세요]');
     S.push('· gate.tripped = ' + (ev.gate ? 'true' : 'false') + (ev.gate ? ' · 사유: 극단 Crest/첨도 — 단발 스파이크 시그니처와 구분 불가(전역 적용)' : ''));
     S.push('· iso = ' + (isoOk ? E.fmt(det.isoRms) + ' mm/s → Zone ' + isoZone + ' (10–1000 Hz 대역제한 속도 RMS · ' + (det.isoBlocks || 1) + '블록 에너지 평균 · 총 ' + (det.anaSec || 0).toFixed(1) + '초 · 블록간 변동 ×' + (det.isoSpread || 1).toFixed(2) + ')' : '산정 불가(센서 단위가 속도가 아님)'));
-    S.push('· monitor = ' + E.fmt(eq.rms) + ' ' + eq.unit + ' → 감시 등급 ' + E.STATUS[eq.grade].ko + ' (광대역 최신 1초 RMS · 알람용, 규격 판정 아님)');
+    S.push('· monitor = 감시 등급 ' + E.STATUS[eq.grade].ko + ' (결함 패턴이 켜고 ISO가 높이를 정함) · 참고 광대역 최신 1초 RMS ' + E.fmt(eq.rms) + ' ' + eq.unit);
     S.push('· window.minutes = ' + winMin + ' (이 창을 넘는 시간 스케일 주장 금지)');
     S.push('· negative[] = ' + (ev.negatives && ev.negatives.length ? ev.negatives.join(' | ') : '없음'));
     S.push('· unmeasurable[] = ' + (ev.unmeasurable && ev.unmeasurable.length ? ev.unmeasurable.join(', ') : '없음'));
@@ -3120,10 +3389,13 @@ export class App extends Component {
     this._tt = setTimeout(function () { self.setState({ toast: null }); }, kind === 'err' ? 9000 : 2600);
   }
   toggleTheme() { var n = this.state.theme === 'light' ? 'dark' : 'light'; try { localStorage.setItem('vibeTheme', n); } catch (e) {} this.setState({ theme: n }); }
-  _setEquipBearing(id, v) { var m = Object.assign({}, this.state.equipBearing); m[id] = v; this.setState({ equipBearing: m }); }
-  _setEquipRpm(id, v) { var m = Object.assign({}, this.state.equipRpm); m[id] = v; this.setState({ equipRpm: m }); }
+  /* dirty를 반드시 같이 세운다 — 회전수·베어링·형상은 결함 패턴 격자를 세우는 세 값이라,
+     저장 안내가 안 뜨면 사용자가 입력해 놓고 저장할 기회 자체를 못 얻는다.
+     값은 state에만 남았다가 새로고침에 사라지고, 화면은 그동안 "판정 못 함"으로 남는다. */
+  _setEquipBearing(id, v) { var m = Object.assign({}, this.state.equipBearing); m[id] = v; this.setState({ equipBearing: m, dirty: true }); }
+  _setEquipRpm(id, v) { var m = Object.assign({}, this.state.equipRpm); m[id] = v; this.setState({ equipRpm: m, dirty: true }); }
   _toggleEquipAdv(id) { var m = Object.assign({}, this.state.equipAdv); m[id] = !m[id]; this.setState({ equipAdv: m }); }
-  _setEquipGeo(id, key, v) { var m = Object.assign({}, this.state.equipGeo); var g = Object.assign({}, m[id]); g[key] = Number(v) || 0; m[id] = g; this.setState({ equipGeo: m }); }
+  _setEquipGeo(id, key, v) { var m = Object.assign({}, this.state.equipGeo); var g = Object.assign({}, m[id]); g[key] = Number(v) || 0; m[id] = g; this.setState({ equipGeo: m, dirty: true }); }
   // 계측·구동 메타 — mount/drive는 문자열, vanes는 수, belt는 하위 객체(d1/d2/len)
   _setEquipMeta(id, key, v) {
     var m = Object.assign({}, this.state.equipMeta), g = Object.assign({}, m[id]);
@@ -3283,18 +3555,19 @@ export class App extends Component {
   }
   // 베이스라인 쪽으로 알람이 날 상황인가 — 그때도 원본을 받아 계측을 확인한다
   // 원본으로 본 계측 판정 — 유효기간이 지났으면 없는 것으로 본다(딱지가 안 떨어지는 것을 막는다)
-  // 충격성 근거 — 게이트와 같은 유효기간을 쓴다(오래된 근거를 이벤트에 붙이지 않는다)
-  _impactOf(key) {
-    var e = (this._impact || {})[key];
-    if (!e) return null;
-    if (Date.now() - e.at > GATE_RAW_TTL_MS) { delete this._impact[key]; return null; }
-    return e.e;
-  }
   _rawGate(key) {
     var e = (this._gateRaw || {})[key];
     if (!e) return null;
     if (Date.now() - e.at > GATE_RAW_TTL_MS) { delete this._gateRaw[key]; return null; }
     return e.g;
+  }
+  /* 원본으로 본 충격성 근거 — 게이트와 같은 창·같은 유효기간. 이벤트 DETAIL이 쓴다.
+     서버도 같은 함수를 같은 창에 돌려 실으므로 두 모드의 이력이 같은 문장이 된다. */
+  _rawImp(key) {
+    var e = (this._impRaw || {})[key];
+    if (!e) return null;
+    if (Date.now() - e.at > GATE_RAW_TTL_MS) { delete this._impRaw[key]; return null; }
+    return e.v;
   }
   _alarmNear(eq, wide) {
     var key = eq.table + ':' + eq.name;
@@ -3322,21 +3595,24 @@ export class App extends Component {
         var g = (w && w.values) ? VC.gateFromRaw(w.values, eq.fs) : null;
         // 시각을 함께 남긴다 — 다시 볼 기회가 없어도 오래되면 스스로 무효가 되게
         if (g) self._gateRaw[key] = { g: g, at: Date.now() }; else delete self._gateRaw[key];
-        /* 충격성 근거 — 같은 샘플로 Crest·첨도를 재 둔다. 판정이 아니라 이벤트에 붙일 설명이다:
-           대역이 올랐을 때 임펄스(베어링·기어) 때문인지 넓게 퍼진 잡음(유동·부착 이완)인지 가른다. */
-        if (!self._impact) self._impact = {};
+        /* 충격성 근거도 같은 파형에서 낸다 — 서버가 IMP에 담는 것과 같은 함수·같은 창이라
+           앱 모드와 서버 모드의 이벤트 DETAIL이 같은 문장이 된다. 이미 받아온 배열이라 한 패스다. */
+        if (!self._impRaw) self._impRaw = {};
         var im = (w && w.values) ? VC.impactEvidence(w.values, eq.fs) : null;
-        if (im) self._impact[key] = { e: im, at: Date.now() }; else delete self._impact[key];
+        if (im) self._impRaw[key] = { v: im, at: Date.now() }; else delete self._impRaw[key];
       })
       .catch(function () {})
       .then(function () { self._isoBusy[key] = false; });
   }
-  /* 표시 등급 — 세 판정 중 가장 나쁜 것. ISO 존만 쓰면 고주파가 지배하는 센서에서
-     베어링이 나빠져도 카드가 계속 양호로 보인다(C1은 ISO로 위험이 나올 수 없다). */
+  /* 표시 등급 — 판정이 만든 등급(결함 패턴이 켜고 ISO가 높이를 정한다)을 그대로 읽는다.
+     ISO 존만 쓰면 고주파가 지배하는 센서에서 베어링이 나빠져도 카드가 계속 양호로 보인다
+     (C1은 ISO로 위험이 나올 수 없다). */
   _severityOf(eq) {
     var st = (this._gradeState || {})[eq.table + ':' + eq.name];
-    if (st) return st.gi;
-    return VC.gradeFor(this._evalValue(eq), eq.zones);   // 판정 전(부팅 직후)에는 전대역 기준
+    /* 판정 전에는 등급이 없다 — 0으로 두고 _holdOf가 '판정 대기'로 덮는다.
+       여기서 gradeFor(전대역, zones)로 지어내면 안 된다: 그건 게이트를 건너뛴 **ISO 존 단독 등급**이라
+       화면이 판정과 다른 값을 말하게 되고, 알람을 끈 상태에서 특히 그렇다. */
+    return st ? st.gi : 0;
   }
   /* 판정 보류 — 지금 등급을 매기지 않는 상태. 셋 다 카드의 숫자가 이 설비를 대표하지 않는다:
       · 계측 이상 — 파형을 못 믿는다(과대일 수도 과소일 수도 있다)
@@ -3345,14 +3621,20 @@ export class App extends Component {
      그래서 등급 칩을 "판정 보류"로 두고 등급 집계에서도 뺀다. 조치는 셋이 다르므로
      배지는 따로 유지한다 — 정지는 할 일이 없고, 나머지 둘은 지금 사람이 가야 한다. */
   _holdOf(eq) {
-    var rs = (this._runState || {})[eq.table + ':' + eq.name];
-    if (!rs) return null;
-    if (rs.lost) return { kind: 'lost', label: '신호 두절' };
-    if (rs.gate) return { kind: 'gate', label: rs.gate.label || '계측 이상' };
-    if (!rs.run) return { kind: 'stop', label: '정지' };
+    var key = eq.table + ':' + eq.name, rs = (this._runState || {})[key];
+    if (rs) {
+      if (rs.lost) return { kind: 'lost', label: '신호 두절' };
+      if (rs.gate) return { kind: 'gate', label: rs.gate.label || '계측 이상' };
+      if (!rs.run) return { kind: 'stop', label: '정지' };
+    }
+    /* 등급을 켜는 축(결함 패턴)을 못 잰 태그도 보류다 — 회전수·기하가 없으면 격자를 못 세운다.
+       이걸 양호로 두면 5.6 mm/s짜리 설비가 아무 표시 없이 초록으로 앉아 있게 된다.
+       사유는 카드 호버가 적는다(결함 패턴 — 판정 못 함). */
+    var gs = (this._gradeState || {})[key];
+    if (!gs) return { kind: 'wait', label: '판정 대기' };
+    if (gs.patOk === false) return { kind: 'nojudge', label: '판정 못 함' };
     return null;
   }
-  _gradeSrc(eq) { return ((this._gradeState || {})[eq.table + ':' + eq.name] || {}).src || 'iso'; }
   /* 사용자 임계값은 "입력한 문자열 그대로" 저장된다(THRESH_RAW) — 판정에 쓸 때 여기서 숫자로 만든다.
      비었거나 숫자가 아니면 규격 기본값으로 되돌린다. 옛 설정은 숫자로 저장돼 있어 그대로 통과한다. */
   _effZones(eq) {
@@ -3823,7 +4105,7 @@ export class App extends Component {
   _statSummary(eq, det, dx, roll, gi) {
     var E = this.E, S = this.state;
     var g = gi != null ? gi : (dx.gi != null ? dx.gi : (eq.grade || 0));
-    var srcKo = { iso: 'ISO 존', baseline: '베이스라인', band: '대역·포락선', pattern: '결함 패턴' };
+    var srcKo = GRADE_SRC_KO;
     var bandKo = { sub: '서브동기', one: '1× 대역', fault: '결함 대역', high: '고주파',
       vh1: '1~2 kHz', vh2: '2~4 kHz', vh3: '4~8 kHz', vh4: '8 kHz+',
       envBPFO: 'BPFO(외륜)', envBPFI: 'BPFI(내륜)', envBSF: 'BSF(볼·롤러)' };
@@ -3842,13 +4124,15 @@ export class App extends Component {
       var ss = 0; for (i = 0; i < a.length; i++) { var d2 = a[i] - m; ss += d2 * d2; }
       return Math.sqrt(ss / a.length);
     })(det.raw.values) : null;
-    var dw = VC.dwellWorst(roll, Number(S.escHold) * 1000 || 60000, VC.DWELL_MIN_N);
+    var dw = VC.dwellWorst(roll, SENSOR_HOLD_MS, VC.DWELL_MIN_N);   // 리포트의 "지속 최악" 창 — 설정이 없어져 상수를 쓴다
     var dwTxt = dw
       ? E.fmt(dw.v) + ' ' + eq.unit + ' 이상이 ' + Math.round(dw.durMs / 60000) + '분 지속 (끝 ' + E.fmtDT(dw.ms) + ')'
         + (acRms != null && dw.v > acRms * 1.5 ? ' — 앵커 시점보다 나쁨, 그 구간을 보려면 기간을 좁히십시오' : '')
       : '표본 부족(연속 ' + VC.DWELL_MIN_N + '개 이상 필요)';
     return [
-      '등급을 올린 축 ' + (g > 0 ? (srcKo[dx.gradeSrc] || dx.gradeSrc) : '없음(네 축 모두 정상)'),
+      '등급을 올린 축 ' + (g > 0 ? (srcKo[dx.gradeSrc] || dx.gradeSrc)
+        : (dx.cov && (dx.cov.missing || []).indexOf('결함 패턴') >= 0) ? '없음(결함 패턴 미측정 — 회전수·기하 확인)'
+          : '없음(결함 패턴 미검출)'),
       '진동/베어링 ' + (axTxt.join('  ·  ') || '대역 이탈 없음(또는 학습 전)'),
       '지속 최악 ' + dwTxt,
     ].join('  ·  ');
@@ -4004,7 +4288,7 @@ export class App extends Component {
           crest: rms.length ? crestA : null,
           kurt: (tr.kurt && tr.kurt.length) ? tr.kurt : null,
           bands: (tr.bands && tr.bands.length && tr.bands[0].vals.length) ? tr.bands : null,
-        }, self._reportMeta(eq, det, _ev, _rptSat));
+        }, self._reportMeta(eq, det, _ev, _rptSat, dx));
 
         var genMs = Date.now();
         function z(n) { return n < 10 ? '0' + n : '' + n; }
@@ -4016,11 +4300,19 @@ export class App extends Component {
           generatedText: E.fmtDT(genMs), logoDataURL: logo,
           specs: specs, sevMachine: eq.name + ' · Class ' + eq.cls + ' · ' + eq.rpm + ' RPM' + (det.frMeas ? ' (실측 ' + Math.round(det.frMeas.rpm) + ')' : ''),
           gradeKo: dx.gradeKo, gradeColor: dx.color,
-          zones: [E.fmt(_rzIso[0]), E.fmt(_rzIso[1]), E.fmt(_rzIso[2])], zonesUnit: 'mm/s', gradeIdx: (dx.gi != null ? dx.gi : eq.grade),
-          isoOnly: dx.isoOnly || 0,   // 등급보다 위에 있는 진동 수준 — 리포트도 그 사실을 밝혀야 한다
+          zones: [E.fmt(_rzIso[0]), E.fmt(_rzIso[1]), E.fmt(_rzIso[2])], zonesUnit: 'mm/s', gradeIdx: dx.gi,
           /* 커버리지를 리포트에도 싣는다 — 정비팀이 받는 문서에서 "양호"가 근거보다 강한
              주장이 되면 안 된다. 학습을 강제하지 않는 대신 한계를 문서에 남긴다. */
           verdict: dx.verdict,
+          /* 헤드라인이 판정과 ISO를 갈라 세우는 데 쓰는 값 — 리포트는 새로 판정하지 않고 이걸 그대로 인쇄한다.
+             patOn=결함 패턴이 켜졌나 · patNa=못 쟀나(회전수·기하 없음) · isoOnly=등급은 안 올렸지만 ISO가 높은 존 */
+          judge: {
+            patOn: !!dx.patGi, patNa: !!(dx.cov && (dx.cov.missing || []).indexOf('결함 패턴') >= 0),
+            isoGi: dx.isoGi != null ? dx.isoGi : null, isoOnly: dx.isoOnly || 0,
+            site: (_ev && _ev.top && _ev.top.f) ? _ev.top.f : '',
+            score: (_ev && _ev.top && _ev.top.score != null) ? _ev.top.score : null,
+            isoRms: det.isoRms != null ? E.fmt(det.isoRms) : '',
+          },
           /* 리포트를 받은 사람은 기간만 보고 "이 스펙트럼이 34일 중 언제 것인가"를 알 수 없다.
              화면이 밝히는 문장을 문서에도 그대로 싣는다 — 두 곳이 다른 말을 하면 근거가 흔들린다. */
           anchorNote: self._anchorNote({ anchor: (_pick && _pick.at) || anchor, pick: _pick }),
@@ -4081,7 +4373,9 @@ export class App extends Component {
      _genOne과 검증 하네스(tools/verify-summary.mjs)가 같은 것을 쓰게 하기 위한 추출 — 두 벌로 두면
      한쪽에 필드를 추가해도 다른 쪽은 모르고, 검사기가 "실제와 다른 것"을 통과시킨다(실제로 세 번 어긋났다).
      차트 계열(rms/p2p/kurt/bands·축 라벨)은 롤업·추세 청크에 의존하므로 _genOne에 남긴다. */
-  _reportMeta(eq, det, ev, rptSat) {
+  /* dx(판정 결과)를 받는다 — 조치 카드가 ISO 존이 아니라 **화면과 같은 등급**으로 갈려야 하기 때문이다.
+     여기서 ISO로 다시 고르면 같은 설비를 리포트와 카드가 다르게 부른다(383건 중 46%). */
+  _reportMeta(eq, det, ev, rptSat, dx) {
     var self = this, E = this.E;
     var roll = eq.rollup || [];
     // 지표는 화면·리포트와 같은 함수에서 — 여기서 따로 계산하면 요약 문구만 옛 기준으로 남는다
@@ -4132,7 +4426,20 @@ export class App extends Component {
                 basis: gateReasonTxt + ' — 단발 스파이크 시그니처' };
             }
             if (!isoOk2) return null;
-            var g = VC.gradeFor(det.isoRms, eq.zones), x = det.isoRms, z = eq.zones;
+            /* 회전수·기하가 없어 결함 패턴을 못 잰 경우는 등급이 아니라 **측정 상태**다.
+               ISO 값만으로 "긴급 점검"을 지시하면 격자도 못 세운 설비에 조치를 명령하게 된다. */
+            var _covMiss = (dx && dx.cov && dx.cov.missing) || [];
+            if (_covMiss.indexOf('결함 패턴') >= 0) {
+              return { kind: 'nojudge', cls: 'hold', icon: '⏸', title: '판정 못 함 — 회전수·베어링 정보 필요',
+                body: '결함주파수 격자를 세울 수 없어 베어링 상태를 판정하지 않았습니다. 설정 → 설비 정보에 명판 회전수와 베어링 품번을 넣고 다시 생성하십시오.',
+                basis: 'ISO 대역제한 속도 RMS ' + E.fmt(det.isoRms) + ' mm/s — 이 값만으로는 베어링 상태를 말할 수 없습니다' };
+            }
+            var x = det.isoRms, z = eq.zones;
+            var _isoG = VC.gradeFor(x, z);
+            /* 카드는 **화면과 같은 등급**으로 고른다. ISO로 고르면 결함 근거 없이 진폭만 높은 설비에
+               "긴급 점검·정지 검토"가 나가고(정상 100건 중 42건), 반대로 진폭이 낮은 초기 결함에는
+               "계속 운전"이 나간다(결함 283건 중 115건). 둘 다 실측이다. */
+            var g = (dx && dx.gi != null) ? dx.gi : _isoG;
             var head = E.fmt(x) + ' mm/s · 10–1000 Hz · ' + (det.isoBlocks || 1) + '블록 평균 · Class ' + eq.cls;
             var crit2 = E.fmt(0.25 * z[1]);   // ISO Criterion II: B/C 경계의 25% 변화가 유의
             var card = [
@@ -4149,10 +4456,22 @@ export class App extends Component {
                 body: '점검 일정을 앞당기십시오. 정지 여부는 설비 중요도·예비기 유무·추가 증상(베어링 온도·이음·누유)과 함께 판단하십시오.',
                 basis: head + ' · D 경계 ' + E.fmt(z[2]) + ' 초과' },
             ][g];
+            /* 다섯 번째 — 등급은 양호인데 진폭이 존을 넘은 경우. 위 네 장 중 어느 것도 이 상황을 말하지 못한다:
+               "계속 운전"은 진동이 높다는 사실을 지우고, 등급을 올리면 오탐 축(ISO 단독 69%)이 되살아난다.
+               색은 등급 팔레트를 쓰지 않는다 — 계측 게이트 카드와 같은 이유로 5번째 심각도로 오독되면 안 된다. */
+            if (g === 0 && _isoG > 0) {
+              var _bestR = (ev && ev.top && ev.top.score != null) ? ev.top.score : null;
+              card = { cls: 'hold', icon: '🔵', title: '베어링 외 원인 점검 — 진폭 확인 필요',
+                body: '베어링 결함주파수 자리에 근거가 서지 않아 등급을 올리지 않았습니다. 진동이 높은 것은 사실이므로'
+                  + ' 정렬·체결·불평형을 육안·실측으로 확인하고, 필요하면 위상(타코)·축방향 측정을 의뢰하십시오'
+                  + ' — 이 셋은 단일 채널·위상 없이는 원리적으로 판별할 수 없습니다.',
+                basis: head + ' · ISO 존 ' + ['A', 'B', 'C', 'D'][_isoG] + '(' + E.STATUS[_isoG].ko + ')'
+                  + (_bestR != null ? ' · 결함주파수 격자 미채택(최고 ' + _bestR.toFixed(1) + ')' : ' · 결함주파수 격자 미채택') };
+            }
             card.kind = 'zone';
             // 블록간 변동이 크면 경계까지의 여유가 불확도 안에 든다 → 단정하지 않는다(R10)
             if (Math.round((det.isoSpread || 1) * 100) / 100 >= 1.5) card.title += ' (잠정)';
-            // 광대역이 규격 판정보다 높을 때만 — 등급을 올리는 근거가 아님을 못 박는다
+            // 광대역 감시가 이 등급보다 높을 때만 — 등급을 올리는 근거가 아님을 못 박는다
             if (eq.grade > g) card.aside = '광대역 감시는 ' + E.STATUS[eq.grade].ko + '(' + E.fmt(eq.rms) + ' ' + eq.unit + ') — 전체 에너지의 '
               + Math.round((det.hfEnergyFrac || 0) * 100) + '%가 10–1000 Hz 밖입니다. 등급이 아니라 알람 임계·협대역 감시 전환 검토 사항입니다.';
             return card;
@@ -4197,7 +4516,9 @@ export class App extends Component {
           basis: gs.limited ? 'ISO 10~1000 Hz 대역제한 구간 RMS'
             : (eq.fs > 0 ? '전대역 구간 RMS(샘플레이트 ' + self._num(eq.fs) + ' Hz — 1 kHz 위를 측정하지 않음)'
               : '전대역 구간 RMS(샘플레이트 불명 — 대역제한 미적용)'),
-          src: { iso: 'ISO 존', baseline: '베이스라인 이탈', band: '대역 이탈' }[gs.src] || 'ISO 존',
+          /* 등급을 만든 축 — 정본 맵(GRADE_SRC_KO)을 쓴다. 사본을 두면 축이 늘 때 한쪽만 뒤처진다.
+             양호는 아무 축도 등급을 올리지 않은 상태라 비운다 — report.js가 빈 값이면 행에서 뺀다. */
+          src: gi > 0 ? (GRADE_SRC_KO[gs.src] || GRADE_SRC_KO.iso) : null,
           wide: isFinite(gs.wide) ? E.fmt(gs.wide) : null,
         };
       })(),
@@ -4333,19 +4654,31 @@ export class App extends Component {
       routes: routesWithDefaults(S.routes), // 미설정 심각도는 기본값 적용 (UI 체크 상태와 동일)
     };
   }
-  // 이벤트 1건 발송 — 라우팅에 걸릴 때만. 폭주 방지는 판정 상태머신(진입확인·재알림주기·복귀유지)이 이미 담당한다.
-  _notifyEvent(eq, ev, val, lim, nowMs) {
-    var cfg = this._notifyCfg(), gradeKo = GRADE_WORDS[ev.gi];
-    if (!Notify.shouldNotify(gradeKo, ev.etype, 'webhook', cfg)) return;
-    var to = cfg.channels.webhook.to;
-    var msg = Notify.eventMessage({
+  /* 발송 대기열에 담는다 — 실제 발송은 회차가 끝난 뒤 _flushNotify가 한 번에 정리한다.
+     폭주 방지는 두 겹이다: 판정 상태머신(진입확인·재알림주기·복귀유지)이 시간축을,
+     여기 묶음이 **같은 순간의 동시 다발**을 맡는다. 후자는 상태머신으로는 막을 수 없다 —
+     태그마다 규칙대로 딱 한 번씩 낸 것이 합쳐져 수백 건이 되기 때문이다. */
+  _queueNotify(eq, ev, val, lim, nowMs) {
+    if (!this._notifyQ) this._notifyQ = [];
+    this._notifyQ.push({
       alias: eq.alias || eq.name, tag: eq.name, table: eq.table,
-      typeKo: TYPEKO[ev.etype] || ev.etype, gradeKo: gradeKo,
-      // etype·detail — 값 줄이 유형마다 다르다(계측 이상은 사유만, 대역은 비율만). 없으면 옛 틀로 찍힌다.
+      typeKo: TYPEKO[ev.etype] || ev.etype, gradeKo: GRADE_WORDS[ev.gi],
+      // etype·detail — 값 줄이 유형마다 다르다(계측 이상은 사유만). 없으면 옛 틀로 찍힌다.
       etype: ev.etype, detail: ev._detail || ev.detail || '',
       val: val, lim: lim, unit: eq.unit, timeText: this.E.fmtDT(nowMs || Date.now()),
     });
-    runTql(Notify.buildWebhookTql(to, Notify.payloadFor(msg, to))).catch(function () {});
+  }
+  // 회차 발송 — 거르기·묶기는 notify가 정한다(서버 타이머도 같은 함수를 임베드해 규칙 드리프트가 없다)
+  _flushNotify(nowMs) {
+    var q = this._notifyQ;
+    this._notifyQ = null;
+    if (!q || !q.length) return;
+    var cfg = this._notifyCfg(), to = cfg.channels.webhook.to;
+    if (!to) return;
+    var msgs = Notify.planNotifications(q, cfg, 'webhook', this.E.fmtDT(nowMs || Date.now()));
+    msgs.forEach(function (msg) {
+      runTql(Notify.buildWebhookTql(to, Notify.payloadFor(msg, to))).catch(function () {});
+    });
   }
   // 채널 테스트 발송 — 알람을 기다리지 않고 설정을 즉시 검증. 발송은 서버(TQL $.request)에서 수행.
   _testNotify(ch) {
@@ -4414,7 +4747,7 @@ export class App extends Component {
     base.indicsTitle = this.live ? '진단 지표 (시간영역)' : '스펙트럴 진단 지표';
     base.indicsDesc = this.live ? '원시 파형 구간에서 직접 산출한 충격·에너지 특성 지표' : '스펙트럼에서 직접 산출된 충격·에너지 특성 지표';
     if (!S.ready || !this.data) return base;
-    /* 등급은 판정이 만든 것(_severityOf = 세 축 최댓값)을 그대로 쓴다.
+    /* 등급은 판정이 만든 것(_severityOf = 결함 패턴 게이트 · ISO 높이)을 그대로 쓴다.
        여기서 gradeFor(e.rms, …)로 다시 매기면 최신 1초·광대역·단일 축이 되어,
        같은 설비가 모니터링(_severityOf)과 상세분석(e.grade)에서 다른 등급으로 보인다.
        클래스·단위를 바꾼 직후에는 판정이 아직 안 돌았을 수 있어 _severityOf가 그 경우만 폴백한다. */
@@ -4430,7 +4763,7 @@ export class App extends Component {
     var eqs = _hide.length ? eqsAll.filter(function (e) { return _hide.indexOf(e.table) < 0; }) : eqsAll;
     /* 판정 보류는 등급으로 세지 않는다 — 못 믿는 값으로 매긴 등급이 "위험 5대"에 섞이면
        그 숫자를 못 믿게 된다. 대신 자기 칸에서 세고, 내역(사유별)은 호버로 내린다. */
-    var holdN = 0, holdBy = { gate: 0, lost: 0, stop: 0 };
+    var holdN = 0, holdBy = { gate: 0, lost: 0, stop: 0, nojudge: 0, wait: 0 };
     eqs.forEach(function (e) {
       var h = self._holdOf(e);
       if (h) { holdN++; holdBy[h.kind]++; return; }
@@ -4451,7 +4784,9 @@ export class App extends Component {
           tip: '지금 등급을 매기지 않는 설비입니다 — 카드의 값이 그 설비를 대표하지 않습니다.'
             + '\n\n계측 이상 ' + holdBy.gate + '대 — 파형을 못 믿습니다. 센서·케이블 확인이 필요합니다.'
             + '\n신호 두절 ' + holdBy.lost + '대 — 데이터가 안 들어옵니다. 수집 경로 확인이 필요합니다.'
-            + '\n정지 ' + holdBy.stop + '대 — 설비가 서 있습니다. 조치는 필요 없고, 운전이 재개되면 판정도 재개됩니다.',
+            + '\n정지 ' + holdBy.stop + '대 — 설비가 서 있습니다. 조치는 필요 없고, 운전이 재개되면 판정도 재개됩니다.'
+            + '\n판정 못 함 ' + holdBy.nojudge + '대 — 회전수·베어링이 없어 결함주파수 격자를 못 세웁니다. 설비 정보를 채우십시오.'
+            + (holdBy.wait ? '\n판정 대기 ' + holdBy.wait + '대 — 첫 판정 회차를 기다리는 중입니다.' : ''),
           style: 'flex: 1 1 0; min-width: 96px; padding: 14px 18px; border: none; border-right: 1px solid var(--border-default); background: ' + (act ? 'rgba(0,108,210,.10)' : 'transparent') + '; text-align: left; cursor: pointer; font-family: inherit;' + (act ? ' box-shadow: inset 0 -2px 0 var(--primary-light);' : ''),
           onClick: function () { self.setState({ gradeFilter: act ? null : 'hold' }); } };
       }
@@ -4605,7 +4940,8 @@ export class App extends Component {
         flap = {
           text: '진동 ' + _fl.round + '회',
           tip: '최근 2시간에 등급 악화가 ' + _fl.round + '회 반복됐습니다 (약 ' + _needMin + '분 주기).'
-            + '\n\n판정값이 주기적으로 오가는 것은 설비 상태보다 설정 문제일 때가 많습니다 — 부하 변동이나 간헐 운전인데 RMS 구간이 그보다 짧은 경우입니다.'
+            + '\n\n등급이 주기적으로 오가는 것은 결함 근거가 채택선 근처에서 노는 상태입니다 — 부하가 변하면 결함이 하중대를 드나들며 격자가 켜졌다 꺼집니다.'
+      + '\n추세 차트의 격자 점수 계열을 보면 채택선 언저리에 붙어 있는지 확인할 수 있습니다.'
             + '\n\nRMS 구간을 ' + _needMin + '분 이상으로 늘리면 하나의 상태로 합쳐집니다(반응은 그만큼 느려집니다).'
             + '\n실제 결함이라면 그대로 두고 원인을 확인하십시오.',
           needMin: _needMin,
@@ -4639,15 +4975,34 @@ export class App extends Component {
       /* 등급을 올린 판정이 무엇인지 — 등급만 보여주면 원인을 화면에서 알 수 없다.
          ISO가 올린 경우는 표시하지 않는다(그게 기본이라 매 카드에 붙으면 잡음이 된다). */
       var _gs = (self._gradeState || {})[e.table + ':' + e.name] || {};
-      var srcKo = { baseline: '베이스라인', band: '대역' }[_gs.src];
-      var gradeNote = (_gs.gi > 0 && srcKo) ? srcKo : '';
+      /* 등급 칩 옆에는 축 이름 대신 **확정 상태**를 적는다.
+         카드는 원시 등급(단발에도 바뀜)을 쓰므로, 그것만 보면 웹훅이 왜 안 왔는지 알 수 없다.
+           1회차     — 아직 확정 전. 알림이 안 나간 이유가 여기 있다
+           N시간째   — 확정된 뒤 얼마나 이어지는지. 침묵이 "아직 나쁨"인지 알려준다
+         축 이름(결함 패턴)은 안 적는다 — 등급을 올리는 축이 하나뿐이라 매 카드에 같은 말이 붙고,
+         값 호버에 이미 "결함 패턴 검출 (격자 …)"이 나온다. */
+      var _st = (self._monState || {})[e.table + ':' + e.name];
+      /* 확정 상태를 등급 칩 옆에 적는다 — 카드는 원시 등급(한 회차만 떠도 바뀜)을 쓰므로,
+         칩만 보면 웹훅이 왜 안 왔는지 알 수 없다. 나빠질 때와 좋아질 때를 대칭으로 적는다:
+           1회차 / N회차  — 아직 확정 전
+           N시간째        — 확정 뒤 얼마나 이어지는지
+           복귀 N회차     — 초록인데 아직 확정 전(상태기는 여전히 나쁨을 들고 있다)
+         마지막 줄이 없으면 복귀 1회차에 카드가 조용히 초록이 되어, 그 뒤 되돌아가도
+         이벤트가 안 나므로 "좋아졌다가 원래대로"가 화면에도 이력에도 안 남는다. */
+      var gradeNote = '';
+      var _confirmed = _st && _st.g > 0;
+      if (_gs.gi > 0) {
+        if (_confirmed && _st.since) gradeNote = durKo(Date.now() - _st.since) + '째';
+        else gradeNote = (_st && _st.candN > 1) ? (_st.candN + '회차') : '1회차';
+      } else if (_confirmed) {
+        gradeNote = '복귀 ' + ((_st.candN > 1) ? _st.candN : 1) + '회차';
+      }
       /* 판정 보류면 등급 칩을 대체한다 — 못 믿는 값으로 매긴 등급을 그대로 두면
          "계측 이상인데 양호"처럼 화면이 자기 모순을 말한다. 직전 확정 등급은 호버로 남긴다. */
       var _hold = self._holdOf(e);
       var _ms = (self._monState || {})[e.table + ':' + e.name];
       var holdTip = '';
       if (_hold) {
-        gradeNote = '';
         holdTip = '지금 등급을 매기지 않습니다 — ' + _hold.label + ' 상태라 이 값이 설비를 대표하지 않습니다.';
         if (_ms && _ms.g != null) {
           holdTip += '\n\n직전 확정 ' + (GRADE_WORDS[_ms.g] || '-')
@@ -4671,7 +5026,10 @@ export class App extends Component {
       var _ax = [];
       /* 결함 패턴이 맨 위 — 등급을 켜는 축이라 "왜 이 등급인가"의 답이 여기 있다.
          못 잰 경우를 빈칸으로 두면 "정상"으로 읽히므로 사유를 적는다. */
-      if (_gs.patOk) _ax.push('결함 패턴 ' + (_gs.patOn ? '검출' : '없음') + (_gs.patR != null ? ' (격자 ' + _gs.patR.toFixed(1) + ')' : ''));
+      if (_gs.patOk) _ax.push('결함 패턴 ' + (_gs.patOn ? '검출' : '없음') + (_gs.patR != null ? ' (격자 ' + _gs.patR.toFixed(1) + ')' : '')
+        /* 전대역 복조는 공진 대역을 못 골라 근거가 약하다 — 같은 문구로 적으면 고정 대역 판정과
+           구분이 안 된다. 조기 베어링 결함은 이 경로로 안 잡힌다는 사실까지 밝힌다. */
+        + (_gs.patWide ? ' · 전대역 복조(샘플레이트 부족으로 1–5 kHz 대역 불성립) — 근거 약함, 조기 베어링 결함은 검출되지 않습니다' : ''));
       else if (_gs.patOk === false) _ax.push('결함 패턴 — 판정 못 함(회전수·기하·샘플레이트 확인)');
       if (_gs.blR != null && isFinite(_gs.blR)) _ax.push('베이스라인 한계 대비 ×' + _gs.blR.toFixed(1));
       if (_gs.bandR != null && isFinite(_gs.bandR)) _ax.push('대역 최대 ×' + _gs.bandR.toFixed(1));
@@ -4684,11 +5042,15 @@ export class App extends Component {
           + '\n\n두 값 차이가 크면 1 kHz 위(충격·베어링·기어)에 에너지가 몰려 있다는 뜻입니다.';
       }
       if (_ax.length) valTip = (valTip ? valTip + '\n\n' : '') + _ax.join('\n');
+      /* 카드를 누르면 상세가 **감시가 판정한 그 시점**을 본다 — 안 넘기면 상세가 1시간을 스윕해
+         제 나름의 최악 지점을 고르므로, 카드와 상세가 서로 다른 순간을 두고 등급을 말하게 된다.
+         패턴을 못 잰 태그(판정 보류)는 시각이 없으므로 종전대로 기간 스윕에 맡긴다. */
+      var _patAt = ((self._patNow || {})[e.table + ':' + e.name] || {}).at || null;
       /* 큰 글씨는 사용자가 붙인 별칭, 작은 글씨는 실제 태그명이다. 소스가 둘 이상이면 테이블까지
          적는다 — 판정 키는 '테이블:태그'라 서로 다른 설비인데, 이름이 같으면 카드가 똑같이 보인다
          (별칭 기본값이 태그명이라 기본 상태가 그렇다). */
       return { mainUnit: mainUnit, hold: !!_hold, holdTip: holdTip, gradeNote: gradeNote, valTip: valTip, runBadge: runBadge, flap: flap, id: e.id, alias: e.alias || e.name, name: e.name,
-        sub: e.name + (base.tblFilterShow ? ' (' + e.table + ')' : ''), unit: e.unit, cls: e.cls, gradeKo: g.ko, gradeColor: g.color, gradeSoft: g.soft, rmsText: E.fmt(mainVal), sparkLine: e.spark.line, sparkArea: e.spark.area, sparkColor: g.color, sparkFill: g.soft, sparkH: sparkH, lastText: E.ago(e.lastSeen, self.data.now), onClick: function () { self._gotoDetail(e.id); }, cardStyle: 'border-left: 3px solid ' + g.color + ';' };
+        sub: e.name + (base.tblFilterShow ? ' (' + e.table + ')' : ''), unit: e.unit, cls: e.cls, gradeKo: g.ko, gradeColor: g.color, gradeSoft: g.soft, rmsText: E.fmt(mainVal), sparkLine: e.spark.line, sparkArea: e.spark.area, sparkColor: g.color, sparkFill: g.soft, sparkH: sparkH, lastText: E.ago(e.lastSeen, self.data.now), onClick: function () { self._gotoDetail(e.id, _patAt); }, cardStyle: 'border-left: 3px solid ' + g.color + ';' };
     });
     /* 설비 카드 드래그 — 놓는 순간 순서를 바꾸고 저장한다.
        순서는 화면에 보이는 카드만이 아니라 저장된 전체 목록을 기준으로 다시 만든다
@@ -4863,16 +5225,10 @@ export class App extends Component {
     }
     base.sevMachine = eq.name + ' · Class ' + eq.cls + ' · ' + eq.rpm + ' RPM';
     /* 존 막대는 ISO 속도(mm/s) 눈금이다 — 원본 단위(g·μm)를 걸면 카드 값과는 맞아 보여도 규격과 어긋난다.
-       채운 칸은 **종합 등급**이고, ISO 실측값이 그보다 위 칸에 있으면 그 칸에 테두리로 따로 표시한다:
-       결함 패턴이 게이트가 된 뒤로 둘이 갈릴 수 있어서다(베어링은 멀쩡한데 진동만 높은 경우).
-       한 칸만 채우고 끝내면 "진동 8.9 mm/s인데 양호"가 화면에서 설명 없이 남는다. */
+       칸은 종합 등급 하나만 채운다. 등급이 어떻게 합쳐지는지(결함 패턴 게이트)는 내부 판정 방식이라
+       막대에 드러내지 않는다 — 진동 수준이 등급보다 높은 사실은 판정문과 ISO 판정값 카드가 말한다. */
     var _isoZ = this._isoZones(eq);
     base.sevZoneUnit = 'mm/s';
-    /* 갈렸을 때만 설명한다 — 늘 붙이면 배경이 되어 정작 갈린 순간에 안 읽힌다. */
-    base.sevZoneNote = (dx.isoOnly > 0)
-      ? '채운 칸 = 종합 등급(베어링 결함 근거 기준) · 테두리 칸 = 진동 수준 실측 위치. '
-        + 'ISO 값이 높아도 베어링 결함 근거가 없으면 등급을 올리지 않습니다 — 원인이 베어링 밖일 수 있습니다'
-      : '';
     base.sevZones = [
       { ko: '양호', color: '#3aa76d', range: '< ' + E.fmt(_isoZ[0]) },
       { ko: '주의', color: '#d99a2b', range: E.fmt(_isoZ[0]) + '–' + E.fmt(_isoZ[1]) },
@@ -4883,14 +5239,13 @@ export class App extends Component {
        그 등급은 계측이 멈추기 직전 값이다. */
     ].map(function (z, i) {
       var a = i === _gi, hold = a && base.sevHold;
-      var isoHere = !a && i === (dx.isoOnly || -1);   // 등급보다 위에 있는 ISO 실측 위치
-      return { ko: z.ko, range: z.range, isoMark: isoHere,
+      return { ko: z.ko, range: z.range,
         cellStyle: 'flex: 1; display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 600; box-sizing: border-box; color: '
-          + (hold ? '#8a8f99' : a ? '#fff' : isoHere ? z.color : 'var(--text-muted)')
+          + (hold ? '#8a8f99' : a ? '#fff' : 'var(--text-muted)')
           + '; background: ' + (a && !hold ? z.color : 'var(--bg-elevated)')
           + '; border-right: 1px solid var(--border-light);'
-          + (hold ? ' box-shadow: inset 0 0 0 1.5px #8a8f99;' : isoHere ? ' box-shadow: inset 0 0 0 1.5px ' + z.color + ';' : ''),
-        labStyle: 'flex: 1; text-align: center; font-size: 10px; color: ' + (isoHere ? z.color : 'var(--text-muted)') + ';' };
+          + (hold ? ' box-shadow: inset 0 0 0 1.5px #8a8f99;' : ''),
+        labStyle: 'flex: 1; text-align: center; font-size: 10px; color: var(--text-muted);' };
     });
     base.sevCards = this._sevCards(_m, eq.unit, _held, _rf.stepSec).map(function (c) {
       var gg = E.STATUS[c.grade];
@@ -5058,9 +5413,11 @@ export class App extends Component {
     base.onDoDownload = function () { self._exportEvents(); };
     base.stopClick = function (ev) { if (ev && ev.stopPropagation) ev.stopPropagation(); };
     base.evtTagOptions = [{ id: 'all', label: '전체 태그' }].concat(eqs.map(function (e) { return { id: e.id, label: self._tagLabel(e) }; }));
-    // 실제로 생성되는 유형만 — 'spectrum'은 생성 코드가 없어 고르면 항상 0건이었다
+    /* 실제로 생성되는 유형만 — 고를 수 있는데 절대 안 나오는 항목은 "0건"을 감시 문제로 오독하게 한다.
+       TYPEKO에는 옛 유형(베이스라인·대역)이 남아 있다: 지난 이벤트를 이름으로 렌더해야 하므로 라벨은 지우지 않고,
+       **필터 목록에서만** 뺀다. 이미 쌓인 이력은 '전체 유형'으로 그대로 보인다. */
     base.evtTypeOptions = [{ id: 'all', label: '전체 유형' }].concat(
-      Object.keys(TYPEKO).map(function (k) { return { id: k, label: TYPEKO[k] }; }));
+      EVT_LIVE_TYPES.map(function (k) { return { id: k, label: TYPEKO[k] }; }));
     base.evtEmpty = fEvs.length === 0;
     base.evtCount = this._evtTotal != null ? this._evtTotal : fEvs.length; // 스코프·필터 내 실제 총 건수(목록은 200캡)
     function _scroller(el) { var p = el ? el.parentElement : null; while (p) { if (p.scrollHeight > p.clientHeight + 4) { var ov = getComputedStyle(p).overflowY; if (ov === 'auto' || ov === 'scroll' || p.tagName === 'MAIN') return p; } p = p.parentElement; } return document.scrollingElement || document.documentElement; }
@@ -5220,6 +5577,11 @@ export class App extends Component {
     // 설비 정보 미설정 태그(새 태그) 감지 — Class/RPM/베어링 어느 것도 지정 안 됐으면 기본값 적용 중 = 업데이트 필요
     var _unsetCnt = 0;
     eqs.forEach(function (e2) { if (self._equipUnset(e2.id)) _unsetCnt++; });
+    /* "미설정"과 "판정 불가"는 다른 것을 센다. 미설정은 OR라서 RPM 하나만 넣어도 빠지는데,
+       등급이 서려면 회전수와 베어링 기하가 **둘 다** 있어야 한다. 그래서 아무것도 안 넣은 태그가
+       0이면서 판정 불가가 대부분인 상태가 나온다 — 배지가 0을 말하는 동안 등급이 안 서는 것이다. */
+    var _blkCnt = 0;
+    eqs.forEach(function (e2) { if (self._patBlockedId(e2.id)) _blkCnt++; });
     // 베이스라인 미학습 태그 감지 — 학습 가능한데 미학습인 것만 카운트(학습 불가=데이터 부족 태그는 제외)
     var _blUnCnt = 0, _blOldCnt = 0;
     var _blAll = self._blMap || S.baselines || {};
@@ -5234,8 +5596,8 @@ export class App extends Component {
       if (_bb && VC.BAND_ORDER.some(function (bn) { return _bb[bn] && agoStale(_bb[bn].at); })) _blOldCnt++;
     });
     base.blOldCnt = _blOldCnt;
-    base.equipUnsetDot = _unsetCnt > 0 || _blUnCnt > 0 || _blOldCnt > 0; // 헤더 ⚙ 표시등
-    base.setNav = [{ id: 'source', label: '데이터 소스', icon: 'database' }, { id: 'equip', label: '설비 정보', icon: 'settings-gear' }, { id: 'criteria', label: '판정 기준', icon: 'dashboard' }, { id: 'monitor', label: '알람 설정', icon: 'pulse' }, { id: 'llm', label: 'LLM 연동', icon: 'sparkle' }, { id: 'data', label: '데이터 관리', icon: 'trash' }].map(function (n) { var a = S.setSection === n.id; var bd = (n.id === 'equip' && _unsetCnt > 0) ? '미설정 ' + _unsetCnt
+    base.equipUnsetDot = _unsetCnt > 0 || _blkCnt > 0 || _blUnCnt > 0 || _blOldCnt > 0; // 헤더 ⚙ 표시등
+    base.setNav = [{ id: 'source', label: '데이터 소스', icon: 'database' }, { id: 'equip', label: '설비 정보', icon: 'settings-gear' }, { id: 'criteria', label: '판정 기준', icon: 'dashboard' }, { id: 'monitor', label: '알람 설정', icon: 'pulse' }, { id: 'llm', label: 'LLM 연동', icon: 'sparkle' }, { id: 'data', label: '데이터 관리', icon: 'trash' }].map(function (n) { var a = S.setSection === n.id; var bd = (n.id === 'equip' && _blkCnt > 0) ? '판정 불가 ' + _blkCnt : (n.id === 'equip' && _unsetCnt > 0) ? '미설정 ' + _unsetCnt
         : (n.id === 'criteria' && _blUnCnt > 0) ? '미학습 ' + _blUnCnt
           : (n.id === 'criteria' && _blOldCnt > 0) ? '재학습 ' + _blOldCnt : ''; return { label: n.label, icon: n.icon, badge: bd, onClick: function () { self.setState({ setSection: n.id }); if (n.id === 'criteria') self._refreshBandCov(); if (n.id === 'data') self._refreshUsage(); }, style: 'display: flex; align-items: center; gap: 9px; padding: 9px 12px; border-radius: 6px; cursor: pointer; font-size: 13px; border-left: 2px solid ' + (a ? 'var(--primary-light)' : 'transparent') + '; background: ' + (a ? 'var(--overlay-hover)' : 'transparent') + '; color: ' + (a ? 'var(--text-primary)' : 'var(--text-tertiary)') + '; font-weight: ' + (a ? '600' : '500') + ';' }; });
     base.secSource = S.setSection === 'source'; base.secEquip = S.setSection === 'equip'; base.secCriteria = S.setSection === 'criteria'; base.secMonitor = S.setSection === 'monitor'; base.secLlm = S.setSection === 'llm';
@@ -5361,6 +5723,7 @@ export class App extends Component {
       var geoCells = [{ k: '볼 수 n', v: '' + geo.n }, { k: '볼경 Bd', v: geo.Bd + ' mm' }, { k: '피치경 Pd', v: geo.Pd + ' mm' }, { k: '접촉각 φ', v: geo.phi + '°' }];
       return {
         id: e.id, name: e.name, alias: e.alias || e.name, unit: selUnit, cls: selCls, unset: self._equipUnset(e.id),
+        blocked: self._patBlockedId(e.id),
         clsOptions: [{ v: '', l: '— 선택 —' }, { v: 'I', l: 'I · 소형' }, { v: 'II', l: 'II · 중형' }, { v: 'III', l: 'III · 대형·강성' }, { v: 'IV', l: 'IV · 대형·연성' }],
         rpm: selRpm, bModel: model,
         isCustom: isCustom, isSleeve: isSleeveB, isCatalog: isCatalogB, freqChips: freqChips, geoCells: geoCells, adv: !!S.equipAdv[e.id],
@@ -5408,7 +5771,7 @@ export class App extends Component {
        목록에 자체 스크롤을 두지 않는 이유는 이 표가 행을 펼치기 때문이다 — 고정 높이 안에서
        펼치면 펼친 내용이 갇힌다. 길이는 필터로 줄이고 스크롤은 페이지에 맡긴다. */
     var _eqFilter = S.equipFilter || 'all';
-    var _eqMatch = { unset: function (r) { return r.unset; } };
+    var _eqMatch = { blocked: function (r) { return r.blocked; } };
     var _chip = function (a, dead) {
       return 'display: inline-flex; align-items: center; gap: 7px; padding: 5px 11px; border-radius: 6px; font-size: 12px; font-weight: '
         + (a ? '600' : '500') + '; cursor: ' + (dead ? 'default' : 'pointer') + '; border: 1px solid '
@@ -5420,7 +5783,9 @@ export class App extends Component {
        행의 n/N 배지가 짚어 준다(어느 항목이 비었는지는 그 자리에서 펼쳐 봐야 하는 정보다). */
     base.equipFilters = [
       { k: 'all', label: '전체', n: _eqRows.length, tip: '' },
-      { k: 'unset', label: '미설정', n: _unsetCnt, tip: '단위·Class·RPM·베어링·마운팅 어느 것도 지정하지 않아 기본값(Class II · 1800 rpm · mm/s)으로 판정 중인 태그입니다. 좌측 "미설정" 배지와 같은 기준·같은 수입니다.' },
+      /* 미설정(아무것도 안 넣음)은 이것의 부분집합이라 칩을 따로 두지 않는다 — 같은 수가 두 번 보인다.
+         남길 것은 조치로 이어지는 쪽이다: 등급이 안 서는 태그. 아무것도 안 넣은 줄은 행의 점이 짚어 준다. */
+      { k: 'blocked', label: '판정 불가', n: _blkCnt, tip: '회전수와 베어링 기하가 둘 다 있어야 결함주파수 격자를 세울 수 있습니다. 하나라도 없으면 등급을 켜는 축이 비어 카드가 "판정 보류"로 남습니다(미끄럼 베어링도 구름체가 없어 여기 포함됩니다). 좌측 "판정 불가" 배지와 같은 기준·같은 수입니다.' },
     ].map(function (f) {
       var a = _eqFilter === f.k, dead = f.n === 0 && f.k !== 'all';
       return {
@@ -5551,7 +5916,7 @@ export class App extends Component {
       '판정 주기': '얼마나 자주 판정하는지입니다.\n3초면 3초마다 한 번씩, 그때까지의 RMS 구간을 평가합니다.\n\n짧게 하면 변화를 빨리 알지만 조회가 그만큼 늘어납니다. 조회는 테이블당 한 번이라 태그 수와는 무관합니다.',
       '평가 주기': '얼마나 자주 판정하는지입니다.\n3초면 3초마다 한 번씩, 그때까지의 RMS 구간을 평가합니다.',
       '대역 학습 기간': '대역별 정상 기준을 배울 구간입니다. 베이스라인과 따로 두는 이유는 표본 밀도가 달라서입니다 — 대역은 추출 주기마다 하나씩만 생깁니다(10분 주기면 24시간에 144개).',
-      'RMS 구간': '이 구간에 들어온 원본 전체로 실효값 하나를 냅니다. 길면 짧은 진동이 하나의 상태로 합쳐지고, 짧으면 변화를 잘게 봅니다.',
+      'RMS 구간': '이 구간에 들어온 원본 전체로 실효값 하나를 냅니다. 길면 짧은 진동이 하나의 상태로 합쳐지고, 짧으면 변화를 잘게 봅니다.\n\n등급은 이 값이 정하지 않습니다 — 결함 패턴이 추출 주기마다 정하고, 이 값은 운전 여부·신호 두절·계측 이상·평소 대비를 봅니다.',
     };
     // 계통주파수는 입력받되 RPM으로 검산한다 — 유도전동기 동기속도(120·f/극수)는 계통에 묶여 있어
     // 1800/3600은 60Hz, 1500/3000은 50Hz 계열이다. 자동으로 바꾸지는 않는다(사용자 입력이 우선).
@@ -5772,11 +6137,6 @@ export class App extends Component {
       };
     });
     // 알람 동작(시나리오) — 진입 확인·복귀 유지·지속 재알림
-    base.escHold = S.escHold; base.recHold = S.recHold;
-    base.escHoldOptions = [{ v: '0', l: '즉시' }, { v: '30s', l: '30초' }, { v: '1m', l: '1분' }, { v: '2m', l: '2분' }, { v: '5m', l: '5분' }];
-    base.recHoldOptions = [{ v: '0', l: '즉시' }, { v: '1m', l: '1분' }, { v: '5m', l: '5분' }, { v: '10m', l: '10분' }];
-    base.onEscHold = function (ev) { self.setState({ escHold: ev.target.value, dirty: true }); };
-    base.onRecHold = function (ev) { self.setState({ recHold: ev.target.value, dirty: true }); };
     var RENO_OPTS = [{ v: '0', l: '끔' }, { v: '30m', l: '30분' }, { v: '1h', l: '1시간' }, { v: '2h', l: '2시간' }, { v: '6h', l: '6시간' }];
     base.renotifyOptions = RENO_OPTS;
     // 베이스라인 미학습 경고(판정기준 카드) — 학습 가능한데 미학습인 태그 수 (setNav의 _blUnCnt와 동일 기준)
@@ -5826,7 +6186,10 @@ export class App extends Component {
     /* 심각도별 알림 — 방식(즉시/알림 안 함)과 재알림 주기를 한 표에.
        같은 심각도 3행을 두 카드에 따로 그리던 것을 합쳤다(사용자 제안).
        재알림은 '알림 안 함'이어도 남겨 둔다 — sustained 이벤트는 발송과 별개로 이력에 쌓인다. */
-    var ROUTE_META = [{ ko: '주의', color: '#d99a2b' }, { ko: '위험', color: '#e07b39' }, { ko: '심각', color: '#e5484d' }];
+    /* 감시 이상은 등급 팔레트를 쓰지 않는다 — 같은 색을 쓰면 "위험보다 덜 나쁜 등급"으로 읽힌다.
+       재알림 칸도 비운다: 두절·계측 이상은 상태가 유지되는 동안 이벤트 자체가 안 나므로 재알림할 대상이 없다. */
+    var ROUTE_META = [{ ko: '주의', color: '#d99a2b' }, { ko: '위험', color: '#e07b39' }, { ko: '심각', color: '#e5484d' },
+      { ko: HEALTH_ROUTE, color: 'var(--text-muted)', health: true }];
     var _routes = routesWithDefaults(S.routes); // 화면 상태 = 실제 발송 판정과 동일 소스
     base.alertRows = ROUTE_META.map(function (mt) {
       var r = _routes[mt.ko];
@@ -5838,12 +6201,57 @@ export class App extends Component {
           all[mt.ko] = Object.assign({}, r, { timing: ev.target.value });
           self.setState({ routes: all, dirty: true });
         },
+        health: !!mt.health,
+        renoNA: !!mt.health,   // 재알림 선택칸을 비활성 — 낼 이벤트가 없다
         reno: (S.renotify || {})[mt.ko] || '0',
         onReno: function (ev) { var all = Object.assign({}, S.renotify); all[mt.ko] = ev.target.value; self.setState({ renotify: all, dirty: true }); },
       };
     });
     // 채널은 켰는데 전 심각도가 '알림 안 함' — 한 건도 안 나가는 상태라 경고
-    base.routeNoneWarn = !!S.notifCh.webhook && !ROUTE_ORDER.some(function (k) { return _routes[k].timing === '즉시'; });
+    /* 확정 시간은 **판정 기준의 추출 주기**가 정한다 — 알람 화면에서 고치게 두면 값이 두 곳이 되어 어긋난다.
+       여기서는 결과만 보여주고, 바꾸려면 그 자리로 보낸다. */
+    var _cIv = durMs(S.bandInterval || '10m') || 600000;
+    base.confirmIvKo = durKo(_cIv);
+    /* 사용자가 이 화면에서 실제로 묻는 것은 "언제 웹훅이 오나" 하나인데, 그 답이 표 안에 흩어져
+       6행을 읽고 주기를 곱해야 나왔다. 확정은 두 회차 연속이므로 주기의 2배다. */
+    base.confirmSumKo = durKo(_cIv * 2);
+    /* 회차별로 무슨 일이 나는지 — "두 회차 연속"만 적으면 그 사이와 이후가 안 보인다.
+       등급 표시 칸에는 카드에 **실제로 찍히는 문구**를 그대로 적는다: 화면에서 본 것을 여기서 되찾을 수 있어야 한다.
+       나빠질 때와 좋아질 때를 같은 모양의 두 묶음으로 나눠 대칭임이 눈에 보이게 한다. */
+    var _AMBER = '#d99a2b', _GREEN = '#3aa76d';
+    base.confirmSteps = [
+      { head: '이상 진입', color: _AMBER },
+      { when: '1회차', what: '등급 표시 · 이력에 관찰로 남김', chip: '표시', sent: false, color: _AMBER, first: true },
+      { when: '2회차', what: '확정 — 여기서 알람이 시작됩니다', chip: '확정 표시', sent: true, dot: true, color: _AMBER },
+      /* 발송 이야기만 적는다 — 카드가 경과 시간을 보여주는 것은 화면 동작이라 '등급 표시' 칸의 몫이고,
+         한 칸에 성격이 다른 둘을 '·'로 붙여 두니 뒤가 잘린 문장처럼 읽혔다("주기마다" 무엇을?).
+         재알림 주기 값은 바로 아래 심각도별 표에 있으므로 여기서 반복하지 않는다. */
+      { when: '이후', what: '재알림 주기마다 다시 알림', chip: '유지', sent: true, color: _AMBER, last: true },
+      { head: '정상 복귀', color: _GREEN },
+      { when: '1회차', what: '복귀 관찰 — 확정은 아직 유지', chip: '유지', sent: false, color: _GREEN, first: true },
+      { when: '2회차', what: '정상 복귀 — 에피소드 종료', chip: '해제', sent: true, dot: true, color: _GREEN, last: true },
+    ];
+    /* 섹션만 바꾸고 맨 위로 올리면 어느 칸을 고쳐야 하는지 알 수 없다 — 그 칸까지 데려간다.
+       렌더 뒤에 찾아야 하므로 한 틱 미룬다(setState 직후에는 아직 그 섹션이 DOM에 없다). */
+    base.onGoBandIv = function () {
+      // 섹션만 바꾼다 — 링크를 눌렀다고 대역 추출을 켜면 안 되는 설정을 대신 바꾸는 셈이다
+      self.setState({ setSection: 'criteria' });
+      setTimeout(function () {
+        var el = document.getElementById('band-iv');
+        if (!el) { self._scrollTop(); return; }
+        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        /* 잠깐 테두리로 강조 — 스크롤만으로는 여러 칸 중 어느 것인지 안 보인다.
+           빨강을 쓰지 않는 이유: 설정 화면의 빨강은 "이 값이 잘못됐다"는 뜻이고(경고는 앰버) 심각 등급 색이기도 하다.
+           "여기를 보세요"를 그 색으로 하면 잘못 설정한 줄 알게 된다. 강조색(활성 상태에 쓰는 파랑)을 쓴다. */
+        el.style.transition = 'box-shadow .2s, background .2s';
+        el.style.borderRadius = '7px'; el.style.padding = '7px 9px'; el.style.margin = '3px -9px 0';
+        el.style.boxShadow = '0 0 0 2px var(--primary-light)';
+        el.style.background = 'var(--bg-input)';
+        setTimeout(function () { el.style.boxShadow = 'none'; el.style.background = 'transparent'; }, 1800);
+      }, 60);
+    };
+    // 등급 행만 본다 — 감시 이상은 기본이 즉시라 함께 세면 이 경고가 영영 안 뜬다
+    base.routeNoneWarn = !!S.notifCh.webhook && !GRADE_ROUTES.some(function (k) { return _routes[k].timing === '즉시'; });
     /* 대역 베이스라인 — 베이스라인 카드와 같은 형태(태그별 상태 + 학습/삭제).
        자동 학습을 하지 않는 이유: 데이터가 쌓였다고 알아서 학습하면 그 순간 설비가 이상해도
        그것을 "정상"으로 굳힌다. "지금이 정상이다"는 사람이 판단해야 하고, 그 판단을 버튼으로 받는다. */
@@ -5949,6 +6357,10 @@ export class App extends Component {
       ? '제외 ' + _skip.length + '개 — ' + _skip.map(function (x) { return x.label + ' (' + x.why + ')'; }).join(', ')
         + '\n\n대역 경계가 회전주파수의 배수로 정의되므로(0.5× · 1.5× · 10×) RPM 없이는 대역을 나눌 수 없습니다. 설비 정보에서 RPM을 입력하십시오.'
       : '';
+    /* 켜져 있는데 대상이 0이면 타이머가 아예 안 구워진다 — 토글만 보고는 알 수 없으니 여기서 밝힌다.
+       채우기 옆 '대상 n/m' 칩은 0/m일 때도 추출은 도는 것처럼 읽힌다. */
+    base.bandNoTargetWarn = (S.bandOn && !_bplan.tags.length)
+      ? self._bandNoTargetWhy({ skipped: _skip }) : '';
     /* 추출 주기 × 학습 기간 = 표본 수. 두 값이 다른 카드에 있어 관계가 안 보이는데,
        곱이 최소 표본에 못 미치면 학습이 실패한다 — 눌러보고 알게 되지 않도록 미리 보여준다. */
     var _bIv = durMs(S.bandInterval) || 600000;
@@ -6023,7 +6435,7 @@ export class App extends Component {
     /* 회차보다 짧은 주기는 고를 수 없게 한다 — 태그가 많으면 한 회차(태그당 약 1초)가 주기를 넘겨
        회차가 겹쳐 서로 밀다가 한 번도 완주하지 못한다.
        못 쓰는 선택지는 잠그고 이유를 라벨에 적되, 규모에 따라 달라지는 값이라 목록에서 빼지는 않는다. */
-    var _bandN = (this._bandSpec().tags || []).length;
+    var _bandN = (this._bandTags().tags || []).length;
     var _passSec = Math.round(_bandN * BAND_TAG_SEC);
     base.bandPassSec = _passSec;
     base.bandIvOptions = [
@@ -6033,10 +6445,14 @@ export class App extends Component {
       var bad = _passSec > 0 && o.sec < _passSec * 2;
       return { v: o.v, l: bad ? o.l + ' — 회차(' + _passSec + '초)보다 짧음' : o.l, disabled: bad };
     });
+    /* 이 주기는 계산 부하(하한)만이 아니라 **등급 확정의 회차 길이**도 정한다.
+       확정 흐름 자체는 알람 설정의 회차 표가 보여주므로, 여기서는 그 사실만 알린다. */
     base.bandIvHint = _passSec > 0
-      ? '감시 태그 ' + _bandN + '개 → 한 회차 약 ' + _passSec + '초. 그보다 짧은 주기는 회차가 겹쳐 아무것도 쌓이지 않습니다.'
+      ? '감시 태그 ' + _bandN + '개 → 한 회차 약 ' + _passSec + '초. 회차보다 짧은 주기는 겹쳐서 아무것도 쌓이지 않습니다.'
+        + ' 이 주기가 등급 확정의 회차 길이도 정합니다(알람 설정 참고).'
       // 10분이 하한인 이유를 여기서 한 번 말한다 — 선택지에서 사라진 것을 사용자가 설명 없이 마주치지 않게
-      : '추출 창이 샘플레이트에 따라 최대 4분대라 그보다 짧은 주기는 같은 구간을 겹쳐 잽니다. 급격한 이상은 광대역 감시가 초 단위로 따로 봅니다.';
+      : '추출 창이 샘플레이트에 따라 최대 4분대라 그보다 짧은 주기는 같은 구간을 겹쳐 잽니다.'
+        + ' 이 주기가 등급 확정의 회차 길이도 정합니다 — 정지·신호 두절·계측 이상은 10초마다 따로 봅니다.';
     /* 드롭다운에서 고르면 바로 적용하지 않고 확인 절차를 연다 — 주기를 바꾸면 이전 구간과
        밀도가 갈려 학습이 편향될 수 있고, 이미 채운 값의 간격과도 어긋난다. */
     base.onBandIvPickDirect = function (ev) {

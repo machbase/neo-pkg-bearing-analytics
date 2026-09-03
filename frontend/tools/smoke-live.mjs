@@ -13,6 +13,7 @@ const CH = (await import('../../cgi-bin/chart/chart.js')).default;
 const Mock = (await import('./mock.js')).default; // 테스트 전용 목 생성기
 const { App } = await import('../src/app.js');
 const L = await import('../src/data/live.js');
+const VC = (await import('../../cgi-bin/calc/calc.js')).default;
 
 const E = Object.assign({}, CH, Mock); // 구 vibe-engine 병합 형태
 let fail = 0;
@@ -53,7 +54,14 @@ const det = await L.liveDetail(E, c1);
 ok(det.raw.values.length > 1000, 'C1 원시 파형', det.raw.values.length + ' pts');
 ok(det.fft.freqs.length > 100, 'C1 FFT 스펙트럼', det.fft.freqs.length + ' bins · res ' + det.fft.res.toFixed(3) + 'Hz');
 ok(det.indics.length === 4, '시간영역 지표 4종', det.indics.map(i => i.k + '=' + i.v).join(' · '));
-ok(det.fft.markers.length >= 3, 'FFT 마커(1×/2×/3×+베어링)', det.fft.markers.map(m => m.label).join(','));
+/* 차수 마커(1×/2×/3×)는 rpm/60에서 나오므로 회전수가 있어야 선다. c1은 설정 없이 조립한 것이라
+   rpm이 0이다 — 이 패키지는 회전수를 추측하지 않는다(폴백을 넣으면 2극·6극 설비에서 격자가
+   통째로 어긋나는데 화면은 평소처럼 등급을 낸다). 그래서 두 방향을 다 잠근다:
+   설정이 있으면 마커가 서고, 없으면 아예 그리지 않는다. */
+ok(det.fft.markers.length === 0, '회전수 미설정이면 차수 마커를 그리지 않는다 — 추측한 격자를 그리느니 비운다',
+  det.fft.markers.map(m => m.label).join(',') || '(없음)');
+const detCfg = await L.liveDetail(E, c1cfg);
+ok(detCfg.fft.markers.length >= 3, 'FFT 마커(1×/2×/3×+베어링)', detCfg.fft.markers.map(m => m.label).join(','));
 ok(det.envelope.freqs.length > 50, '포락선 스펙트럼(복원)', det.envelope.freqs.length + ' bins · ' + det.envelope.hint.slice(0, 40));
 ok(det.cepstrum.freqs.length > 30, '켑스트럼(복원)', det.cepstrum.freqs.length + ' bins');
 ok(det.spectro.rows === 22 && det.spectro.cols === 52, '스펙트로그램(복원)', det.spectro.rows + 'x' + det.spectro.cols + ' · fmax ' + det.spectro.fmax);
@@ -61,7 +69,9 @@ ok(det.spectro.rows === 22 && det.spectro.cols === 52, '스펙트로그램(복�
 // 3b. 첨도·대역 에너지 추이 (청크 샘플링)
 const tr = await L.loadTrendChunks(E, c1, c1.rollup);
 ok(tr.kurt.length >= 10, '첨도 추이 청크', tr.kurt.length + '점 · kurt[0]=' + (tr.kurt[0] || 0).toFixed(1));
-ok(tr.bands.length === 3 && tr.bands[1].vals.length === tr.kurt.length, '대역 에너지 3계열', tr.bands.map(b => b.label).join('/'));
+// 대역 개수는 제품 목록에서 가져온다 — 숫자를 박아 두면 대역이 늘 때 이 검사만 낡는다
+ok(tr.bands.length === VC.BAND_FREQ.length && tr.bands[1].vals.length === tr.kurt.length,
+  '대역 에너지 ' + VC.BAND_FREQ.length + '계열(차수 상대 + 절대 kHz)', tr.bands.map(b => b.label).join('/'));
 
 // 4. 라이브 상태로 전 탭 렌더
 const app = new App({ defaultTab: 'monitor', defaultTheme: 'dark', seed: 42, equipmentCount: 20 });
@@ -144,9 +154,13 @@ await L.saveConfig(prev || {}, AUTH); // 원상 복구
   // 이벤트 조회 — LOG 테이블(append 전용), GRADE는 단어. 실 테이블 오염 방지 위해 읽기만 검증
   const evs = await L.loadEvents(500);
   ok(Array.isArray(evs) && (evs.length === 0 || typeof evs[0].grade === 'string'), '이벤트 로드(GRADE 단어)');
-  // 기간 지정 조회(CSV/JSON 내보내기용) — 범위 필터 동작
-  const rangeNone = await L.loadEventsRange(0, 1);          // 과거(ms=0~1)엔 이벤트 없음
-  const rangeAll = await L.loadEventsRange(0, Date.now());  // 전체 범위
+  /* 기간 지정 조회(CSV/JSON 내보내기용) — 범위 필터 동작.
+     하한을 ms=0으로 두지 않는다: 질의는 로컬 시각 문자열(to_date)로 나가는데 DB는 UTC 기준으로
+     읽어 epoch 바로 아래로 떨어지고, Machbase가 1970-01-01 이전 DATETIME을 거부한다(ERR-2247).
+     시간대 최대 오프셋(±14h)을 넘기려고 하루 뒤에서 잡는다 — 어느 시간대에서 돌려도 안전하다. */
+  const PAST = 86400000;                                       // 1970-01-02 — 실 이벤트보다 한참 이전
+  const rangeNone = await L.loadEventsRange(PAST, PAST + 1);   // 이 구간엔 이벤트 없음
+  const rangeAll = await L.loadEventsRange(PAST, Date.now());  // 전체 범위
   ok(rangeNone.length === 0 && Array.isArray(rangeAll) && rangeAll.length >= evs.length, '이벤트 기간 조회(범위 필터)');
   // 판정상태(MONSTATE, LOOKUP) upsert→조회
   await L.saveMonState('ZZ:SMOKE', { g: 2, b: true, rms: 3.14, ms: 1 });

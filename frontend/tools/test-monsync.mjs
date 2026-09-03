@@ -288,6 +288,36 @@ function instrument(app) {
   a._applyHealth(DEAD, { t: NOW - 5000, n: 4 });
   a._applyHealth(null, null);
   chk(kinds(a) === 'unknown', '상태를 못 읽으면 복구 판단을 하지 않는다', kinds(a));
+  /* 다만 _applyHealth까지 오는 것은 연속 실패가 쌓인 뒤다 — 한 번 튄 조회로 배너가 뒤집히면
+     "확인할 수 없습니다"와 "복구됐습니다"가 번갈아 뜬다. 세는 곳은 _healthTick이다
+     (거기서만 "읽으려다 실패한 것"과 "볼 것이 없는 것"이 구분된다). */
+  const APPSRC = (await import('node:fs')).readFileSync(new URL('../src/app.js', import.meta.url), 'utf8');
+  chk(APPSRC.indexOf('< TIMER_MISS_MIN) return;') >= 0,
+    '조회 1회 실패로는 _applyHealth를 부르지 않는다 — 못 읽은 틱은 화면을 그대로 둔다');
+
+  /* 훑기는 하는데 하나도 판정 못 하는 상태 — 타이머·심박·두절 검사를 전부 통과하므로
+     이 경고가 없으면 화면이 조용하다. 실제로 60태그 전부 결함 패턴을 못 재는데 계기판이
+     전부 초록이었고, 이벤트만 0건이었다. */
+  const HB0 = (over) => ({ t: Date.now() - 3000, n: 60, pat: 0, ms: 3000, __over: over });
+  a = mk();
+  a._applyHealth(RUN, HB0());
+  chk(kinds(a) === '', '기동 직후 pat 0은 알리지 않는다 — 패턴은 주기마다 잰다', kinds(a) || '(없음)');
+  a._patZeroAt = Date.now() - 20 * 60000;                 // 20분째 0
+  a._applyHealth(RUN, HB0());
+  chk(kinds(a) === 'nopat', '0이 이어지면 알린다', kinds(a));
+  chk(/알람이 날 수 없습니다/.test(warn(a).text || ''), '알람이 날 수 없는 상태임을 밝힌다');
+
+  // 한 번이라도 재면 홀드가 풀린다 — 안 풀면 옛 0구간이 남아 다음 0에 즉시 뜬다
+  a._applyHealth(RUN, { t: Date.now() - 3000, n: 60, pat: 7, ms: 3000 });
+  chk(!a._patZeroAt, '판정한 태그가 있으면 홀드를 푼다', String(a._patZeroAt));
+  a._applyHealth(RUN, HB0());
+  chk(kinds(a) === '', '풀린 뒤엔 다시 처음부터 센다', kinds(a) || '(없음)');
+
+  // pat 필드가 없는 옛 TQL은 건드리지 않는다 — 재등록 전까지 오경보가 된다
+  a = mk();
+  a._patZeroAt = Date.now() - 20 * 60000;
+  a._applyHealth(RUN, { t: Date.now() - 3000, n: 60, ms: 3000 });
+  chk(kinds(a) === '', '옛 TQL(pat 없음)에는 뜨지 않는다', kinds(a) || '(없음)');
 
   /* 대역 추출도 켜둔 설정이다 — 멈추면 대역 기준이 판정에서 조용히 빠진다.
      감시만 되살리고 이건 두면 세 축 중 하나가 없는 채로 "정상"처럼 보인다. */

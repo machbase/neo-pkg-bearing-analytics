@@ -135,8 +135,21 @@ chk(VC.bandJudge({ fault: 1.0 }, { one: BLS.one }, false) === null, '겹치는 �
     cfg: { escHold: 0, recHold: 0, reno: {} },
   };
   const tql = Mon.buildMonitorTql(spec);
-  // 7번째 인자 run은 정지·두절 때 판정을 얼린다 — 대역 판정(bj)과 함께 전달돼야 한다
-  chk(/judgeTick\(prev,rg,breach,now,CFG,bj,run\)/.test(tql), '서버 TQL이 대역 판정·운전여부를 judgeTick에 전달');
+  /* 예비 목록(bandOrder 미지정)도 정본과 같아야 한다 — BORDER가 대역값을 읽는 NAME IN 목록이라
+     여기서 빠진 계열은 조회 자체가 안 된다. 앱은 항상 넘기므로 이 경로는 평소 안 도는데,
+     그래서 어긋나도 아무도 모른다. 목록을 직접 꺼내 정본과 대조한다. */
+  {
+    const noOrder = Object.assign({}, spec);
+    delete noOrder.bandOrder;
+    const t2 = Mon.buildMonitorTql(noOrder);
+    const i2 = t2.indexOf("var BORDER=");
+    const got = i2 < 0 ? [] : JSON.parse(t2.slice(i2 + 11, t2.indexOf(";", i2)));
+    chk(JSON.stringify(got) === JSON.stringify(VC.BAND_ORDER),
+      '예비 대역 목록이 정본(BAND_ORDER)과 같다', got.join(',') || '못 찾음');
+  }
+  /* 7번째 run은 정지·두절 때 판정을 얼리고, 8번째 cyc는 회차를 세는 기준이다(패턴을 잰 시각).
+     cyc가 빠지면 판정 틱마다 회차가 세어져 "2회차 연속"이 20초가 된다 — 서버에서만 그렇게 되면 못 잡는다. */
+  chk(/judgeTick\(prev,rg,breach,now,CFG,bj,run,\(_pv&&_pv\.at\)\|\|null\)/.test(tql), '서버 TQL이 대역·운전여부·회차를 judgeTick에 전달');
   chk(/bandJudge\(bandNow\(t\), t\.bb/.test(tql), '서버 TQL이 최신 대역값으로 판정');
   chk(/NEO_VIBE_BAND/.test(tql), '서버 TQL이 대역 테이블 조회');
   chk(/"대역 이탈"/.test(tql) || /대역 이탈/.test(tql), '알림 문구에 대역 이벤트 한글명');

@@ -72,24 +72,24 @@ This setting also governs **the current grade on monitoring cards**. The grade o
 
 ## Notifications
 
-One place configures **when** to alarm (entry and recovery holds) and **where and how** to send (channel, per-severity delivery, re-notify).
+One place configures **when** to alarm (the confirmation rule) and **where and how** to send (channel, per-severity delivery, re-notify).
 
-### When to alarm — entry and recovery holds
+### When to alarm — two consecutive cycles
 
-These settings reduce noise from momentary spikes and from flapping across a boundary.
+**This is a fixed rule, not a setting.** A grade is confirmed only when the same judgment holds for two consecutive cycles, and the alarm goes out then. Going up and coming down alike.
 
-| Setting | Options | Meaning |
-| :--- | :--- | :--- |
-| Entry hold | Immediate · 30s · 1m · 2m · 5m | A **worsened** grade must persist this long before alarming |
-| Recovery hold | Immediate · 1m · 5m · 10m | After returning to normal, it must hold this long before a recovery alarm |
+```
+cycle 1   caution   observation event · no alert
+cycle 2   caution   threshold · alert sent
+cycle 3   good      (not recovered yet)
+cycle 4   good      recovered · alert sent
+```
 
-If alarms arrive less often than expected, check the entry hold first; if too often, check the recovery hold.
+The cycle interval follows the **pattern/band extraction interval** (10 minutes by default). Set that to 30 minutes and confirmation takes 60.
 
-> **A 10-minute judgment cadence changed what this setting means.** An entry hold shorter than
-> 10 minutes effectively means "confirmed on the next cycle" — no grade judgment happens in between.
-> For a real delay, use **multiples** of the extraction interval (10 min extraction + 20 min entry
-> = two consecutive cycles). The recovery hold still works as before: it stops recovery alerts
-> repeating when the grade oscillates across a boundary.
+> This used to be two minute-based settings, `entry hold` and `recovery hold`. Because judgment runs on the extraction interval, **1, 2 and 5 minutes all collapsed to "next cycle"** — the choice meant nothing, and the settings were removed after measuring it.
+>
+> Instrumentation faults and signal loss are judged on the 10-second axis, where time still applies — 1 minute to confirm, 5 minutes to clear (both fixed).
 
 ### Where to send — the notification channel
 
@@ -114,12 +114,48 @@ For each severity, choose whether to notify, and how often to re-notify while an
 | Column | Options | Meaning |
 | :--- | :--- | :--- |
 | Delivery | Immediate · No notification | Whether events of this severity are sent |
-| Re-notify while sustained | Off · 30m · 1h · 2h · 6h | How often to notify again while the abnormal state continues |
+| Re-notify while sustained | Off · 30m · 1h · 2h · 6h | How often to notify again while the abnormal state continues (default: Warning 2h · Danger 1h · Critical 30m) |
 
-- The default sends **Danger and Critical immediately**, with Warning set to No notification.
+Below the three grade rows there is one more: **Monitoring fault**.
+
+| Row | What | Default |
+| :--- | :--- | :--- |
+| Warning · Danger · Critical | machine condition grade | Immediate |
+| **Monitoring fault** | signal lost · instrumentation fault · instrumentation recovered | **Immediate** |
+
+**A monitoring fault is not a machine grade** — it answers "can this value be trusted", not "how bad is this machine". That is why it has its own switch.
+
+> Signal loss used to ride the 'Warning' route, whose default was No notification, so **not one was ever sent** (271 recorded, 0 delivered). A monitor gone blind with nobody told is the worst failure mode, so it was split out.
+
+> **Re-notification is on by default** (Warning 2h · Danger 1h · Critical 30m).
+> Silence after confirmation leaves "was that just a blip?" unanswered — nothing arrives until recovery.
+> A healthy machine confirms about once a month, so re-notification adds almost nothing there; it only
+> accumulates while a real fault persists.
+
+The monitoring-fault row has no re-notify (`—`). While the state persists **no further events are produced**, so there is nothing to re-alert.
+
+### When many fire at once — bundled delivery
+
+If more than five events of the same type occur in one judgment cycle, they are **sent as a single message**.
+
+```
+⚠ [Warning] Signal lost · 91 points
+   VIBE_PU 38 · VIBE_LOAD 25 · NASA_BEARING 16 · 12 more
+   no data for 6 min
+```
+
+When collection stops, every tag reports signal loss in the same cycle. Sent one by one they exceed the channel rate limit (Slack 1/s, Discord 5 per 2 s) and **only an arbitrary subset arrives** — "91 points lost" arriving as "8 random points lost" is worse than nothing, because the rest look healthy.
+
+Five or fewer are sent individually — for two or three machines the tag, value and reference are more useful.
+
+**History is always stored per event.** Bundling is a delivery format only; the event list and CSV export are unchanged.
+
+- The default is **Immediate on all four rows**.
+
+> **Why Warning is on by default** — under the current structure, Warning means "a fault pattern was matched". Back when ISO set the grade, 69% of healthy machines read Warning or worse and turning it off was right; today it is a 3–4% false-positive signal. Turning it off buries most of what this tool detects in the list with no alert.
 - **No notification** still records the event — only the send is skipped. Re-notify events likewise always land in the history.
 - **Recovery notifications** are sent if any of Warning · Danger · Critical is set to Immediate — if you were alarmed, you need to know it cleared.
-- If the channel is on but every severity is set to No notification, a warning appears on screen.
+- If the channel is on but every **grade** row is set to No notification, a warning appears on screen (the monitoring-fault row is not counted — it defaults to Immediate).
 
 ## Webhook setup guides
 
@@ -233,7 +269,7 @@ To verify alarms end to end, check in this order:
 2. No monitoring-status warnings at the top of the screen.
 3. Events accumulate under **Monitoring → Events**; narrow with type and tag filters.
 4. If notifications don't arrive, isolate the delivery path first with the channel **Test**.
-5. If tests arrive but real alarms don't, check **per-severity delivery** and the **entry hold** (the state must persist that long to be confirmed).
+5. If tests arrive but real alarms don't, check **per-severity delivery**. Also note that a grade needs **two consecutive cycles** to confirm — a single-cycle hit is recorded as `observation` only, with no alert.
 6. If only certain tags are silent in server mode, check whether their table has ROLLUP.
 7. If vibration is clearly high but no alarm fires at all, check that the **shaft speed and bearing part number** are filled in — without either, the fault pattern cannot be computed and the grade never rises. The card's coverage indicator shows this.
 

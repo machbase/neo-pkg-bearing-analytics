@@ -632,7 +632,7 @@
     if (latchIn) for (_lk in latchIn) if (latchIn[_lk] && latchIn[_lk].r > 0) latch[_lk] = { r: latchIn[_lk].r, at: latchIn[_lk].at || 0 };
     var KO = { sub: '서브동기', one: '1× 대역', fault: '결함 대역', high: '고주파', vh1: '1~2 kHz', vh2: '2~4 kHz', vh3: '4~8 kHz', vh4: '8 kHz+',
       envPkRel: '주기성', envBPFO: 'BPFO(외륜)', envBPFI: 'BPFI(내륜)', envBSF: 'BSF(볼)' };
-    var GRADE = [1.5, 3.0], HYST = 0.9;
+    var GRADE = [1.5, 3.0], HYST = 0.9, ETM = 0.8;
     var thr = wasOn ? HYST : 1.0;
     var SOFT = {}, si;
     if (softKeys) for (si = 0; si < softKeys.length; si++) SOFT[softKeys[si]] = 1;
@@ -684,7 +684,7 @@
     /* 1·2순위가 근접하면 종류를 단정하지 않는다 — 실측에서 BPFO 1.42 / BSF 1.39(2% 차)를
        "외륜"으로 단정하고 있었다. "상했다"는 맞게 말하되 "어디가"는 근거가 설 때만 말한다.
        어느 쪽이든 베어링 교체라 정비 계획은 이것만으로도 선다 — 종류는 근본원인 분석용이다. */
-    var envAmbig = envR > 0 && env2R > 0 && env2R >= envR * ENV_TYPE_MARGIN;
+    var envAmbig = envR > 0 && env2R > 0 && env2R >= envR * ETM;   // 모듈 ENV_TYPE_MARGIN과 같은 값(테스트가 대조)
     return { on: on, gi: gi, over: over, maxR: maxR, soft: on && !nHard, detail: detail, latch: latch,
       envR: envR, envKey: envK, envAlt: envAmbig ? env2K : '', freqR: freqR, freqKey: freqK };
   }
@@ -1028,10 +1028,10 @@
       + ';var MON_ADOPT=' + MON_ADOPT + ';var MON_REV=' + MON_REV
       + ';var DEMOD_FIX=' + JSON.stringify(DEMOD_FIX) + ';var BEARING_FS_RATIO=' + BEARING_FS_RATIO
       + ';var TGT_ADOPT=' + TGT_ADOPT + ';var COMB_ADOPT=' + COMB_ADOPT + ';var COMB_M=' + COMB_M + ';'
-      + embedSrc([fftComplex, amplitudeSpectrum, analyticEnvelope, envelopeSpectrum, bandpassSignal,
-        gridScore, targetedMatch, bearingFreqs, envMaxFor, demodFixed, patternGate],
+      + embedSrc([patConst, fftComplex, amplitudeSpectrum, analyticEnvelope, envelopeSpectrum, bandpassSignal,
+        gridScore, targetedMatch, bearingFreqs, envMaxFor, demodFixed, patternGate, patternGrade],
       { envelopeSpectrum: envelopeSpectrum, targetedMatch: targetedMatch, bearingFreqs: bearingFreqs,
-        envMaxFor: envMaxFor, demodFixed: demodFixed, patternGate: patternGate });
+        envMaxFor: envMaxFor, demodFixed: demodFixed, patternGate: patternGate, patternGrade: patternGrade });
   }
   /* 계측 게이트 임베드 — gateFromRaw가 signalQuality를, signalQuality가 kurtosis를 이름으로
      부른다. 압축되면 그 이름들이 바뀌므로 한 스코프에 같이 넣어야 한다(embedSrc가 그 일을 한다). */
@@ -1057,7 +1057,10 @@
     return null;
   }
 
-  /* 표시 등급 — 세 판정(ISO·베이스라인·대역) 중 가장 나쁜 것. 무엇이 등급을 올렸는지(src)를 함께 돌려준다. */
+  /* 표시 등급 — 넘어온 축 중 가장 나쁜 것. 무엇이 등급을 올렸는지(src)를 함께 돌려준다.
+     ⚠ 호출측은 진폭 세 축(ISO·베이스라인·대역)을 0으로 넘기고 패턴 축만 태운다 — 등급을 켜는 것은
+     결함 패턴 하나이고(patternGate) 나머지 셋은 근거로만 표시된다. 최댓값 규칙 자체는 남겨 둔다:
+     축을 되살릴 때 합성 규칙을 다시 만들지 않게. */
   function worstGrade(zoneGi, blGi, bandGi, patGi) {
     var g = zoneGi || 0, src = 'iso';
     if ((blGi || 0) > g) { g = blGi; src = 'baseline'; }
@@ -1065,14 +1068,10 @@
     if ((patGi || 0) > g) { g = patGi; src = 'pattern'; }
     return { gi: g, src: g > 0 ? src : 'iso' };
   }
-  /* 결함 패턴 축 — 학습이 필요 없는 절대 판정이다. 스펙트럼 하나에서 나온 근거 점수가
-     원인을 지목할 만큼 강하면 등급을 올린다: 진폭이 낮아도 결함 패턴은 결함이다.
-     (실측 예: 베어링4 롤러결함이 ISO A존 0.44 mm/s인데 포락선엔 BPFO가 서 있었다.)
-
-     상한은 '주의' — 패턴은 "무엇이 상했나"를 말하고 "얼마나 급한가"는 진폭 축이 말한다.
-     임계는 판정문이 그 원인을 채택하는 점수와 같아야 한다: 원인을 지목해 놓고 등급이
-     양호로 남으면 화면이 스스로 어긋난다.
-     계측 게이트 중에는 스펙트럼 진폭 자체를 못 믿으므로 이 축을 비운다. */
+  /* 근거 채택 점수 — 판정문이 원인을 **지목**하는 문턱이고, 등급 게이트가 아니다.
+     등급은 patternGrade(targetedMatch 배수)가 정한다: 둘을 한 값에 묶으면 검출기가 달라
+     감시와 상세가 같은 신호에 다른 등급을 낸다. 원인 이름은 등급이 켜졌을 때만 쓰이므로
+     "원인을 지목해 놓고 양호"가 화면에 남지는 않는다. */
   var EVID_ADOPT = 55;
   /* 감시·상세가 공유하는 게이트 규칙 — 결함 패턴이 켜고 ISO가 높이를 정한다.
      베이스라인 축이 이미 쓰는 관용구와 같다(blGi = 켜지면 max(1, isoGi)).
@@ -1081,8 +1080,16 @@
   function patternGate(patOn, isoGi) {
     return patOn ? Math.max(1, isoGi || 0) : 0;
   }
-  function patternGrade(score, gate) {
-    return (gate || !(score >= EVID_ADOPT)) ? 0 : 1;
+  /* 결함 패턴 축의 채택 판정 — 감시·상세·서버가 **같은 검출기(targetedMatch)**를 쓰고
+     창 길이만 다르다. r은 그 격자 배수이고, 임계는 창에 맞춘 짝이다:
+     25회전 MON_ADOPT 3.0 · 100회전 TGT_ADOPT 4.0(같은 오탐률 4%에 맞춘 값).
+     창이 짧으면 점수 분포가 내려가므로 임계를 같이 낮춰야 두 화면이 같은 답을 낸다.
+     ⚠ thr에 기본값을 두지 않는다 — 호출측이 자기 창의 임계를 밝히지 않으면 판정하지 않는다.
+     기본값이 있으면 창이 바뀔 때 조용히 틀린 임계로 판정한다.
+     상한은 '주의'(patternGate) — 패턴은 "무엇이 상했나"를 말하고 "얼마나 급한가"는 진폭 축이 말한다.
+     계측 게이트 중에는 스펙트럼 진폭 자체를 못 믿으므로 이 축을 비운다. */
+  function patternGrade(r, gate, thr) {
+    return (gate || !(thr > 0) || !(r >= thr)) ? 0 : 1;
   }
 
   /* 버킷들을 판정 구간 단위로 묶어 구간 RMS 계열을 만든다(베이스라인 학습용) — 학습과 판정의 단위를 맞춘다.
@@ -1181,12 +1188,20 @@
      정류가 하모닉을 인공적으로 만든다는 통념은 이 데이터에서 성립하지 않았다 — AM 합성 검사에서
      정류는 하모닉을 안 만들고 오히려 제곱 포락선이 만들었다(200Hz/100Hz = 0.15).
      H는 세 방식 모두 4가 최적이라 정류 탓에 부풀려진 값이 아니다. */
-  var ENV_MODE = 'env';
-  var DEMOD_FIX = [1000, 5000];
+  /* 임베드되는 함수 몸통이 쓰는 상수는 이 함수 하나가 들고 있다 — 몸통이 바깥 이름을 참조하면
+     TQL 쪽에서 그 이름을 만들어 줄 수 없다. 압축이 변수 이름을 바꾸는데 embedSrc가 되살릴 수
+     있는 것은 함수 .name뿐이고, 객체 속성 이름은 압축되지 않는다. 그래서 상수를 함수가
+     돌려주는 객체의 속성으로 두고, 이 함수를 fns에 같이 실어 선언과 호출이 같은 이름으로
+     압축되게 한다. 값의 정의는 여기 한 곳뿐이고 모듈 상수도 여기서 갈라져 나온다. */
+  function patConst() {
+    return { MODE: 'env', DEMOD: [1000, 5000], H: 4, S: 1, ADOPT: 4.0 };
+  }
+  var ENV_MODE = patConst().MODE;
+  var DEMOD_FIX = patConst().DEMOD;
   function demodFixed(fs) {
-    var nyq = fs / 2;
-    if (!(nyq > 0) || DEMOD_FIX[1] > nyq * 0.95) return null;  // 이 샘플링에선 성립하지 않는 대역
-    return { loHz: DEMOD_FIX[0], hiHz: DEMOD_FIX[1] };
+    var nyq = fs / 2, df = patConst().DEMOD;
+    if (!(nyq > 0) || df[1] > nyq * 0.95) return null;  // 이 샘플링에선 성립하지 않는 대역
+    return { loHz: df[0], hiHz: df[1] };
   }
 
   /* 측대역 무리 판독 — "지배 피크 하나"가 원리적으로 놓치는 경우를 메운다.
@@ -1260,14 +1275,15 @@
   /* 창이 짧으면 점수 분포가 내려간다 — 임계를 같이 낮추지 않으면 감시가 조용해진다.
      같은 오탐률(4%)에 맞춘 값: 100회전 3.88 · 25회전 3.03. */
   var MON_ADOPT = 3.0;
-  var TGT_ADOPT = 4.0;   // 소수 둘째 자리는 표본 124건의 분위수 해상도(0.8%p)가 지지하지 않는다
-  var TGT_H = 4, TGT_S = 1;
+  var TGT_ADOPT = patConst().ADOPT;   // 소수 둘째 자리는 표본 124건의 분위수 해상도(0.8%p)가 지지하지 않는다
+  var TGT_H = patConst().H, TGT_S = patConst().S;
   function gridScore(sp, f, delta, med, res, hMax) {
     if (!(f > 0) || !(med > 0) || !sp || !sp.freqs.length) return { r: 0, lines: 0, relPct: 0 };
     var top = sp.freqs[sp.freqs.length - 1], sum = 0, n = 0, lines = 0, ctrOff = 0, h, m, t, tol, best, j;
-    var _H = hMax > 0 ? hMax : TGT_H;   // 실험 하네스가 H를 흔들 수 있게 — 기본은 TGT_H
+    var _C = patConst();
+    var _H = hMax > 0 ? hMax : _C.H;   // 실험 하네스가 H를 흔들 수 있게 — 기본은 TGT_H
     for (h = 1; h <= _H; h++) {
-      for (m = -TGT_S; m <= TGT_S; m++) {
+      for (m = -_C.S; m <= _C.S; m++) {
         // 측대역은 변조 계열에만, 그리고 간격이 분해능보다 넓을 때만 (좁으면 이웃이 같은 빈을 집는다)
         if (m !== 0 && (!(delta > 0) || Math.abs(delta) < 2 * res)) continue;
         t = h * f + m * delta;
@@ -1306,7 +1322,7 @@
       }
     }
     if (!best) return null;
-    best.adopted = best.r >= TGT_ADOPT;
+    best.adopted = best.r >= patConst().ADOPT;
     /* 구름체(BSF)가 이겨도 **부위를 단정하지 않는다** — 실측에서 구름체 라벨 적중이 0/9였고,
        반대로 내륜·외륜 7건이 구름체로 잘못 갔다. 검출은 살리고 주장만 내린다.
        물리적으로도 결함 구름체는 레이스를 함께 상하게 하므로 "부위 미상"이 정직하다. */
@@ -1572,7 +1588,7 @@
   function envelopeSpectrum(values, fs, maxHz, band, mode) {
     var n = values.length;
     if (n < 64) return { freqs: [], mags: [], res: 1 };
-    var md = mode || ENV_MODE;
+    var md = mode || patConst().MODE;
     var top = Math.min(maxHz || 500, fs * 0.4);
     if (md !== 'rect') {
       /* 대역이 없으면 전대역 해석 신호로 간다 — 저샘플 태그에서 고정 대역이 성립하지 않을 때 여기다.
@@ -1792,7 +1808,7 @@
     acVals: acVals, gateFromBuckets: gateFromBuckets, gateFromRaw: gateFromRaw, sensorTick: sensorTick, impactEvidence: impactEvidence, gateSrc: gateSrc,
     GATE_BLOCK: GATE_BLOCK, gateReason: gateReason,
     bandJudge: bandJudge, bandJudgeSrc: bandJudgeSrc, bandParse: bandParse, evenSample: evenSample, bandAnchors: bandAnchors, bandEdges: bandEdges, bandMeasurable: bandMeasurable, softBands: softBands, demodBand: demodBand, faultCoeffs: faultCoeffs, windowRms: windowRms, windowSeries: windowSeries, isRunning: isRunning, runRef: runRef, detectFlap: detectFlap,
-    BAND_KO: BAND_KO, BAND_ORDER: BAND_ORDER, BAND_FREQ: BAND_FREQ, BAND_CTX: BAND_CTX, BAND_LEGACY: BAND_LEGACY, BAND_GRADE: BAND_GRADE, BAND_HYST: BAND_HYST, BL_IDLE_FRAC: BL_IDLE_FRAC,
+    BAND_KO: BAND_KO, BAND_ORDER: BAND_ORDER, BAND_FREQ: BAND_FREQ, BAND_CTX: BAND_CTX, BAND_LEGACY: BAND_LEGACY, BAND_GRADE: BAND_GRADE, BAND_HYST: BAND_HYST, ENV_TYPE_MARGIN: ENV_TYPE_MARGIN, BL_IDLE_FRAC: BL_IDLE_FRAC,
     bandRmsAveraged: bandRmsAveraged, welchSpectrum: welchSpectrum, decimate: decimate,
     convertDomain: convertDomain, convertSpectrumMags: convertSpectrumMags,
     signalQuality: signalQuality, kurtosisSaturation: kurtosisSaturation,

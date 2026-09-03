@@ -60,8 +60,8 @@ By site: **the outer race stands out clearly, the inner race is middling, and ro
 faults are detected without naming the site.**
 
 > **Snapshot and time axis answer differently for one item.** Rolling-element faults are essentially
-> missed in a single snapshot, yet in run-to-failure testing one was caught with **29% of life
-> remaining — about 10 days** (NASA IMS Set 1 B4). The questions differ: "can this one snapshot be
+> missed in a single snapshot, yet in run-to-failure testing one was caught with **72% of life
+> remaining — about 25 days** (NASA IMS Set 1 B4). The questions differ: "can this one snapshot be
 > **labelled** a ball fault" fails on the geometric overlap, while "is this bearing **getting worse**"
 > succeeds. The site cannot be named, but the anomaly still stands.
 
@@ -113,34 +113,62 @@ The third is a time-axis matter — the baseline lives on the 10-second axis whi
 
 ## Time-axis performance — NASA IMS silent parallel run
 
-The three run-to-failure sets replayed at a 3-hour cadence with **alerting off and judgment on**.
-Bearings that stayed healthy to the end ran on the same rig, so the false-alarm denominator is sound.
+The run-to-failure sets replayed at the **actual monitoring cadence (10 minutes)** with alerting off
+and judgment on. Bearings that stayed healthy to the end ran on the same rig, so the false-alarm
+denominator is sound.
 
-### Faulted bearings
+> **A coarse replay cadence makes false alarms disappear.** An initial run at a 3-hour cadence gave
+> 0.92 per point-month — but that is 1/18 of the real judgment count, so it skipped most of the
+> scattered false hits. Re-running the same tags and periods at 10 minutes gave **13× more**.
+> Every figure below is at the 10-minute cadence.
+
+### Confirmation rule — two consecutive cycles
+
+A grade is confirmed only when **the same judgment holds for two consecutive cycles**. Cycles, not
+minutes, because judgment runs on the extraction interval (10 minutes by default) — every minute-based
+setting collapsed to "next cycle" and meant nothing.
+
+**All three faults had the same shape: one isolated hit → a long gap → a sustained run.**
+
+| Bearing | First isolated hit | Then | Sustained run begins |
+| :--- | :--- | :--- | :--- |
+| Set 2 B1 (outer) | day 1.11 | **2.6-day gap** | **day 3.70** |
+| Set 1 B4 (element) | day 0.10 | **7-day gap** | **day 9.8** |
+| Set 1 B3 (inner) | day 33.3 | — | never |
+
+Going to the machine on that first hit finds nothing. Hits of the same character occurred **77 times
+across 7 healthy bearings**, and an operator cannot tell the two apart.
+
+### Faulted bearings — at confirmation
 
 | Bearing | Site | First alarm | Test length |
 | :--- | :--- | :--- | :--- |
-| Set 2 B1 | outer race | **43% of life remaining ≈ 2.9 days** | 6.8 d |
-| Set 1 B4 | rolling element | **29% remaining ≈ 10.0 days** (site not named) | 34.5 d |
-| Set 3 B3 | outer race | 3% remaining ≈ 1.3 days | 44.7 d |
-| Set 1 B3 | **inner race** | **never** | 34.5 d |
+| Set 2 B1 | outer race | **46% of life remaining ≈ 3.1 days** | 6.8 d |
+| Set 1 B4 | rolling element | **72% remaining ≈ 25 days** (site not named) | 34.5 d |
+| Set 1 B3 | **inner race** | **never** (two late isolated hits only) | 34.5 d |
 
-**3 of 4 detected.** The inner race never stood once across 34.5 days.
+**2 of 3 detected.** Accepting isolated hits would make it 3 of 3, but the "earlier" alarm that buys
+is the first hit in the table above — nothing to find on site. The inner race stood only on days 33.3
+and 34.1, too late for planned maintenance.
 
-### False alarms on healthy bearings
+### False alarms on healthy bearings — by confirmation rule
 
-| Set | Healthy points | Duration | False alarms |
+Measured on 7 healthy points over 158 days (Sets 1 and 2).
+
+| Rule | False alarms | Per point-month | Faults detected |
 | :--- | ---: | ---: | ---: |
-| Set 1 | 4 (2 bearings × X/Y) | 138 d | **0** |
-| Set 2 | 3 | 20 d | 4 |
-| Set 3 | 3 | 134 d | 5 |
-| **Total** | **10 points (8 bearings)** | **292 d** | **9 = 0.92 per point-month** |
+| Isolated hit confirms | 77 | **14.6** | 3/3 (all on isolated hits) |
+| **Two consecutive** | **28** | **5.3** | **2/3** |
+| Three consecutive | 19 | 3.0 | 2/3 |
 
 The denominator is **measurement points** — two channels on one bearing alarm independently, so what an operator actually receives scales with points.
 
-**Set 1 produced nothing across 138 days.** The 9 alarms in Sets 2 and 3 are of a different character — most cluster in the **final 1–3% of the test**, at which point a neighbouring bearing on the same rig was failing. The fault may have travelled through the shaft.
+Variation between sets is large. **Set 1 (4 healthy points, 138 days) gives 1.1 per point-month**
+under the two-cycle rule; Set 2 gives 34 — Set 2 is the worst case, with a neighbouring bearing
+failing on the same rig. Normal conditions look like Set 1.
 
-But "influence from adjacent equipment" is a standing condition in the field rather than an exception, so **taking 0.92 at face value is the safe reading.**
+**Isolated hits are not discarded.** They are recorded as `observation` events, and the grid score for
+every cycle accumulates as its own time series and appears on the trend chart — only the alert is withheld.
 
 > **Do not convert accelerated-life percentages into field time.** High-load accelerated tests
 > compress the propagation phase far more than the initiation phase. **There is no field validation
@@ -188,7 +216,7 @@ The one dissenting fold comes from XJTU's "healthy" label — it uses the **earl
 - **The time axis is a case study of 14 bearing channels (NASA IMS).** Do not quote the percentages without the per-bearing table
 - **Accelerated-life bias** — on Paderborn, artificially machined defects scored markedly better than real accelerated-life damage. The same bias may apply to lead time
 - The pool contains **no large, low-speed, or variable-speed machines**
-- **It has never been measured on a real machine.** The 0.92 figure above is from test rigs — measure it in silent parallel operation on your own equipment before enabling alerts
+- **It has never been measured on a real machine.** The 5.3 figure above is from test rigs — measure it in silent parallel operation on your own equipment before enabling alerts
 
 ---
 

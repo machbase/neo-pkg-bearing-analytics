@@ -44,6 +44,7 @@ export const loadBaselines = DB.loadBaselines;
 export const saveBaseline = DB.saveBaseline;
 export const deleteBaseline = DB.deleteBaseline;
 export const insertEvent = DB.insertEvent;
+export const insertBandPoint = DB.insertBandPoint;
 export const loadMonState = DB.loadMonState;
 export const saveMonState = DB.saveMonState;
 // 서버 상시감시(P5): 판정 TQL을 파일로 저장하고 Neo 타이머로 주기 실행 (앱 없이도 감시)
@@ -345,12 +346,11 @@ export async function sweepAnchors(E, eq, fromMs, toMs, n) {
   /* 후보 시각은 구간을 N등분한 각 조각의 끝 — 시작점을 쓰면 조각의 데이터를 하나도 못 본다.
      마지막 후보가 곧 지금까지 쓰던 앵커라, 이 스윕은 옛 동작을 포함한다(나빠질 수 없다).
 
-     ⚠ 롤업 RMS로 "시끄러운 곳"을 지명해 섞는 안을 재고 되물렸다(2026-08-20). 결함 근거는
-     확실히 진해졌지만(6.8일 외륜 전 기간 결함점수 2.2→29.0) **오탐이 같이 올라간다** —
-     잘 찾을수록 건전 설비의 가장 큰 순간 전이를 찾게 된다. 같은 오탐률(60%)에 맞추면
-     균등 89% vs 지명혼합 72%로 균등이 이긴다. 지속성 요건(K곳 이상 도달)으로 오탐을 눌러도
-     단발로 서는 진짜 결함이 같이 죽는다(내륜 s1-c5: 심각→양호).
-     다시 시도하기 전에 docs/scope.kr.md "시도했다가 물린 것"을 볼 것. */
+     ⚠ 롤업 RMS로 "시끄러운 곳"을 지명해 섞으면 안 된다. 결함 근거는 진해지지만
+     (6.8일 외륜 전 기간 결함점수 2.2→29.0) **오탐이 같이 올라간다** — 잘 찾을수록 건전 설비의
+     가장 큰 순간 전이를 찾게 된다. 같은 오탐률(60%)에 맞추면 균등 89% vs 지명혼합 72%로 균등이 이긴다.
+     지속성 요건(K곳 이상 도달)으로 오탐을 눌러도 단발로 서는 진짜 결함이 같이 죽는다
+     (내륜 s1-c5: 심각→양호). */
   const times = [];
   for (let i = 1; i <= N; i++) times.push(Math.round(lo + (hi - lo) * (i / N)));
 
@@ -405,8 +405,14 @@ export async function sweepAnchors(E, eq, fromMs, toMs, n) {
 export async function monPattern(eq, atMs) {
   const fs_ = Math.max(1, eq.fs || 1), fr = eq.rpm / 60;
   if (!(fr > 0) || !(eq.bearing && eq.bearing.n > 0)) return null;   // 회전수·기하 없으면 격자를 못 세운다
-  const band = VC.demodFixed(fs_);
-  if (!band) return null;                                            // 샘플레이트가 낮아 고정 대역 불성립
+  /* 고정 대역(1–5 kHz)이 Nyquist 밖이면 대역통과를 걸지 않고 전대역으로 복조한다 — 상세분석과
+     같은 규칙이다. 여기서 null을 돌려주면 등급을 켜는 축이 통째로 빠져 카드가 '판정 보류'로
+     굳는데, 같은 신호를 상세는 전대역으로 복조해 진단을 낸다(두 화면이 다른 말을 하게 된다).
+     커토그램으로 물러서지는 않는다 — 커토그램 대역 복조는 검출 12%, 대역통과를 아예 안 걸면
+     43%다(fs 6.4 kHz 재현 기준). 어설프게 고르느니 안 고르는 편이 낫다.
+     ⚠ 이 경로는 검증 풀에 표본이 없다(554건 중 0건 · 데시메이션으로 낸 값이라 실제 저샘플
+     장비의 잡음 특성과 같다는 보장이 없다) → demodSrc로 알려 근거 강도를 낮춰 표시한다. */
+  const band = VC.demodFixed(fs_) || null;
   const bf = VC.bearingFreqs(eq.rpm, eq.bearing);
   /* 필요한 **표본 수**로 잡는다 — 시간 창으로만 잡으면 벽시계 밀도가 샘플레이트와 다른 태그에서
      표본이 모자란다(적재 시 타임스탬프가 퍼진 데이터·재생 데이터가 그렇다: 20,480 표본이
@@ -444,7 +450,9 @@ export async function monPattern(eq, atMs) {
     const vel = (eq.unit === 'mm/s') ? w.values : VC.convertDomain(w.values, fs_, eq.unit || 'mm/s', 'mm/s', fr);
     isoRms = VC.bandRmsAveraged(vel, fs_, 10, 1000, 8).rms;
   } catch (e) { /* 못 재면 null — 호출측이 높이를 0으로 본다 */ }
-  return { on: r >= VC.MON_ADOPT, r: r, key: t ? t.key || '' : '', at: end, n: w.values.length, iso: isoRms };
+  // 상세와 같은 함수·같은 검출기 — 창이 25회전이라 임계만 그 창의 짝(MON_ADOPT)이다
+  return { on: VC.patternGrade(r, false, VC.MON_ADOPT) > 0, r: r, key: t ? t.key || '' : '', at: end, n: w.values.length, iso: isoRms,
+    demodSrc: band ? 'fixed' : 'wideband' };
 }
 
 // 상세분석 상세 데이터 — 파형·FFT(서버) + 포락선·켑스트럼·스펙트로그램(클라이언트 계산)
@@ -701,17 +709,15 @@ export async function liveDetail(E, eq, anchorMs, viewUnit, fromMs) {
        결함주파수가 허용오차(±1~2%)를 벗어난다. 명판은 틀려도 **일관되게** 틀려서 오히려 안정적이다.
        (NASA IMS 내륜은 실측 1×라야 말기 한 장이 잡히는데, 그 한 장을 얻자고 전체를 잃는다.)
        실측 1×(det.frMeas)는 화면 표시와 차수 라벨에만 쓴다.
-       ⚠ 이 규칙이 코드에서 깨져 있었다(2026-08-20 수정) — 중심 주파수는 명판인데 측대역 간격만
-       실측을 쓰는 혼합 기준이었고, 검증 하네스(verify-datasets.mjs)는 명판으로만 돌았다.
-       즉 554케이스 54%가 앱의 실제 동작이 아니었다. 앵커 스윕도 명판을 쓰므로,
-       앵커를 고르는 점수와 그 앵커에서 다시 내는 점수의 기준까지 어긋나 있었다. */
+       ⚠ 중심 주파수와 측대역 간격은 **같은 기준**이어야 한다. 중심만 명판·간격만 실측처럼 섞으면
+       앵커를 고르는 점수와 그 앵커에서 다시 내는 점수의 기준이 어긋난다(앵커 스윕도 명판을 쓴다). */
     const bfEnv = eq.bearing && eq.bearing.n > 0 ? VC.bearingFreqs(eq.rpm, eq.bearing) : null;
     const envMax = VC.envMaxFor(bfEnv, fr, fs);   // 500 고정이면 고속 기계의 BPFI 2차가 잘려 채택이 원천 봉쇄된다
     const fixBand = VC.demodFixed(fs);
     /* 고정 대역이 성립하지 않으면(fs가 낮아 5 kHz가 Nyquist 밖) **커토그램으로 물러서지 않는다.**
        커토그램 대역으로 복조하면 검출이 12%인데 대역통과를 아예 안 걸면 43%다(fs 6.4 kHz 재현 기준).
        어설프게 고르느니 안 고르는 편이 낫다 — 그리고 이래야 커토그램이 "참고용"이라는 화면 문구에
-       숨은 예외가 없어진다(전에는 저샘플 태그에서만 몰래 판정에 들어갔다).
+       숨은 예외가 없어진다 — 저샘플 태그에서만 몰래 판정에 들어가는 경로를 두지 않는다.
        ⚠ 이 경로는 검증 풀에 표본이 없다(554건 중 폴백을 타는 케이스 0건) — 기존 데이터를
        6.4 kHz로 데시메이션해 비교한 값이라 실제 저샘플 장비의 잡음 특성과 같다는 보장은 없다. */
     const demod = fixBand || null;
@@ -829,8 +835,8 @@ export async function loadTrendChunks(E, eq, roll) {
     // 알람이 쓰는 바로 그 함수로 구한다 — 같은 이름의 값이 두 벌이면 "알람은 났는데 차트엔 안 보이는" 상태가 된다.
     const be = Band.bandEnergy(w.values, fs, fr, fs / 2);
     /* 대역 에너지는 FFT라 창당 256샘플이 필요하고, 첨도는 표본만 있으면 난다.
-       예전엔 대역이 안 나오면 이 청크를 통째로 버려서 첨도까지 함께 사라졌다 —
-       샘플레이트가 낮은 태그(예: 44 Hz)에서 두 차트가 나란히 빈 채로 뜨던 원인이다.
+       대역이 안 나온다고 이 청크를 통째로 버리면 첨도까지 함께 사라진다 —
+       샘플레이트가 낮은 태그(예: 44 Hz)에서 두 차트가 나란히 빈 채로 뜬다.
        계열 길이는 맞춰야 하므로(x축 공유) 대역만 null로 비운다. */
     kurt.push(VC.kurtosis(w.values));
     if (be) be.vals.forEach((v, i) => bandVals[i].push(v));
