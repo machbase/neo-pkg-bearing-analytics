@@ -1,8 +1,10 @@
 // 타이머 등록 경로 검사 — 오프라인. npm run smoke에 포함.
-// 핵심 주장: 지울 것이 없으면 지우러 가지 않는다.
-// Neo는 없는 타이머 DELETE에 500을 준다. 첫 등록이 늘 그 경우라, 새 설치가 감시를 켜는 순간
-// 감시·대역·감시자가 빨간 요청을 하나씩 남긴다 — 동작은 멀쩡해서 오히려 고장으로 읽힌다.
+// Neo 타이머 API 는 JSON-RPC 2.0(`POST /web/api/rpc`)이다. 예전 REST 경로 `/web/api/timers` 는
+// 없어져서 404 가 오는데, 그 404 를 조회 실패로 삼키면 "타이머가 없다"로 읽혀 매번 새로 만들려 든다.
+// 그래서 여기서는 경로·메서드·인자 모양까지 고정한다.
 globalThis.window = globalThis;
+globalThis.localStorage = { getItem: () => 'h.e30.s', setItem() {}, removeItem() {} };
+globalThis.atob = (s) => Buffer.from(s, 'base64').toString('binary');
 const DB = (await import('../../cgi-bin/db/db.js')).default;
 
 let fail = 0;
@@ -11,150 +13,173 @@ const chk = (ok, msg, extra) => {
   else { fail++; console.error('FAIL', msg, extra || ''); }
 };
 
-// ── Neo 대역(帶域) 흉내 — 요청을 기록하고 실제 서버처럼 답한다 ─────────────
-let listed = {};        // 지금 등록돼 있는 타이머
+// ── Neo 흉내 — RPC 호출을 기록하고 실제 서버처럼 답한다 ─────────────
+let listed = {};        // 지금 등록돼 있는 타이머 (name → id)
+let nextId = 1;
 let listOk = true;      // 목록 조회가 되는가
-let createOk = true;    // 생성이 성공하는가
-let seen = [], noise = 0;   // noise = 서버가 5xx로 답한 횟수
-const res = (body, ok = true) => Promise.resolve({ ok, status: ok ? 200 : 500, json: () => Promise.resolve(body) });
+let addOk = true;
+let deleteWorks = true;   // false 면 삭제 요청을 받기만 하고 무시한다(증식 재현)
+let rpcs = [];          // {method, params}
+let files = [];
+let http5xx = 0;
+
+const res = (body, ok = true) => Promise.resolve({
+  ok, status: ok ? 200 : 500, json: () => Promise.resolve(body), text: () => Promise.resolve(''),
+});
 globalThis.fetch = (url, opts) => {
   const m = (opts && opts.method) || 'GET';
-  seen.push(m + ' ' + url);
-  if (url === '/web/api/login') return res({ success: true, accessToken: 'tok' });
-  if (url.startsWith('/web/api/files')) return res({ success: true });
-  if (url === '/web/api/timers' && m === 'GET') {
-    if (!listOk) { noise++; return res({ success: false, reason: 'boom' }, false); }
-    return res({ data: Object.keys(listed).map((n) => ({ name: n, state: 'RUNNING' })) });
+  if (String(url).startsWith('/web/api/files')) { files.push(m + ' ' + url); return res({ success: true }); }
+  if (url !== '/web/api/rpc') { http5xx++; return res({ success: false }, false); }
+  const req = JSON.parse(opts.body);
+  rpcs.push({ method: req.method, params: req.params });
+  const rpcRes = (result) => res({ jsonrpc: '2.0', id: req.id, result });
+  const rpcErr = (message) => res({ jsonrpc: '2.0', id: req.id, error: { code: -32000, message } });
+  if (req.method === 'timer.list') {
+    if (!listOk) return rpcErr('boom');
+    const out = [];
+    Object.keys(listed).forEach((nm) => listed[nm].forEach((id) =>
+      out.push({ id, name: nm, state: 'RUNNING', task: '/t.tql', schedule: '@every 3s' })));
+    return rpcRes(out);
   }
-  if (url === '/web/api/timers' && m === 'POST') {
-    if (!createOk) return res({ success: false, reason: 'duplicate name' });
-    listed[JSON.parse(opts.body).name] = true;
-    return res({ success: true });
+  if (req.method === 'timer.add') {
+    if (!addOk) return rpcErr('duplicate name');
+    const nm = req.params[0].name;
+    (listed[nm] = listed[nm] || []).push(nextId++);
+    return rpcRes(1);
   }
-  if (m === 'DELETE') {
-    const name = url.split('/').pop();
-    if (!listed[name]) { noise++; return res({ success: false, reason: 'not found' }, false); }  // Neo가 500을 주는 자리
-    delete listed[name];
-    return res({ success: true });
+  if (req.method === 'timer.stop') return rpcRes(null);
+  if (req.method === 'timer.delete') {
+    if (!deleteWorks) return rpcRes(null);
+    Object.keys(listed).forEach((nm) => {
+      listed[nm] = listed[nm].filter((id) => id !== req.params[0]);
+      if (!listed[nm].length) delete listed[nm];
+    });
+    return rpcRes(null);
   }
-  return res({ success: true });
+  return rpcErr('unknown method ' + req.method);
 };
-const run = async (setup, known, opt) => {
-  listed = {}; listOk = true; createOk = !(opt && opt.createFails); seen = []; noise = 0;
-  Object.assign(listed, setup || {});
-  seen = [];  // 로그인·인증파일 확인은 첫 회차에만 나므로 계산에서 뺀다
-  await DB.createMonitorTimer('SQL()', '@every 10s', known).catch((e) => { seen.push('THROW ' + e.message); });
-  return {
-    del: seen.filter((s) => s.startsWith('DELETE')).length,
-    stop: seen.filter((s) => /^POST .*\/state$/.test(s)).length,
-    get: seen.filter((s) => s === 'GET /web/api/timers').length,
-    post: seen.filter((s) => s === 'POST /web/api/timers').length,
-    file: seen.filter((s) => s.includes('/cgi-bin/monitor.tql')).length,
-    threw: seen.some((s) => s.startsWith('THROW')),
-    noise, seen,
-  };
-};
-await run({}, 'absent');   // 로그인 왕복을 미리 끝내 둔다 — 이후 계산에 섞이지 않게
+const reset = () => { rpcs = []; files = []; http5xx = 0; };
+const only = (m) => rpcs.filter((r) => r.method === m);
 
-// ── 1. 켜는 순간 — 없다는 것을 이미 안다 ──────────────────────────────────
+console.log('\n== 첫 등록 — 지울 것이 없다 ==');
 {
-  const r = await run({}, 'absent');
-  chk(r.file === 1 && r.post === 1, 'TQL을 쓰고 등록한다', `파일 ${r.file} · 등록 ${r.post}`);
-  chk(r.del === 0, '없는 타이머를 지우러 가지 않는다', `DELETE ${r.del}건`);
-  chk(r.get === 0, '아는 것을 다시 조회하지 않는다', `GET ${r.get}건`);
-  chk(r.noise === 0, '5xx 응답이 하나도 없다', `${r.noise}건`);
+  reset(); listed = {};
+  await DB.createMonitorTimer('SCRIPT({})', '@every 3s');
+  chk(files.length === 1 && only('timer.add').length === 1, 'TQL을 쓰고 등록한다', `파일 ${files.length} · 등록 ${only('timer.add').length}`);
+  chk(only('timer.delete').length === 0 && only('timer.stop').length === 0, '없는 타이머를 지우러 가지 않는다');
+  /* 등록 전에 반드시 목록을 본다 — 부르는 쪽의 "없음 확인"을 믿고 건너뛰면 그 판단이 한 번만
+     틀려도 같은 이름이 한 벌 더 생긴다. Neo 는 이름 중복을 막지 않아 그대로 쌓인다. */
+  chk(only('timer.list').length === 1, '등록 전에 목록을 확인한다');
+  chk(http5xx === 0, 'REST 경로로 새지 않는다');
 }
 
-// ── 2. 설정을 바꿔 다시 굽는다 — 우리가 만든 것이 돌고 있다 ────────────────
+console.log('\n== 인자 모양 — 여기가 틀리면 조용히 404/Parse error ==');
 {
-  const r = await run({ NEO_VIBE_MONITOR: true }, 'present');
-  chk(r.del === 1 && r.post === 1, '있는 것을 지우고 다시 만든다', `DELETE ${r.del} · POST ${r.post}`);
-  chk(r.get === 0, '아는 상태면 조회하지 않는다', `GET ${r.get}건`);
-  chk(r.noise === 0, '5xx 응답 없음', `${r.noise}건`);
-
-  /* 멈추고 지운다 — 삭제만으로 실행 중인 회차가 멎는다는 보장이 없다. 안 멎으면 목록에서
-     사라진 채 계속 도는데, 중복 실행 잠금이 그걸 가려 조용히 skip만 뱉는다.
-     설정을 바꿀 때마다 교체하므로 한 번만 새도 옛 스펙 인스턴스가 계속 쌓인다. */
-  chk(r.stop === 1, '지우기 전에 멈춘다', `stop ${r.stop}건`);
-  const iStop = r.seen.findIndex((s) => /\/state$/.test(s));
-  const iDel = r.seen.findIndex((s) => s.startsWith('DELETE'));
-  chk(iStop >= 0 && iDel >= 0 && iStop < iDel, '정지가 삭제보다 먼저 간다', r.seen.filter((s) => /state|DELETE/.test(s)).join(' → '));
+  reset(); listed = {};
+  await DB.createMonitorTimer('SCRIPT({})', '@every 7s');
+  const add = only('timer.add')[0];
+  chk(Array.isArray(add.params), 'params 는 배열이다 (객체면 Parse error)');
+  const a = add.params[0];
+  chk(a && typeof a.name === 'string' && a.name.length > 0, 'name 을 보낸다', a && a.name);
+  chk(a && a.spec === '@every 7s', 'schedule 이 아니라 spec 으로 보낸다', a && JSON.stringify(a.spec));
+  chk(a && typeof a.command === 'string' && /\.tql$/.test(a.command), 'path 가 아니라 command 로 보낸다', a && a.command);
+  chk(a && a.autoStart === true, 'autoStart 를 켠다');
 }
 
-// ── 3. 모르는 상태(앱을 새로 열었다) — 한 번 읽고 판단한다 ─────────────────
+console.log('\n== 이미 있는 것 — 멈추고 지우고 다시 만든다 ==');
 {
-  const r = await run({}, null);
-  chk(r.get === 1 && r.del === 0 && r.post === 1, '목록에 없으면 삭제를 건너뛴다', `GET ${r.get} · DELETE ${r.del}`);
-  chk(r.noise === 0, '5xx 응답 없음', `${r.noise}건`);
-
-  const r2 = await run({ NEO_VIBE_MONITOR: true }, null);
-  chk(r2.get === 1 && r2.del === 1 && r2.post === 1, '목록에 있으면 지운 뒤 만든다', `GET ${r2.get} · DELETE ${r2.del}`);
-  chk(r2.noise === 0, '5xx 응답 없음', `${r2.noise}건`);
+  reset(); listed = {}; listed[DB.monTimer()] = [42];
+  await DB.createMonitorTimer('SCRIPT({})', '@every 3s');
+  chk(only('timer.delete').length === 1 && only('timer.add').length === 1, '있는 것을 지우고 다시 만든다',
+    `delete ${only('timer.delete').length} · add ${only('timer.add').length}`);
+  chk(only('timer.stop').length === 1, '지우기 전에 멈춘다');
+  const si = rpcs.findIndex((r) => r.method === 'timer.stop');
+  const di = rpcs.findIndex((r) => r.method === 'timer.delete');
+  chk(si >= 0 && di > si, '정지가 삭제보다 먼저 간다');
+  // 이름이 아니라 id 로 지운다 — 이름을 보내면 unmarshal 오류가 나고 타이머가 남는다
+  chk(only('timer.stop')[0].params[0] === 42 && only('timer.delete')[0].params[0] === 42, 'id 로 멈추고 지운다',
+    JSON.stringify(only('timer.delete')[0].params));
+  chk(http5xx === 0, 'REST 경로로 새지 않는다');
 }
 
-// ── 4. 목록을 못 읽으면 지워 본다 ──────────────────────────────────────────
+console.log('\n== 상태를 모를 때 — 목록을 한 번 읽는다 ==');
 {
-  /* 남아서 도는 것보다 낫다 — 확인이 안 된다고 손을 놓으면 옛 코드가 계속 판정한다.
-     이때만 500이 날 수 있는데, 그건 조회가 이미 실패한 상황이라 소음이 아니라 증상이다. */
-  listed = {}; listOk = false; createOk = true; seen = []; noise = 0;
-  await DB.createMonitorTimer('SQL()', '@every 10s', null);
-  chk(seen.filter((s) => s.startsWith('DELETE')).length === 1, '상태를 모르면 지워 본다');
+  reset(); listed = {};
+  await DB.createMonitorTimer('SCRIPT({})', '@every 3s');
+  chk(only('timer.list').length === 1 && only('timer.delete').length === 0, '목록에 없으면 삭제를 건너뛴다',
+    `list ${only('timer.list').length} · delete ${only('timer.delete').length}`);
+
+  reset(); listed = {}; listed[DB.monTimer()] = [7];
+  await DB.createMonitorTimer('SCRIPT({})', '@every 3s');
+  /* 조회가 두 번인 이유: 지우기 전에 한 번, 정말 사라졌는지 확인하러 한 번.
+     확인을 빼면 삭제 실패가 그대로 중복 등록이 된다. */
+  chk(only('timer.list').length === 2 && only('timer.delete').length === 1, '목록에 있으면 지운 뒤 만든다',
+    `list ${only('timer.list').length} · delete ${only('timer.delete').length}`);
+  chk(only('timer.add').length === 1, '지운 뒤에만 만든다');
 }
 
-// ── 5. 아는 것이 틀렸으면 실패로 돌려준다 ──────────────────────────────────
+console.log('\n== 같은 이름이 여러 벌 쌓였을 때 ==');
 {
-  /* 다른 세션이 만들어 둔 경우다. 조용히 넘기면 옛 타이머가 새 설정인 척 계속 돈다 —
-     호출측이 서명을 비우고 다음 회차에 '모름' 경로로 되돌아오도록 예외를 낸다. */
-  const r = await run({ NEO_VIBE_MONITOR: true }, 'absent', { createFails: true });
-  chk(r.threw, '생성 실패는 삼키지 않는다', r.seen.join(' · '));
+  /* 실제로 세 벌까지 쌓였다 — 하나만 지우면 나머지가 같은 TQL 을 계속 돌리며 잠금을 서로 뺏는다.
+     화면에는 그냥 "타이머가 돈다"로 보여 원인을 못 찾는다. */
+  reset(); listed = {}; listed[DB.monTimer()] = [11, 12, 13];
+  await DB.createMonitorTimer('SCRIPT({})', '@every 3s');
+  chk(only('timer.delete').length === 3, '중복을 전부 지운다', `delete ${only('timer.delete').length}`);
+  chk(only('timer.stop').length === 3, '지우기 전에 각각 멈춘다');
+  chk(only('timer.delete').map((r) => r.params[0]).sort().join(',') === '11,12,13', '세 id 를 모두 지운다',
+    only('timer.delete').map((r) => r.params[0]).join(','));
+  chk(listed[DB.monTimer()].length === 1, '끝나면 한 벌만 남는다', JSON.stringify(listed[DB.monTimer()]));
 }
 
-// ── 6. 세 타이머가 같은 경로를 쓴다 ────────────────────────────────────────
+console.log('\n== 지우지 못하면 만들지 않는다 ==');
 {
-  const fs = await import('node:fs');
-  const src = fs.readFileSync(new URL('../../cgi-bin/db/db.js', import.meta.url), 'utf8');
-  ['createMonitorTimer', 'createBandTimer', 'createWdTimer'].forEach((fn) => {
-    const i = src.indexOf('function ' + fn + '(');
-    const body = i >= 0 ? src.slice(i, i + 260) : '';
-    chk(i >= 0 && /putTimer\(/.test(body) && /known/.test(body), fn + '이 putTimer로 등록한다');
-  });
+  /* 삭제가 듣지 않는 서버에서 그냥 만들면 같은 이름이 한 벌씩 늘어난다(실측: 다섯 벌).
+     지웠는지 확인하고, 안 지워졌으면 등록을 중단해야 증식이 멈춘다. */
+  reset(); listed = {}; listed[DB.monTimer()] = [21];
+  const keep = listed[DB.monTimer()].slice();
+  const origDel = 'timer.delete';
+  deleteWorks = false;                       // 삭제가 무시되는 서버를 흉내낸다
+  let threw = null;
+  await DB.createMonitorTimer('SCRIPT({})', '@every 3s').catch((e) => { threw = e; });
+  deleteWorks = true;
+  chk(threw !== null, '지우지 못하면 에러로 올린다', threw && String(threw.message).slice(0, 40));
+  chk(only('timer.add').length === 0, '지우지 못하면 만들지 않는다 — 여기가 증식의 차단점');
+  chk(listed[DB.monTimer()].join(',') === keep.join(','), '원래 있던 것은 그대로 둔다');
 }
 
-// ── 7. 앱이 아는 것을 실제로 넘기는가 ──────────────────────────────────────
+console.log('\n== 조회가 안 될 때 ==');
 {
-  /* 위 검사는 "이렇게 부르면 맞다"까지만 본다. 인자를 안 넘기면 전부 '모름' 경로로 떨어져
-     조회가 하나씩 붙는다 — 검사는 통과하는데 요청은 안 줄어든다. */
-  const fs = await import('node:fs');
-  const app = fs.readFileSync(new URL('../src/app.js', import.meta.url), 'utf8');
-  const bodyOf = (m) => { const i = app.indexOf('\n  ' + m + '(silent) {'); return i < 0 ? '' : app.slice(i, i + 2600); };
-  [['_syncMonitorTimer', 'createMonitorTimer', '_specSig'], ['_syncBandTimer', 'createBandTimer', '_bandSig'],
-    ['_syncWdTimer', 'createWdTimer', '_wdSig']].forEach(([m, fn, sig]) => {
-    const body = bodyOf(m);
-    const call = body.split('\n').find((l) => l.includes(fn + '('));
-    chk(body.includes("_timerKnown('" + sig + "')") && !!call && /,\s*[^)]+,\s*[^)]+\)/.test(call),
-      m + '이 ' + sig + ' 기억을 등록에 넘긴다', call && call.trim());
-  });
-  /* 감시자만 서명을 등록 전에 대입한다 — 그 뒤에 읽으면 방금 넣은 값이라 늘 '있음'이 되고,
-     첫 등록에서 500이 그대로 난다. */
-  const wdBody = bodyOf('_syncWdTimer');
-  chk(wdBody.indexOf("_timerKnown('_wdSig')") < wdBody.indexOf('this._wdSig = sig'),
-    '감시자는 서명을 넣기 전에 기억을 읽는다');
+  reset(); listed = {}; listOk = false;
+  await DB.createMonitorTimer('SCRIPT({})', '@every 3s');
+  listOk = true;
+  // 상태를 모르면 지워 본다 — 남아 있는데 안 지우면 옛 스펙이 계속 돈다
+  chk(only('timer.add').length === 1, '조회 실패해도 등록은 한다');
 }
 
-// ── 8. 언인스톨 안전망이 만든 타이머 전부를 지우는가 ──────────────────────
+console.log('\n== 생성 실패 ==');
 {
-  /* 앱을 거치지 않고 Neo UI에서 바로 제거하면 이 스크립트가 유일한 정리 지점이다.
-     빠뜨린 타이머는 실행할 TQL이 패키지와 함께 사라진 채로 목록에 남아 주기마다 실패한다.
-     이름이 db.js와 갈라져도 같은 결과라 두 목록을 대조한다. */
-  const fs = await import('node:fs');
-  const db = fs.readFileSync(new URL('../../cgi-bin/db/db.js', import.meta.url), 'utf8');
-  const un = fs.readFileSync(new URL('../../scripts/uninstall.js', import.meta.url), 'utf8');
-  const names = ['MON_TIMER', 'BAND_TIMER', 'WD_TIMER'].map((v) => {
-    const m = new RegExp('var ' + v + " = '([^']+)'").exec(db);
-    return m && m[1];
-  });
-  chk(names.every(Boolean), 'db.js에서 타이머 이름 셋을 읽는다', String(names));
-  names.forEach((n) => chk(!!n && un.includes("'" + n + "'"), 'uninstall이 ' + n + '을 지운다'));
+  reset(); listed = {}; addOk = false;
+  let threw = false;
+  await DB.createMonitorTimer('SCRIPT({})', '@every 3s', 'absent').catch(() => { threw = true; });
+  addOk = true;
+  chk(threw, '생성 실패는 삼키지 않는다 — 호출측이 배너를 띄워야 한다');
+}
+
+console.log('\n== 상태 조회 ==');
+{
+  reset(); listed = {}; listed['NEO_BEARING_MONITOR_JOY'] = [3];
+  const m = await DB.timerStates();
+  chk(m && m['NEO_BEARING_MONITOR_JOY'] && m['NEO_BEARING_MONITOR_JOY'].state === 'RUNNING', '이름으로 찾을 수 있게 돌려준다');
+  chk(m['NEO_BEARING_MONITOR_JOY'].id === 3, 'id 를 같이 준다 — 삭제에 필요하다');
+  // 같은 이름이 여럿이면 전부 들고 있어야 한다 — 하나만 기억하면 나머지를 영영 못 지운다
+  reset(); listed = {}; listed['NEO_BEARING_MONITOR_JOY'] = [3, 4, 5];
+  const d = await DB.timerStates();
+  chk(d['NEO_BEARING_MONITOR_JOY'].ids.join(',') === '3,4,5', '중복된 id 를 모두 돌려준다',
+    JSON.stringify(d['NEO_BEARING_MONITOR_JOY'].ids));
+  reset(); listOk = false;
+  const n = await DB.timerStates();
+  listOk = true;
+  chk(n === null, '조회 실패는 null(상태 모름) — 빈 목록으로 접지 않는다', String(n));
 }
 
 console.log(fail ? `\n=== FAIL ${fail}건 ===` : '\n=== 전부 통과 ===');

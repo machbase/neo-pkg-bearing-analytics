@@ -28,7 +28,7 @@ Monitoring runs on **two cadences**. One is fast and cheap; the other is slow an
                             │
           ┌─────────────────┴─────────────────┐
           │                                   │
-    every 10 s (cheap)              every 10 min (expensive)
+    every 3 s (cheap)               every 10 min (expensive)
     one window RMS                FFT → envelope → fault-frequency grid
           │                                   │
           ├── running / stopped               ├── fault pattern (gate)
@@ -49,6 +49,8 @@ Monitoring runs on **two cadences**. One is fast and cheap; the other is slow an
 **Events come only from the right-hand axis.** The left-hand axis only **stops** judgment (stopped, lost, instrumentation fault) and **fills in evidence**.
 
 ### Why two cadences
+
+In this document, the **10-second axis** is the name for the fast axis — taken from the default RMS window (10 s); it actually runs at the judgment interval (3 s by default).
 
 | | 10-second axis | 10-minute axis |
 | :--- | :--- | :--- |
@@ -83,10 +85,10 @@ Vibration fluctuates moment to moment, so judging on one point makes the value j
 | Setting | Meaning | Default |
 | :--- | :--- | :--- |
 | RMS window | how much data is combined into one value | last 10 s |
-| Judgment interval | how often the judgment runs | every 10 s |
+| Judgment interval | how often the judgment runs | every 3 s |
 | Pattern/band extraction interval | how often the fault pattern is computed | **every 10 min** |
 
-The first two are adjustable, and the current values are the floor — nothing shorter is available. The third is adjustable too, but only **upward** (10 min – 1 h). Shorter and the server cannot keep up with its own interval.
+The first two are set in alarm settings (RMS window 3 s – 1 h, judgment interval 1 s – 1 min). The third is adjustable too, but only **upward** (10 min – 1 h). Shorter and the server cannot keep up with its own interval.
 
 A **longer** window merges brief excursions into a single state — slower to react, but steadier. If the window is shorter than the interval, data falls between judgments and the screen warns about it.
 
@@ -314,7 +316,7 @@ recovered     grid 2.2 · cleared after 4 h 20 min
 
 ### Every cycle's judgment goes to a time series
 
-Events record only **what changed**. Isolated hits that never reach confirmation, and stretches where the score hovers near the adoption line, live in the **grid score series** instead — one point per 10 minutes in the same table as the band values (`NEO_VIBE_BAND`).
+Events record only **what changed**. Isolated hits that never reach confirmation, and stretches where the score hovers near the adoption line, live in the **grid score series** instead — one point per 10 minutes in the same table as the band values (`BAND`).
 
 On the trend chart that reads:
 
@@ -476,4 +478,4 @@ It settles why two reports differ.
 
 - [Previous: Alarms and events](./alarms.en.md)
 - [Back to contents](./index.en.md)
-- [Next: Troubleshooting](./troubleshooting.en.md)
+- [Next: Fault types and signatures](./faults.en.md)

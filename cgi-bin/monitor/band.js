@@ -1,5 +1,5 @@
 // monitor/band.js — 대역 에너지 추출 TQL 생성기.
-// 선택된 태그마다 짧은 원시 창을 서버에서 FFT해 대역 RMS를 구하고 NEO_VIBE_BAND(TAG)에 적재한다.
+// 선택된 태그마다 짧은 원시 창을 서버에서 FFT해 대역 RMS를 구하고 BAND(TAG)에 적재한다.
 //
 // 왜 서버에서 하나: 대역값 하나를 얻으려고 원시 11 MB를 브라우저로 옮길 이유가 없다.
 //   서버에서 계산하면 숫자 6개만 오간다. 앱이 닫혀 있어도 추세가 이어져야 하므로 타이머로 돈다.
@@ -230,7 +230,7 @@
   }
 
   /* spec: { tags:[{tbl,tag,fr,fs}], nowMs, anchors } → 자체 완결형 TQL 문자열.
-     태그마다 SQL→FFT→SCRIPT 블록을 만들고, 결과를 NEO_VIBE_BAND에 INSERT 한다.
+     태그마다 SQL→FFT→SCRIPT 블록을 만들고, 결과를 BAND에 INSERT 한다.
      dryRun이면 INSERT 대신 $.yield로 값만 방출(검증용).
 
      anchors(ms 배열)를 주면 각 시각을 창의 끝으로 삼아 그만큼 반복한다 — 과거 채우기(백필)용.
@@ -245,6 +245,15 @@
     // (FFT() 스테이지는 파이프라인당 하나뿐이라 태그마다 파이프를 만들 수 없다 → goja에서 직접 FFT)
     var body = [
       'SCRIPT({',
+      // 앱 저장소는 계정 스키마에 있다 — 접두가 없으면 서버가 다른 테이블을 보게 된다
+      'var TBLP=' + JSON.stringify(spec.tblPrefix || '') + ';',
+      'var UPFX=' + JSON.stringify(spec.keyPrefix || '') + ';',
+      /* 데이터 표는 대개 남(SYS)의 소유다 — 접두 없는 이름은 접속 계정 스키마에서 찾으므로
+         타이머가 SYS 가 아니면 조용히 "없는 표"가 되어 회차가 0건으로 끝난다(try/catch 가 삼킨다).
+         키는 짧은 이름을 그대로 쓰고, 조회할 때만 수식된 이름으로 바꾼다. */
+      'var SRC=' + JSON.stringify(spec.srcMap || {}) + ';',
+      'function srcOf(t){ return SRC[t]||t; }',
+      'function statOf(t){ var s=srcOf(t), i=s.lastIndexOf("."); return i<0 ? "V$"+s+"_STAT" : s.slice(0,i+1)+"V$"+s.slice(i+1)+"_STAT"; }',
       'var TAGS=' + JSON.stringify(tags.map(function (t) {
         // demod·bf는 앱이 정해 값으로 굽는다 — 서버는 커토그램도 베어링 형상표도 갖고 있지 않다
         return { tbl: t.tbl, tag: t.tag, fr: t.fr, fs: t.fs, win: Math.pow(2, WIN_POW),
@@ -260,6 +269,9 @@
       /* 백필 앵커의 격자 간격. 앵커가 수집 공백에 떨어졌을 때 되짚을 범위이자, 이미 채운 칸을
          가려내는 단위다. 타이머 경로는 앵커가 MAX_TIME 하나뿐이라 0(되짚기·구간 중복검사 없음). */
       'var GRID=' + (spec.anchors && spec.anchors.length ? Math.max(0, Number(spec.grid) || 0) : 0) + ';',
+      /* 회차 전체를 감싼다 — 예외가 밖으로 나가면 Neo 가 타이머를 STOP 으로 두고 재시도하지 않는다.
+         대역 추출은 원본을 읽고 FFT 까지 돌아 실패할 자리가 많다. */
+      'try {',
       'var db=$.db(), now=' + (Number(spec.nowMs) || Date.now()) + ', nOk=0;',
       'function esc(s){return String(s).replace(/\'/g,"\'\'");}',
       // 시각 문자열(밀리초 포함) — sqlDate와 같은 규약
@@ -281,7 +293,7 @@
       /* 없는 테이블·태그는 그 태그만 건너뛴다 — 태그 목록이 값으로 구워져 있어, 소스가 바뀌거나
          옛 TQL이 남으면 이 조회가 예외를 던진다. 감싸지 않으면 스크립트가 통째로 끝나
          멀쩡한 나머지 태그의 대역 추출까지 멈춘다(타이머는 STOP으로 죽는다). */
-      '    try { db.query("select MAX_TIME from V$"+t.tbl+"_STAT where NAME=\'"+esc(t.tag)+"\'").forEach(function(r){ mx=tms(r[0]); }); } catch(e) { return; }',
+      '    try { db.query("select MAX_TIME from "+statOf(t.tbl)+" where NAME=\'"+esc(t.tag)+"\'").forEach(function(r){ mx=tms(r[0]); }); } catch(e) { return; }',
       '    if(!(mx>0)) return;',
       '    anch=[mx];',
       '  }',
@@ -300,14 +312,14 @@
       /* 되짚기가 붙으면 저장 시각이 앵커와 달라진다 — 앵커 한 점만 보면 매번 못 찾아 같은 구간을
          다시 계산하고 값이 쌓인다. 그래서 백필은 격자 한 칸 안에 이미 값이 있는지로 판단한다. */
       dry ? '' : '  var seen=0, dLo = GRID>0 ? (maxMs-GRID) : maxMs;',
-      dry ? '' : '  try { db.query("select count(*) from NEO_VIBE_BAND where NAME=\'"+esc(t.tbl+":"+t.tag+":"+NAMES[0])+"\' and TIME between to_date(\'"+dt(dLo)+"\') and to_date(\'"+dt(maxMs)+"\')")',
+      dry ? '' : '  try { db.query("select count(*) from "+TBLP+"BAND where NAME=\'"+esc(UPFX+t.tbl+":"+t.tag+":"+NAMES[0])+"\' and TIME between to_date(\'"+dt(dLo)+"\') and to_date(\'"+dt(maxMs)+"\')")',
       // 표가 아직 없거나 조회가 실패하면 중복을 감수하고 진행한다 — 감시가 통째로 죽는 것보다 낫다
       dry ? '' : '    .forEach(function(r){ seen=+r[0]; }); } catch(e) { seen=0; }',
       dry ? '' : '  if(seen>0) return;',
       '  var fromMs = maxMs - durMs;',
       '  var vals=[];',
       // 원본 조회도 같다 — 없는 테이블이면 이 앵커만 버리고 다음 태그로 간다
-      '  try { db.query("select VALUE from "+t.tbl+" where NAME=\'"+esc(t.tag)+"\' and TIME between to_date(\'"+dt(fromMs)+"\') and to_date(\'"+dt(maxMs)+"\') order by TIME")',
+      '  try { db.query("select VALUE from "+srcOf(t.tbl)+" where NAME=\'"+esc(t.tag)+"\' and TIME between to_date(\'"+dt(fromMs)+"\') and to_date(\'"+dt(maxMs)+"\') order by TIME")',
       '    .forEach(function(r){ vals.push(+r[0]); }); } catch(e) { return; }',
       /* 간헐 수집(예: 10분마다 1초) 대응 — 백필 앵커는 벽시계 격자(정각·10분·20분…)에 맞춰 만들어지는데
          수집 시각은 그 격자와 무관하다. 그대로 두면 앵커가 거의 전부 수집 공백에 떨어져 백필이 한 건도
@@ -318,13 +330,13 @@
          타이머 경로(GRID=0)는 앵커가 이미 MAX_TIME이라 되짚을 필요가 없어 건너뛴다. */
       '  if(vals.length < 1024 && GRID > 0){',
       '    var snapMs=0;',
-      '    try { db.query("select ROLLUP(\'sec\',1,TIME) RT, COUNT(VALUE) CNT from "+t.tbl+" where NAME=\'"+esc(t.tag)+"\' and TIME between to_date(\'"+dt(maxMs-GRID)+"\') and to_date(\'"+dt(maxMs)+"\') group by RT order by RT desc limit 1")',
+      '    try { db.query("select ROLLUP(\'sec\',1,TIME) RT, COUNT(VALUE) CNT from "+srcOf(t.tbl)+" where NAME=\'"+esc(t.tag)+"\' and TIME between to_date(\'"+dt(maxMs-GRID)+"\') and to_date(\'"+dt(maxMs)+"\') group by RT order by RT desc limit 1")',
       '      .forEach(function(r){ if(+r[1]>0) snapMs=tms(r[0]); }); } catch(e) { snapMs=0; }',
       '    if(snapMs>0){',
       '      maxMs = snapMs + 1000;',   // 그 초의 끝까지 창에 넣는다
       '      fromMs = maxMs - durMs;',
       '      vals=[];',
-      '      try { db.query("select VALUE from "+t.tbl+" where NAME=\'"+esc(t.tag)+"\' and TIME between to_date(\'"+dt(fromMs)+"\') and to_date(\'"+dt(maxMs)+"\') order by TIME")',
+      '      try { db.query("select VALUE from "+srcOf(t.tbl)+" where NAME=\'"+esc(t.tag)+"\' and TIME between to_date(\'"+dt(fromMs)+"\') and to_date(\'"+dt(maxMs)+"\') order by TIME")',
       '        .forEach(function(r){ vals.push(+r[0]); }); } catch(e) { return; }',
       '    }',
       '  }',
@@ -346,11 +358,11 @@
       '    var v=vv.vals[b];',
       dry
         ? '    $.yield("band", t.tbl+":"+t.tag+":"+NAMES[b], v);'
-        : '    db.exec("insert into NEO_VIBE_BAND values(\'"+esc(t.tbl+":"+t.tag+":"+NAMES[b])+"\', to_date(\'"+ts+"\'), "+v+")");',
+        : '    db.exec("insert into "+TBLP+"BAND values(\'"+esc(UPFX+t.tbl+":"+t.tag+":"+NAMES[b])+"\', to_date(\'"+ts+"\'), "+v+")");',
       '  }',
       dry
         ? '  $.yield("fr", t.tbl+":"+t.tag+":fr", fr);'
-        : '  db.exec("insert into NEO_VIBE_BAND values(\'"+esc(t.tbl+":"+t.tag+":fr")+"\', to_date(\'"+ts+"\'), "+fr+")");',
+        : '  db.exec("insert into "+TBLP+"BAND values(\'"+esc(UPFX+t.tbl+":"+t.tag+":fr")+"\', to_date(\'"+ts+"\'), "+fr+")");',
       /* 포락선 지표 — 결함주파수 4종은 베어링 품번이 있을 때만 넣는다.
          측정 불가 대역을 0으로 남기는 규칙(위)과 다른 이유: 대역은 샘플레이트가 정하는 물리적
          사실이라 "잴 수 없음"과 "안 돌았음"을 구분해 둘 값이 있지만, 품번 미지정은 설정 화면에서
@@ -362,7 +374,7 @@
       '      if(!(ev>=0)) continue;',
       dry
         ? '      $.yield("env", t.tbl+":"+t.tag+":"+EK[q][0], ev);'
-        : '      db.exec("insert into NEO_VIBE_BAND values(\'"+esc(t.tbl+":"+t.tag+":"+EK[q][0])+"\', to_date(\'"+ts+"\'), "+ev+")");',
+        : '      db.exec("insert into "+TBLP+"BAND values(\'"+esc(UPFX+t.tbl+":"+t.tag+":"+EK[q][0])+"\', to_date(\'"+ts+"\'), "+ev+")");',
       '    }',
       '  }',
       '  nOk++;',
@@ -370,10 +382,9 @@
       '});',
       /* 심박과 상호 감시 — 타이머로 돌 때만 붙인다(백필·미리보기는 타이머가 아니다).
          대역 값이 안 쌓이는 회차에도 심박은 남긴다: 상대가 보는 것은 "돌았는가"지 "일했는가"가 아니다. */
-      (!dry && spec.wd) ? WD.wdSrc(spec.wd).join('\n') : '',
-      (!dry && spec.wd) ? WD.hbSrc(spec.wd.selfHb, 'nOk') : '',
-      (!dry && spec.wd) ? 'var _wd=wdTick(db);' : '',
+      (!dry && spec.selfHb) ? WD.hbOnlySrc(spec.selfHb, 'nOk') : '',
       '$.yield("done", now, nOk);',
+      '} catch(e) { $.yield("error", Date.now(), 0); }',
       '})',
       'CSV()',
     ];

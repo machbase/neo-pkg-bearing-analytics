@@ -166,7 +166,7 @@ await L.saveConfig(prev || {}, AUTH); // 원상 복구
   await L.saveMonState('ZZ:SMOKE', { g: 2, b: true, rms: 3.14, ms: 1 });
   let ms = await L.loadMonState();
   ok(ms['ZZ:SMOKE'] && ms['ZZ:SMOKE'].g === 2 && ms['ZZ:SMOKE'].b === true, '판정상태 저장→조회');
-  await DB.q("DELETE FROM NEO_VIBE_MONSTATE WHERE K='ZZ:SMOKE'");
+  await DB.q("DELETE FROM MONSTATE WHERE K='ZZ:SMOKE'");
 }
 
 process.exit(fail ? 1 : 0);

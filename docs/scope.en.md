@@ -251,3 +251,9 @@ Compared at a fixed false-positive rate. **Read this table before trying any of 
 - [Fault types and signatures](./faults.en.md) — which faults are distinguished, on what evidence
 - [How detection works](./detection.en.md) — the gate structure and the two cadences
 - [Alarms and events](./alarms.en.md) — the alarm state machine and suppression
+
+## Navigation
+
+- [Previous: Fault types and signatures](./faults.en.md)
+- [Back to contents](./index.en.md)
+- [Next: Troubleshooting](./troubleshooting.en.md)

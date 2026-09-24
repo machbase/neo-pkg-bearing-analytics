@@ -14,15 +14,15 @@ const jget = (u, o) => fetch(NEO + u, o).then((r) => r.text());
 // 프로브 tql — 현재 ms를 MONSTATE 마커에 upsert (이벤트 무관, LOOKUP PK 삭제 가능해 정리 쉬움)
 const probeTql = 'SCRIPT({\n'
   + '  var db=$.db(), t=Date.now();\n'
-  + "  db.exec(\"delete from NEO_VIBE_MONSTATE where K='" + KEY + "'\");\n"
-  + "  db.exec(\"insert into NEO_VIBE_MONSTATE values('" + KEY + "','\"+t+\"')\");\n"
+  + "  db.exec(\"delete from MONSTATE where K='" + KEY + "'\");\n"
+  + "  db.exec(\"insert into MONSTATE values('" + KEY + "','\"+t+\"')\");\n"
   + '  $.yield(t);\n'
   + '})\nCSV()';
 
 let pass = 0, fail = 0;
 const check = (n, c) => { if (c) pass++; else { fail++; console.log('  ✗ ' + n); } };
 async function readMarker() {
-  const sql = "select VAL from NEO_VIBE_MONSTATE where K='" + KEY + "'";
+  const sql = "select VAL from MONSTATE where K='" + KEY + "'";
   const t = await jget('/db/query?q=' + encodeURIComponent(sql) + '&format=json&timeformat=ms');
   try { const j = JSON.parse(t); return (j.data && j.data.rows && j.data.rows[0]) ? Number(j.data.rows[0][0]) : 0; } catch (e) { return 0; }
 }
@@ -45,7 +45,7 @@ try {
   // 4) 정리 — 타이머·프로브파일·마커행 제거
   await fetch(NEO + '/web/api/timers/' + TIMER, { method: 'DELETE', headers: H }).then((r) => r.text()).catch(() => {});
   await fetch(NEO + '/web/api/files' + PROBE_PATH, { method: 'DELETE', headers: H }).then((r) => r.text()).catch(() => {});
-  await jget('/db/query?q=' + encodeURIComponent("delete from NEO_VIBE_MONSTATE where K='" + KEY + "'"));
+  await jget('/db/query?q=' + encodeURIComponent("delete from MONSTATE where K='" + KEY + "'"));
   const gone = await jget('/web/api/timers', { headers: H });
   check('정리 후 프로브 타이머 없음', !gone.includes(TIMER));
 }

@@ -403,12 +403,18 @@
   //  · 시간 적분 대신 주파수 영역: 드리프트(적분 상수) 누적이 없고 수학적으로 동일.
   //  · 적분(오더↓) 시 저주파 드리프트를 hpHz 고역통과로 제거. 미분(오더↑)은 필터 불필요.
   //  order: 변위=0 · 속도=1 · 가속도=2 (미분할수록 order↑). SI 단위로 변환 후 계수 적용, 다시 표시 단위로.
-  var UNIT_SI = { 'g': 9.80665, 'mm/s': 1e-3, 'μm': 1e-6 }; // 표시값 × 이것 = SI(m/s²·m/s·m)
-  var UNIT_ORD = { 'g': 2, 'mm/s': 1, 'μm': 0 };
+  /* 단위 → [SI 배율, order]. 표시값 × 배율 = SI(m/s²·m/s·m).
+     ⚠ 표를 함수 안에 둔다 — convertDomain이 서버 TQL에 임베드되므로(convSrc) 모듈 상수를 참조하면
+        압축본에서 이름이 어긋나 서버에서만 ReferenceError가 난다. */
+  function unitScale(u) {
+    var T = { 'g': [9.80665, 2], 'mm/s': [1e-3, 1], 'μm': [1e-6, 0] };
+    return T[u] || null;
+  }
   function convertDomain(values, fs, fromUnit, toUnit, fr) {
     if (fromUnit === toUnit) return values.slice(0);
-    var sFrom = UNIT_SI[fromUnit], sTo = UNIT_SI[toUnit], d = UNIT_ORD[toUnit] - UNIT_ORD[fromUnit];
-    if (sFrom == null || sTo == null || d === 0) return values.slice(0);
+    var uf = unitScale(fromUnit), ut = unitScale(toUnit);
+    if (!uf || !ut || uf[1] === ut[1]) return values.slice(0);
+    var sFrom = uf[0], sTo = ut[0], d = ut[1] - uf[1];
     var n = values.length, m = 1; while (m * 2 <= n) m *= 2;
     if (m < 16 || !(fs > 0)) return values.slice(0);
     var re = new Array(m), im = new Array(m), i, mean = 0;
@@ -439,9 +445,9 @@
   }
   // 스펙트럼(진폭) 물리량 변환 — 서버 FFT mags를 표시 단위로. |(iω)^d| = ω^d 스케일.
   function convertSpectrumMags(mags, freqs, fromUnit, toUnit) {
-    var d = UNIT_ORD[toUnit] - UNIT_ORD[fromUnit];
-    if (d === 0 || UNIT_SI[fromUnit] == null || UNIT_SI[toUnit] == null) return mags.slice(0);
-    var sc = UNIT_SI[fromUnit] / UNIT_SI[toUnit];
+    var uf = unitScale(fromUnit), ut = unitScale(toUnit);
+    if (!uf || !ut || uf[1] === ut[1]) return mags.slice(0);
+    var d = ut[1] - uf[1], sc = uf[0] / ut[0];
     return mags.map(function (mg, i) { var w = 2 * Math.PI * freqs[i]; return w > 0 ? mg * sc * Math.pow(w, d) : 0; });
   }
 
@@ -1029,15 +1035,24 @@
       + ';var DEMOD_FIX=' + JSON.stringify(DEMOD_FIX) + ';var BEARING_FS_RATIO=' + BEARING_FS_RATIO
       + ';var TGT_ADOPT=' + TGT_ADOPT + ';var COMB_ADOPT=' + COMB_ADOPT + ';var COMB_M=' + COMB_M + ';'
       + embedSrc([patConst, fftComplex, amplitudeSpectrum, analyticEnvelope, envelopeSpectrum, bandpassSignal,
-        gridScore, targetedMatch, bearingFreqs, envMaxFor, demodFixed, patternGate, patternGrade],
+        gridScore, targetedMatch, bearingFreqs, envMaxFor, demodFixed, patternGate, patternGrade, patternRound],
       { envelopeSpectrum: envelopeSpectrum, targetedMatch: targetedMatch, bearingFreqs: bearingFreqs,
-        envMaxFor: envMaxFor, demodFixed: demodFixed, patternGate: patternGate, patternGrade: patternGrade });
+        envMaxFor: envMaxFor, demodFixed: demodFixed, patternGate: patternGate, patternGrade: patternGrade,
+        patternRound: patternRound });
   }
   /* 계측 게이트 임베드 — gateFromRaw가 signalQuality를, signalQuality가 kurtosis를 이름으로
      부른다. 압축되면 그 이름들이 바뀌므로 한 스코프에 같이 넣어야 한다(embedSrc가 그 일을 한다). */
   function gateSrc() {
     return embedSrc([kurtosis, signalQuality, gateFromBuckets, gateFromRaw, sensorTick, impactEvidence],
       { gateFromBuckets: gateFromBuckets, gateFromRaw: gateFromRaw, sensorTick: sensorTick, impactEvidence: impactEvidence });
+  }
+  /* 단위 변환·ISO 대역 평균 임베드 — ISO 존은 속도 규격이라 서버 감시도 가속도·변위 원본을 앱과 같은
+     함수로 속도로 바꾼 뒤 잰다. convertDomain→unitScale·fftComplex, bandRmsAveraged→bandRms→
+     bandpassSignal→fftComplex로 서로를 부르므로 한 스코프로 묶는다.
+     FFT를 두 번 도는 변환이라 goja에서 무겁다 — 호출측(monitor.js)이 TTL로 빈도를 묶는다. */
+  function convSrc() {
+    return embedSrc([unitScale, fftComplex, convertDomain, bandpassSignal, bandRms, bandRmsAveraged],
+      { convertDomain: convertDomain, bandRmsAveraged: bandRmsAveraged });
   }
 
   /* 판정을 막은 사유 하나 — 심각한 것부터. 화면이 "무엇 때문에 보류인지" 적을 때 쓴다.
@@ -1079,6 +1094,18 @@
      그리고 머신 클래스를 잘못 잡아도 오탐이 안 흔들린다 — ISO가 경보를 켜지 않으므로. */
   function patternGate(patOn, isoGi) {
     return patOn ? Math.max(1, isoGi || 0) : 0;
+  }
+  /* 이번 판정 회차의 등급 후보(rg)와 회차 식별자(cyc) — 앱 감시·서버 감시가 이 함수 하나로 정한다(patSrc 임베드).
+     결함 패턴을 잴 수 있는 태그(capable: 회전수·기하 있음)인데 이번에 결과가 없으면(첫 측정 전·조회 실패·
+     표본 부족) "판정 보류"다 — 직전 등급과 직전 회차를 그대로 넘겨 judgeTick이 전이하지 않게 한다.
+     패턴 없음(=양호)으로 읽으면 회차 식별자도 없어 틱마다 새 회차로 세어지고, 몇 초 만에 거짓 복귀가 확정된 뒤
+     다음 측정에서 다시 악화 알림이 나간다.
+     pat: {on, at} | null · prev: 직전 판정 상태 | null · hG: 높이(ISO 존 등급) → {rg, cyc, miss} */
+  function patternRound(pat, capable, prev, hG) {
+    if (!pat && capable) {
+      return { rg: prev ? (prev.g || 0) : 0, cyc: (prev && prev.cyc != null) ? prev.cyc : null, miss: true };
+    }
+    return { rg: patternGate(!!(pat && pat.on), hG), cyc: pat ? (pat.at || null) : null, miss: false };
   }
   /* 결함 패턴 축의 채택 판정 — 감시·상세·서버가 **같은 검출기(targetedMatch)**를 쓰고
      창 길이만 다르다. r은 그 격자 배수이고, 임계는 창에 맞춘 짝이다:
@@ -1794,7 +1821,7 @@
     BEARINGS: BEARINGS, bearingFreqs: bearingFreqs, faultFreqSummary: faultFreqSummary,
     toBucket: toBucket, sevMetrics: sevMetrics, kurtosis: kurtosis, fmt: fmt, timeIndics: timeIndics,
     fftComplex: fftComplex, bandKurtosis: bandKurtosis, amplitudeSpectrum: amplitudeSpectrum, envelopeSpectrum: envelopeSpectrum, analyticEnvelope: analyticEnvelope, ENV_MODE: ENV_MODE, SK_MODE: SK_MODE,
-    MON_REV: MON_REV, MON_ADOPT: MON_ADOPT, patternGate: patternGate, patSrc: patSrc,
+    MON_REV: MON_REV, MON_ADOPT: MON_ADOPT, patternGate: patternGate, patternRound: patternRound, patSrc: patSrc,
     bandpassSignal: bandpassSignal, kurtogram: kurtogram,
     MOUNT_FMAX: MOUNT_FMAX, mountFmax: mountFmax, KG_NYQ_FRAC: KG_NYQ_FRAC, beltFreqs: beltFreqs,
     RULESET: RULESET, rulesetFingerprint: rulesetFingerprint,
@@ -1806,6 +1833,7 @@
     patternGrade: patternGrade, EVID_ADOPT: EVID_ADOPT,
     dwellWorst: dwellWorst, DWELL_MIN_N: DWELL_MIN_N,
     acVals: acVals, gateFromBuckets: gateFromBuckets, gateFromRaw: gateFromRaw, sensorTick: sensorTick, impactEvidence: impactEvidence, gateSrc: gateSrc,
+    convSrc: convSrc, unitScale: unitScale,
     GATE_BLOCK: GATE_BLOCK, gateReason: gateReason,
     bandJudge: bandJudge, bandJudgeSrc: bandJudgeSrc, bandParse: bandParse, evenSample: evenSample, bandAnchors: bandAnchors, bandEdges: bandEdges, bandMeasurable: bandMeasurable, softBands: softBands, demodBand: demodBand, faultCoeffs: faultCoeffs, windowRms: windowRms, windowSeries: windowSeries, isRunning: isRunning, runRef: runRef, detectFlap: detectFlap,
     BAND_KO: BAND_KO, BAND_ORDER: BAND_ORDER, BAND_FREQ: BAND_FREQ, BAND_CTX: BAND_CTX, BAND_LEGACY: BAND_LEGACY, BAND_GRADE: BAND_GRADE, BAND_HYST: BAND_HYST, ENV_TYPE_MARGIN: ENV_TYPE_MARGIN, BL_IDLE_FRAC: BL_IDLE_FRAC,

@@ -13,12 +13,9 @@ cgi-bin/llm/worker-beacon.log
 cgi-bin/launcher-beacon.log
 stop-beacon.log
 .claude/
-
-# neo-pkg-vibe-analytics 런타임 산출물
-cgi-bin/config/*.json
-# 타이머 TQL — 앱이 이 설치의 태그·존·베이스라인을 값으로 구워 쓴다(monitor/*.js가 생성자).
-# 배포본에 들어가면 만든 쪽 환경의 테이블·태그가 남의 서버로 따라간다.
+cgi-bin/config/**
 cgi-bin/*.tql
+cgi-bin/tql/**
 
 frontend/dist/
 *.log

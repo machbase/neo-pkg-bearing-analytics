@@ -9,7 +9,7 @@ weight: 40
 
 Alarms periodically evaluate the selected tags, record state changes as **events**, and notify the channel you configure. Settings live under **Settings → Alarm settings**.
 
-Click the alarm indicator in the header to turn alarms on or off. The state is saved across sessions, and in server monitoring mode a mode badge appears next to it.
+Click the alarm indicator in the header to turn alarms on or off. The click saves that one value immediately, so it persists across sessions — unsaved edits on the Settings tab are not saved along with it. In server monitoring mode a mode badge appears next to it.
 
 > For how grades and events are computed, see [How detection works](./detection.en.md). This document covers configuration and operation.
 
@@ -47,7 +47,7 @@ Things to know:
 >
 > | | What it does | Interval |
 > | :--- | :--- | :--- |
-> | Fast axis | running/stopped · signal lost · instrumentation faults · amplitude tracking | the **evaluation interval** set below (default 10 s) |
+> | Fast axis | running/stopped · signal lost · instrumentation faults · amplitude tracking | the **evaluation interval** set below (default 3 s) |
 > | Slow axis | **fault pattern — grades and events come from here** | the **pattern/band extraction interval** (default 10 min) |
 >
 > The settings below configure the **fast axis**. Grades actually change on the slow axis, so
@@ -89,7 +89,7 @@ The cycle interval follows the **pattern/band extraction interval** (10 minutes 
 
 > This used to be two minute-based settings, `entry hold` and `recovery hold`. Because judgment runs on the extraction interval, **1, 2 and 5 minutes all collapsed to "next cycle"** — the choice meant nothing, and the settings were removed after measuring it.
 >
-> Instrumentation faults and signal loss are judged on the 10-second axis, where time still applies — 1 minute to confirm, 5 minutes to clear (both fixed).
+> Instrumentation faults and signal loss are judged on the fast axis (the evaluation interval), where time still applies — 1 minute to confirm, 5 minutes to clear (both fixed).
 
 ### Where to send — the notification channel
 
@@ -258,6 +258,8 @@ For what each type means and the recording rules, see [How detection works](./de
 | Zero evaluation targets | No new data on monitored tags | Check data ingestion |
 | Band extraction is stopped | Band timer stopped | **Re-register** button |
 | In-app evaluation stalled for N minutes | Browser deferred evaluation in app mode | Reopen or refresh the tab |
+| Could not reload data | A table query failed while re-reading data (after a settings save, for example). Monitoring continues on the last loaded data and retries automatically (from 10 s, backing off to 5 min). Newly selected tables are not monitored until a retry succeeds | Usually clears on its own. **Retry now** button. If it keeps failing, check whether the table was dropped or permission was revoked, and deselect it in settings if needed |
+| Server monitoring could not read the notification settings and did not send N events | In server mode, the timer could not read the account's notification settings at send time. The events are still recorded | **Open notification settings** → save them again |
 
 If the judged value flips between worse and better in quick succession, a **flapping notice** appears. That usually means the RMS window is shorter than the equipment's load cycle rather than a real fault — increase the window to at least the suggested value.
 

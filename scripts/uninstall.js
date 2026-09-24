@@ -53,20 +53,44 @@
       JSON.stringify({ loginName: user, password: pass }));
     var token = '';
     try { token = JSON.parse(loginResp).accessToken || ''; } catch (e) { /* empty */ }
-    // 이름은 cgi-bin/db/db.js의 MON_TIMER·BAND_TIMER·WD_TIMER와 같아야 한다
+    /* 타이머 API 는 JSON-RPC 다(`POST /web/api/rpc`). 예전 REST 경로 `/web/api/timers` 는
+       없어져서 404 가 오는데, 여기서 실패하면 패키지를 지워도 타이머가 계속 돌며 알림을 보낸다.
+       ⚠ params 는 배열, stop/delete 는 이름이 아니라 id 를 받는다.
+       ⚠ 목록은 **로그인한 계정의 것만** 보인다 — 다른 계정의 타이머는 그 계정으로 로그인해야 지워진다.
+          여기서 쓰는 계정이 감시를 켠 사람과 다르면 남는 것이 있고, 그때는 콘솔에서 지워야 한다. */
+    var PREFIXES = ['NEO_BEARING_MONITOR', 'NEO_BEARING_BAND', 'NEO_BEARING_WD',
+      'NEO_VIBE_MONITOR', 'NEO_VIBE_BAND', 'NEO_VIBE_WD'];   // 옛 이름도 함께 지운다
+    var rpcId = 0;
+    function rpc(method, params) {
+      var body = JSON.stringify({ jsonrpc: '2.0', id: ++rpcId, method: method, params: params || [] });
+      var out = req('POST', base + '/web/api/rpc',
+        { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' }, body);
+      var j = JSON.parse(out);
+      if (j && j.error) throw new Error(j.error.message || 'rpc error');
+      return j ? j.result : null;
+    }
     if (token) {
-      ['NEO_VIBE_MONITOR', 'NEO_VIBE_BAND', 'NEO_VIBE_WD'].forEach(function (name) {
-        /* 멈추고 지운다 — db.js의 deleteTimer와 같은 규칙이다. 삭제만으로 실행 중인 회차가
-           멎는다는 보장이 없는데, 여기는 곧 TQL 파일까지 사라지는 자리라 남아 돌면 주기마다 실패한다.
-           없는 타이머에 보내면 500이지만 응답을 보지 않는다 — 지울 것이 남지 않는 쪽이 중요하다. */
-        try {
-          req('POST', base + '/web/api/timers/' + name + '/state',
-            { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' }, JSON.stringify({ state: 'stop' }));
-        } catch (e) { /* 정지 실패해도 삭제는 시도한다 */ }
-        try { req('DELETE', base + '/web/api/timers/' + name, { 'Authorization': 'Bearer ' + token }); } catch (e) { /* 다음 것을 계속 지운다 */ }
-      });
+      var targets = [];
+      try {
+        var list = rpc('timer.list', []) || [];
+        for (var i = 0; i < list.length; i++) {
+          var t = list[i];
+          if (!t || !t.name) continue;
+          for (var j2 = 0; j2 < PREFIXES.length; j2++) {
+            if (String(t.name).indexOf(PREFIXES[j2]) === 0) { targets.push(t); break; }
+          }
+        }
+      } catch (e) { /* 목록을 못 읽으면 지울 id 를 알 수 없다 — 아래 로그로 남긴다 */ }
+
+      for (var k = 0; k < targets.length; k++) {
+        /* 멈추고 지운다 — 삭제만으로 실행 중인 회차가 멎는다는 보장이 없는데, 여기는 곧 TQL 파일까지
+           사라지는 자리라 남아 돌면 주기마다 실패한다. */
+        try { rpc('timer.stop', [targets[k].id]); } catch (e) { /* 정지 실패해도 삭제는 시도한다 */ }
+        try { rpc('timer.delete', [targets[k].id]); } catch (e) { /* 다음 것을 계속 지운다 */ }
+      }
+      if (!targets.length) console.println('  (지울 타이머 없음 — 다른 계정이 등록했다면 그 계정으로 확인하세요)');
     }
   } catch (e) { /* 안전망 — 정리 실패가 uninstall을 막지 않는다 */ }
 })();
 
-console.println('neo-pkg-vibe-analytics uninstalled. data/ 디렉터리는 보존됩니다.');
+console.println('neo-pkg-bearing-analytics uninstalled. data/ 디렉터리는 보존됩니다.');

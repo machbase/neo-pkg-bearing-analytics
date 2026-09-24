@@ -49,7 +49,9 @@
       var val = (ev.val == null ? '-' : Number(ev.val).toFixed(3)) + (ev.unit ? ' ' + ev.unit : '');
       var lim = (ev.lim == null ? '' : Number(ev.lim).toFixed(3));
       var ratio = (ev.val > 0 && ev.lim > 0) ? '  (기준의 ×' + (ev.val / ev.lim).toFixed(2) + ')' : '';
-      vline = val + (lim ? ' / 기준 ' + lim : '') + ratio;
+      // 기준 숫자가 없는 행(원본 단위 표기)은 등급 근거를 말로 붙인다
+      var basis = ev.lim == null ? basisText(ev.detail) : '';
+      vline = val + (lim ? ' / 기준 ' + lim : '') + ratio + (basis ? ' · ' + basis : '');
     }
     var text = subject + (vline ? '\n' + vline : '') + '\n' + when;
     var html = '<div style="font-family:sans-serif">'
@@ -59,6 +61,18 @@
       + row('발생', when)
       + '</table></div>';
     return { subject: subject, text: text, html: html, event: ev };
+  }
+  /* 원본 단위로 적는 등급 이벤트의 근거 문구 — 예: "ISO 위험 구간 · 결함 패턴 외륜(BPFO)".
+     가속도·변위 태그는 등급을 속도 ISO로 매기므로 원본 단위의 "기준" 숫자가 없다. 그래서 판정기가
+     DETAIL 머리에 'ISO <존> 구간'을 적고, 결함 부위는 judgeDetail의 '격자 r · 부위' 순서에서 읽는다.
+     화면(이벤트 목록·내보내기)과 알림 문구가 이 함수 하나로 같은 말을 한다. */
+  function basisText(detail) {
+    var segs = String(detail || '').split(' · '), zone = '', key = '', i;
+    for (i = 0; i < segs.length; i++) {
+      if (!zone && /^ISO .+ 구간$/.test(segs[i])) zone = segs[i];
+      if (!key && /^격자 /.test(segs[i]) && segs[i + 1] && !/회차|확정|재알림|복귀|판정 창/.test(segs[i + 1])) key = segs[i + 1];
+    }
+    return zone + (key ? (zone ? ' · ' : '') + '결함 패턴 ' + key : '');
   }
   function esc(s) { return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
   function row(k, v) { return '<tr><td style="color:#666">' + esc(k) + '</td><td><b>' + esc(v) + '</b></td></tr>'; }
@@ -144,6 +158,43 @@
     return { subject: subject, text: lines.join('\n'), event: { etype: g[0].etype, gradeKo: g[0].gradeKo, n: g.length } };
   }
 
+  /* 저장된 알림 설정(monitor 도메인 원본: notifCh·notifTo·routes) → 발송 판정용 cfg.
+     앱(_notifyCfg)과 서버(발송 때 계정 설정 표에서 읽은 값)가 이 함수 하나로 만든다 —
+     따로 만들면 라우팅 기본값이 한쪽에서만 바뀌어 화면 체크 상태와 실제 발송이 갈린다.
+     defs: { order:[행 이름…], timing:{행: 기본 timing} } — 미설정 행은 기본값으로 채운다. */
+  function notifyCfgFrom(raw, defs) {
+    raw = raw || {}; defs = defs || {};
+    var ch = raw.notifCh || {}, to = raw.notifTo || {}, routes = raw.routes || {};
+    var order = defs.order || [], timing = defs.timing || {}, out = {};
+    for (var i = 0; i < order.length; i++) {
+      var k = order[i];
+      out[k] = routes[k] ? routes[k] : { timing: timing[k] };
+    }
+    return { channels: { webhook: { on: !!ch.webhook, to: to.webhook || '' } }, routes: out };
+  }
+
+  /* 설정 표(CONFIG)의 조각 행 → 한 도메인의 객체. rows: [[K, VAL], …]
+     저장 형식은 db.js writeDomain — 키 'cfg:<도메인>#<순번>', 값은 URI 인코딩 문자열을 순번대로 자른 조각.
+     행이 없으면 저장한 적이 없는 것이라 빈 객체(오류 아님)다. 조각이 빠졌거나 해독이 안 되면
+     오류로 돌려준다 — 빈 설정으로 읽으면 "알림 꺼짐"과 구별되지 않아 미발송이 조용히 묻힌다. */
+  function configFromRows(rows, domain) {
+    var re = /^cfg:(.+)#(\d+)$/, parts = [], n = 0, i;
+    for (i = 0; i < (rows || []).length; i++) {
+      var m = re.exec(String(rows[i][0]));
+      if (!m || m[1] !== domain) continue;
+      parts[+m[2]] = String(rows[i][1] == null ? '' : rows[i][1]);
+      n++;
+    }
+    if (!n) return { obj: {}, err: '' };
+    for (i = 0; i < parts.length; i++) {
+      if (parts[i] == null) return { obj: null, err: '설정 조각 누락(' + i + '번)' };
+    }
+    try {
+      var o = JSON.parse(decodeURIComponent(parts.join('')));
+      return (o && typeof o === 'object') ? { obj: o, err: '' } : { obj: null, err: '설정 형식 오류' };
+    } catch (e) { return { obj: null, err: '설정 해독 실패' }; }
+  }
+
   // 웹훅 POST를 수행하는 TQL. url·body는 JSON.stringify로 JS 문자열 리터럴화해 이스케이프 문제를 없앤다.
   function buildWebhookTql(url, payload) {
     return 'SCRIPT({\n'
@@ -161,19 +212,22 @@
   //  · IIFE로 감싸는 이유: 내부 esc가 호출측(monitor의 SQL용 esc)과 이름이 겹쳐 덮어쓰는 사고를 막는다.
   //  · f.name으로 재노출하는 이유: 빌드 시 미니파이로 함수명이 바뀌어도 호출측이 쓰는 고정 이름에 바인딩되도록.
   function serverSrc() {
-    var decls = [esc, row, eventMessage, payloadFor, shouldNotify, bundleMessage, planNotifications]
+    var decls = [basisText, esc, row, eventMessage, payloadFor, shouldNotify, bundleMessage, planNotifications,
+      notifyCfgFrom, configFromRows]
       .map(function (f) { return f.toString(); }).join('\n');
     return 'var __NF=(function(){\n' + decls + '\n'
       + 'return {em:' + eventMessage.name + ',pf:' + payloadFor.name + ',sn:' + shouldNotify.name
-      + ',pn:' + planNotifications.name + ',bm:' + bundleMessage.name + '};\n'
+      + ',pn:' + planNotifications.name + ',bm:' + bundleMessage.name
+      + ',nc:' + notifyCfgFrom.name + ',cr:' + configFromRows.name + '};\n'
       + '})();\n'
       + 'var eventMessage=__NF.em, payloadFor=__NF.pf, shouldNotify=__NF.sn,'
-      + ' planNotifications=__NF.pn, bundleMessage=__NF.bm;';
+      + ' planNotifications=__NF.pn, bundleMessage=__NF.bm, notifyCfgFrom=__NF.nc, configFromRows=__NF.cr;';
   }
 
   return {
     payloadFor: payloadFor, eventMessage: eventMessage, shouldNotify: shouldNotify,
     planNotifications: planNotifications, bundleMessage: bundleMessage,
+    notifyCfgFrom: notifyCfgFrom, configFromRows: configFromRows, basisText: basisText,
     // 테스트·화면 표시용 사본 — 함수 안 값(임베드 대상)과 같아야 한다. test-notifyroute가 일치를 검사한다.
     BUNDLE_MIN: 5,
     buildWebhookTql: buildWebhookTql, serverSrc: serverSrc,

@@ -5,7 +5,7 @@ import { readFileSync } from 'node:fs';
 // 패키지 버전은 하드코딩하지 않고 package.json에서 주입 — 두 곳에 적으면 반드시 어긋난다
 const PKG = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
 
-// base './' — Neo가 /web/apps/neo-pkg-vibe-analytics/ 하위 경로로 서빙하므로
+// base './' — Neo가 /web/apps/neo-pkg-bearing-analytics/ 하위 경로로 서빙하므로
 // public 자산(폰트/코디콘/로고) 링크가 상대경로여야 한다.
 export default defineConfig({
   base: './',

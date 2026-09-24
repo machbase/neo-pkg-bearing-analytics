@@ -13,10 +13,12 @@ const DB = fs.readFileSync(new URL('../../cgi-bin/db/db.js', import.meta.url), '
 const BLOCK = DB.slice(DB.indexOf('var CONFIG_FILES'), DB.indexOf('function configDir'));
 const CFG = new Set([...BLOCK.matchAll(/'([A-Za-z_$][\w$]*)'/g)].map((m) => m[1]).filter((k) => !k.endsWith('.json')));
 
-/* 예외 둘 — 사용자의 입력이 아니라 앱이 스스로 거는 방어다. 저장하면 오히려 해롭다.
+/* 예외 셋 — 사용자의 입력이 아니라 앱이 스스로 거는 방어다. 저장하면 오히려 해롭다.
      _loadSchemas : 미지원 컬럼 table을 매 로드마다 다시 뺀다(저장하면 고른 소스가 조용히 바뀐다)
-     _initEmpty   : DB가 안 닿을 때 빈 상태로 시작한다(저장하면 DB가 잠깐 죽은 것만으로 소스가 지워진다) */
-const EXEMPT = [/_loadSchemas\(\)/, /_initEmpty\(msg\)/];
+     _initEmpty   : DB가 안 닿을 때 빈 상태로 시작한다(저장하면 DB가 잠깐 죽은 것만으로 소스가 지워진다)
+     _initNoAuth  : 신원을 모르는 상태다. 누구의 설정인지 모르는 채로 저장하면 남의 폴더에 쓴다
+     _initCfgFail : 설정을 못 읽은 상태다. 비운 화면 값을 저장하면 실제 설정을 덮는다(저장 자체가 잠겨 있다) */
+const EXEMPT = [/_loadSchemas\(\)/, /_initEmpty\(msg\)/, /_initNoAuth\(why\)/, /_initCfgFail\(err\)/];
 
 let pass = 0, fail = 0;
 const chk = (ok, msg, got) => { console.log((ok ? 'PASS ' : 'FAIL ') + msg + (got ? ' — ' + got : '')); ok ? pass++ : fail++; };

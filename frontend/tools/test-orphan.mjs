@@ -16,7 +16,7 @@ let SQLS = [];                 // 실행된 SQL 순서
 let ROWS = {};                 // 패턴 → 반환 행
 DB.q = null;                   // db.js 내부 q는 못 갈아끼운다 — fetch를 막는다
 globalThis.fetch = (url) => {
-  const sql = decodeURIComponent(String(url).replace(/^\/db\/query\?q=/, '').split('&')[0]);
+  const sql = decodeURIComponent(String(url).replace(/^[^?]*\?q=/, '').split('&')[0]);
   SQLS.push(sql);
   const key = Object.keys(ROWS).find((k) => sql.includes(k));
   return Promise.resolve({
@@ -34,13 +34,13 @@ const chk = (ok, msg, extra) => {
 };
 
 // ── 태그별 보유량 집계 ─────────────────────────────────────────────────────
-/* NEO_VIBE_BAND의 NAME은 '테이블:태그:계열'이라 태그 하나가 계열 십여 개를 갖는다.
+/* BAND의 NAME은 '테이블:태그:계열'이라 태그 하나가 계열 십여 개를 갖는다.
    묶지 않으면 목록이 계열 수만큼 부풀어 사람이 읽을 수 없다. */
 {
   SQLS = [];
   ROWS = {
-    'from NEO_VIBE_BAND': [['T:A:sub', 100], ['T:A:one', 100], ['T:A:envBPFO', 50], ['T:B:sub', 7]],
-    'from NEO_VIBE_EVENTS': [['T:A', 12], ['T:C', 3]],
+    'from BAND': [['T:A:sub', 100], ['T:A:one', 100], ['T:A:envBPFO', 50], ['T:B:sub', 7]],
+    'from EVENTS': [['T:A', 12], ['T:C', 3]],
   };
   const u = await DB.tagUsage();
   chk(u['T:A'].band === 250, '한 태그의 계열을 합쳐 센다', String(u['T:A'].band));
@@ -52,7 +52,7 @@ const chk = (ok, msg, extra) => {
 // 한쪽 조회가 실패해도 다른 쪽은 살린다 — 정리 화면이 통째로 안 열리는 것보다 낫다
 {
   const okFetch = globalThis.fetch;
-  globalThis.fetch = (url) => (String(url).includes('NEO_VIBE_BAND')
+  globalThis.fetch = (url) => (String(url).includes('BAND')
     ? Promise.resolve({ ok: false, status: 500, json: () => Promise.resolve({ success: false, reason: 'boom' }) })
     : okFetch(url));
   const u = await DB.tagUsage();
@@ -66,7 +66,7 @@ const chk = (ok, msg, extra) => {
 {
   SQLS = []; ROWS = {};
   await DB.deleteBandOfTag('T', 'A');
-  const deleted = SQLS.filter((s) => /^delete from NEO_VIBE_BAND where NAME=/.test(s))
+  const deleted = SQLS.filter((s) => /^delete from BAND where NAME=/.test(s))
     .map((s) => (/NAME='T:A:([^']+)'/.exec(s) || [])[1]);
   const want = VC.BAND_ORDER.concat(VC.BAND_CTX, VC.BAND_LEGACY || []);
   const missed = want.filter((bn) => deleted.indexOf(bn) < 0);
@@ -76,7 +76,7 @@ const chk = (ok, msg, extra) => {
 
   // 데이터 → 메타 순서. 뒤집히면 메타 정리가 아무것도 못 지운다.
   const iMeta = SQLS.findIndex((s) => /metadata/.test(s));
-  const iLast = SQLS.map((s, i) => (/^delete from NEO_VIBE_BAND where NAME=/.test(s) ? i : -1)).filter((i) => i >= 0).pop();
+  const iLast = SQLS.map((s, i) => (/^delete from BAND where NAME=/.test(s) ? i : -1)).filter((i) => i >= 0).pop();
   chk(iMeta > iLast, '데이터를 다 지운 뒤에 태그 이름을 정리한다', `데이터 마지막 ${iLast} → 메타 ${iMeta}`);
   chk(/NAME not in \(select NAME from/.test(SQLS[iMeta]), '데이터가 안 남은 이름만 지운다', SQLS[iMeta]);
 }
@@ -84,7 +84,7 @@ const chk = (ok, msg, extra) => {
   SQLS = []; ROWS = {};
   await DB.deleteEventsOfTag('T', 'A');
   const iMeta = SQLS.findIndex((s) => /metadata/.test(s));
-  const iDel = SQLS.findIndex((s) => /^delete from NEO_VIBE_EVENTS/.test(s));
+  const iDel = SQLS.findIndex((s) => /^delete from EVENTS/.test(s));
   chk(iDel >= 0 && iMeta > iDel, '이벤트도 데이터 → 메타 순서', `${iDel} → ${iMeta}`);
 }
 
@@ -135,9 +135,9 @@ const chk = (ok, msg, extra) => {
   a._refreshUsage = () => { calls.push('refresh'); return Promise.resolve(); };
   SQLS = []; ROWS = {};
   await a._purgeOrphan([{ key: 'T:B', band: 7, events: 0 }]);
-  chk(SQLS.some((s) => /delete from NEO_VIBE_BAND where NAME='T:B:sub'/.test(s)), '대역 데이터를 지운다');
-  chk(!SQLS.some((s) => /delete from NEO_VIBE_EVENTS/.test(s)), '없는 이벤트는 지우러 가지 않는다');
-  chk(SQLS.some((s) => /NEO_VIBE_MONSTATE/.test(s)), '판정 상태도 함께 지운다');
+  chk(SQLS.some((s) => /delete from BAND where NAME='T:B:sub'/.test(s)), '대역 데이터를 지운다');
+  chk(!SQLS.some((s) => /delete from EVENTS/.test(s)), '없는 이벤트는 지우러 가지 않는다');
+  chk(SQLS.some((s) => /MONSTATE/.test(s)), '판정 상태도 함께 지운다');
   /* 화면이 들고 있는 판정 상태 캐시를 안 비우면, 지운 태그가 '감시 대상 밖'으로 계속 세진다 —
      지웠는데 숫자가 그대로라 사용자는 삭제가 안 된 줄로 읽는다. */
   chk(!a._monState['T:B'] && !!a._monState['T:A'], '지운 태그만 캐시에서 빠진다', Object.keys(a._monState).join(','));

@@ -250,12 +250,15 @@
     var r = drawLine(canvas, { values: o.mags, xLabels: o.freqs.map(function (f) { return f >= 1000 ? (f / 1000).toFixed(1) + 'k' : Math.round(f) + ''; }), tipLabels: o.freqs.map(function (f) { return f.toFixed(1) + ' Hz'; }), color: SERIES.fft, height: o.height, unit: '', zeroBase: true, lw: 1.4, padR: 16 }, CC);
     if (!r || !o.markers) return r;
     var ctx = canvas.getContext('2d'), dpr = window.devicePixelRatio || 1; ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    var G = r.geom, fmaxIdx = o.freqs.length - 1, maxF = o.freqs[fmaxIdx];
+    /* 가로축은 넘어온 구간 [freqs[0], freqs[끝]]이다 — 확대하면 0 Hz가 아니라 잘라낸 첫 주파수에서 시작한다.
+       선(drawLine)은 점 i를 등간격으로 놓고 주파수도 등간격이라, 마커를 같은 비율로 놓아야 해당 빈 위에 선다.
+       0 Hz 기준으로 놓으면 확대했을 때 마커가 실제 피크와 어긋나고 구간 밖 마커가 안에 그려진다. */
+    var G = r.geom, fmaxIdx = o.freqs.length - 1, maxF = o.freqs[fmaxIdx], minF = o.freqs[0], spanF = maxF - minF;
     var mkSorted = o.markers.slice().sort(function (a, b) { return a.freq - b.freq; }), prevX = -999, off = 0;
     ctx.save(); ctx.beginPath(); ctx.rect(G.pad.l, G.pad.t - 1, G.cw, G.ch + 2); ctx.clip();
     mkSorted.forEach(function (mk) {
-      if (mk.freq > maxF) return;
-      var x = G.pad.l + (mk.freq / maxF) * G.cw;
+      if (mk.freq > maxF || mk.freq < minF) return;
+      var x = G.pad.l + (spanF > 0 ? (mk.freq - minF) / spanF : 0) * G.cw;
       if (x - prevX < 16) off = (off + 12) % 36; else off = 0; prevX = x;
       var topY = G.pad.t;
       if (o.hideMarkerLabels) {

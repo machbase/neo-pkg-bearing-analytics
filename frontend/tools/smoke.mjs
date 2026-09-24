@@ -27,6 +27,7 @@ app.liveTables = ['VIBRATION_RAW', 'SENSOR_DATA', 'MOTOR_CURRENT', 'GEARBOX_VIB'
 const sorted = d.equipment.slice().sort((a, b) => b.grade - a.grade);
 sorted.forEach((e, i) => { e.order = i; });
 const eq0 = sorted[0];
+const eqG = sorted.find((e) => e.unit === 'g') || eq0;   // 가속도 설비 — 원본 단위 표시 검사용
 /* 판정이 한 회차 돈 뒤의 _gradeState — 전 태그를 채운다.
    한 태그만 채우면 나머지 카드가 '판정 대기'로 떠서 보류 부재를 검사할 수 없다. */
 const gradedAll = (patOk) => Object.fromEntries(sorted.map((e) => [e.table + ':' + e.name, { gi: 0, patOk: patOk, patOn: false }]));
@@ -244,7 +245,7 @@ const cases = [
     events: { rows: 7730, span: { from: d.now - 11 * 86400000, to: d.now } },
     band: { rows: 39120, keys: 396, span: { from: d.now - 30 * 86400000, to: d.now } },
     monstate: { rows: 269 }, baseline: { rows: 26 },
-  } }, ['이벤트 이력', 'NEO_VIBE_EVENTS', '>TAG<', '>LOOKUP<', '대역 에너지 추이', '판정 상태', '7,730건',
+  } }, ['이벤트 이력', 'EVENTS', '>TAG<', '>LOOKUP<', '대역 에너지 추이', '판정 상태', '7,730건',
     '기간 삭제…', '기간 안 모든 태그', '학습 구간 포함 주의',
     /* 태그별 정리는 감시 목록 밖 태그가 있을 때만 나온다 — 이 케이스는 tagUsage가 없어(현황만 읽음)
        고아를 모르는 상태다. 없는 기능을 있다고 적던 문구가 되살아나지 않게 함께 막는다. */
@@ -286,7 +287,7 @@ const cases = [
   // 표 이름을 정확히 입력하면 열린다(대소문자 무시)
   ['settings data 확인(이름 입력 완료)', { tab: 'settings', setSection: 'data', usage: {
     events: { rows: 7730, span: null }, band: { rows: 0, keys: 0, span: null }, monstate: { rows: 0 }, baseline: { rows: 0 },
-  }, purge: { kind: 'events', fromMs: d.now - 86400000, toMs: d.now, counting: false, n: 5102, keep: 2628 }, purgeTyped: 'neo_vibe_events' },
+  }, purge: { kind: 'events', fromMs: d.now - 86400000, toMs: d.now, counting: false, n: 5102, keep: 2628 }, purgeTyped: 'events' },
     ['5,102건 삭제', '!not-allowed']],
   // 삭제 실행 중 — 버튼이 잠기고 라벨이 바뀐다(중복 실행 방지)
   ['settings data 삭제 실행 중', { tab: 'settings', setSection: 'data', usage: {
@@ -299,7 +300,7 @@ const cases = [
   ['settings data 대역 확인', { tab: 'settings', setSection: 'data', usage: {
     events: { rows: 0, span: null }, band: { rows: 39120, keys: 396, span: null }, monstate: { rows: 0 }, baseline: { rows: 0 },
   }, purge: { kind: 'band', fromMs: d.now - 86400000, toMs: d.now, counting: false, n: 14418, keep: 24702 } },
-    ['NEO_VIBE_BAND', '14,418행 삭제', '대역 베이스라인을 다시 학습', '추세 차트에서 이 구간이 비어 보입니다',
+    ['BAND', '14,418행 삭제', '대역 베이스라인을 다시 학습', '추세 차트에서 이 구간이 비어 보입니다',
       // 대역은 내보내기 경로가 없다 — 이벤트 전용 안내가 새면 안 된다
       '!내보내기로 저장한 뒤']],
   ['settings equip+펼침+커스텀베어링', { tab: 'settings', setSection: 'equip', equipAdv: { [eq0.id]: true }, equipBearing: { [eq0.id]: '직접 입력' } }],
@@ -528,6 +529,26 @@ const cases = [
       '4분 무수신', '>무수신<',
       // 옛 열 제목·구분자와, 두절 행이 숫자로 새는 경우
       '!지표값 vs 기준', '!/ 기준', '!0.000 mm/s', '!기준 0.000']],
+  /* 가속도 설비의 등급 이벤트 — 원본 단위 값만 적고, 등급은 속도 ISO로 매겨 원본 단위의 기준 숫자가
+     없으므로 근거를 말로 적는다(DETAIL 머리의 ISO 존 + 결함 부위). 숫자 기준이 새면 틀린 비교가 된다. */
+  ['monitor 이벤트 원본 단위(g)', { tab: 'monitor', evtScope: 'all', evtType: 'all', evtTag: 'all', events: [
+    _evt({ id: 'g1', type: 'threshold', typeKo: '임계 초과', unit: 'g', value: 0.0773, base: 0, grade: 2,
+      detail: 'ISO 위험 구간 · 격자 3.1 · 외륜(BPFO) · 2회 연속 확정' }),
+    _evt({ id: 'g2', type: 'recovery', typeKo: '정상 복귀', unit: 'g', value: 0.0211, base: 0, grade: 0,
+      detail: 'ISO 양호 구간 · 2시간 만에 복귀' }),
+  ] },
+    ['0.077 g', '0.021 g', 'ISO 위험 구간 · 결함 패턴 외륜(BPFO)', 'ISO 양호 구간', '!기준 0']],
+  /* 설정을 못 읽은 화면 — 기본값으로 채운 탭 대신 사유와 다음 행동만. 조회 실패는 다시 시도만,
+     조각 손상은 그 영역을 기본값으로 여는 길을 함께 준다. 탭 내용(카드 크기 등)은 그리지 않는다. */
+  /* 가속도 설비 카드 — 존 판정은 속도 환산값(iso 4.0 mm/s)으로 하지만 화면 숫자는 같은 대역의
+     원본 단위 RMS(isoRaw 0.077 g)다. 환산값에 원본 단위를 붙이면 "4.00 g"라는 틀린 숫자가 된다. */
+  ['monitor 가속도 카드 원본 단위', { _gradeState: { [eqG.table + ':' + eqG.name]: { gi: 2, src: 'pattern', patOk: true, patOn: true, patR: 6.04,
+    iso: 4.0, isoRaw: 0.0771, wide: 0.31, limited: true, basis: 'iso' } } },
+    ['0.077', 'ISO 10~1000 Hz  0.077 g', '속도로 환산해 비교합니다', '!ISO 10~1000 Hz  4.00']],
+  ['설정 읽기 실패(조회)', { cfgFail: { kind: 'query', msg: '설정 조회 실패 — HTTP 500', domains: [] } },
+    ['설정을 불러오지 못했습니다', '다시 시도', '설정 조회 실패 — HTTP 500', '!기본값으로 열기', '!카드 크기']],
+  ['설정 읽기 실패(손상)', { tab: 'settings', cfgFail: { kind: 'broken', msg: '설정 일부가 손상됐습니다 — equipment', domains: ['equipment'] } },
+    ['설비 정보 설정을 읽을 수 없습니다', '다시 시도', '설비 정보만 기본값으로 열기', '!카드 크기']],
 ];
 
 const baseState = JSON.parse(JSON.stringify(app.state));
@@ -584,7 +605,7 @@ let fail = 0;
      주기(iv)만큼 두절 설비가 배지 없이 정상처럼 보인다. 렌더 테스트로는 잡히지 않는 배선이라
      소스에서 확인한다(_reloadLive 본문 안에 호출이 있는지). */
   {
-    const rl = /_reloadLive\(\) \{[\s\S]*?\n  \}/.exec(appSrc);
+    const rl = /_reloadLive\((quiet)?\) \{[\s\S]*?\n  \}/.exec(appSrc);
     if (!rl) { fail++; console.error('FAIL _reloadLive 본문을 찾지 못함 — 정규식 확인'); }
     else if (rl[0].indexOf('_refreshRunState') < 0) {
       fail++;

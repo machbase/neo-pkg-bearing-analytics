@@ -10,6 +10,7 @@
    호출부도 생성된 TQL 원문에서 떼어내 실행한다 — 옮겨 적으면 생성기가 바뀌었을 때
    테스트만 통과하고 실물이 깨진다. 발췌가 실패하면 조용히 통과하지 않고 예외로 터진다. */
 globalThis.window = globalThis;
+import fs2 from 'node:fs';
 const VC = (await import('../../cgi-bin/calc/calc.js')).default;
 const { judgeTick } = await import('../src/app.js');
 const { buildMonitorTql } = (await import('../../cgi-bin/monitor/monitor.js')).default;
@@ -53,7 +54,7 @@ const BODY = [src, line('var _lim0 = baselineLimit('), line('var _near ='),
   line('var _isoG = _hold ?'), line('if(_iso.fresh){ res.next.iso')].join('\n');
 const step = new Function('now', 'prev', 'db', 'esc', 'dtms', 'LAST', 'WVAL', 'isoNeeded', 'isoSkippable', 'isoRms',
   'baselineLimit', 'gateFromRaw', 'GRAW', 'impactEvidence', 'IMP',
-  't', 'wide', 'z', 'key', 'res', BODY + '\nreturn {val:val, rg:_isoG, hold:_hold, fresh:_iso.fresh, next:res.next};');
+  'srcOf', 't', 'wide', 'z', 'key', 'res', BODY + '\nreturn {val:val, rg:_isoG, hold:_hold, fresh:_iso.fresh, next:res.next};');
 
 // ── 스텁 — DB만 갈아끼운다 ────────────────────────────────────────────────
 const KEY = 'T:A', TAG = { tbl: 'T', tag: 'A', fs: FS, zones: Z };
@@ -69,7 +70,7 @@ const run = (now, prev, buckets, wide, iso) => {
   measured = iso;
   return step(now, prev, db, (x) => x, () => '', { [KEY]: now }, { [KEY]: buckets },
     VC.isoNeeded, VC.isoSkippable, isoRmsStub, VC.baselineLimit, VC.gateFromRaw, {}, VC.impactEvidence, {},
-    TAG, wide, Z, KEY, { next: {} });
+    (x) => x, TAG, wide, Z, KEY, { next: {} });   // srcOf — 표가 하나라 그대로 통과
 };
 const loud = [{ rms: 99, cnt: FS }];      // 지름길이 끼어들지 않게
 
@@ -128,6 +129,44 @@ const loud = [{ rms: 99, cnt: FS }];      // 지름길이 끼어들지 않게
   const r = run(0, null, spike, wide, 3.0);
   chk(queries === 1, '한 초라도 경계를 넘으면 계산한다(급상승을 삼키지 않는다)', queries + '회 조회');
   chk(r.rg === 2, '그 급상승이 등급에 반영된다', '등급 ' + r.rg);
+}
+
+/* 판정 상태는 MONSTATE.VAL에 encodeURIComponent(JSON)로 들어간다. 넘치면 **잘린 채 저장되고**,
+   잘린 값은 dec()가 null로 떨어뜨려 그 태그만 직전 상태를 영영 못 쌓는다 — 에러도 로그도 없다.
+   한글은 인코딩되면 글자당 9자라 사유 문장 하나가 260자다. 폭을 줄이거나 상태에 산문을 더하면
+   여기서 걸린다. 파생 가능한 문장(충격성 text 등)은 상태에 넣지 말 것. */
+{
+  const SQL = (await import('../../cgi-bin/db/sql.js')).default;
+  const ddl = SQL.monCreateTables().filter((s) => s.indexOf('MONSTATE') >= 0)[0];
+  const at = ddl ? ddl.indexOf('VAL VARCHAR(') : -1;
+  const CAP = at < 0 ? 0 : parseInt(ddl.slice(at + 'VAL VARCHAR('.length), 10);
+  chk(CAP > 0, '상태 테이블의 VAL 폭을 DDL에서 읽는다', String(CAP));
+
+  // 가장 큰 상태 — 계측 게이트가 걸리고 충격성 근거·패턴·포락선 이력까지 한 태그에 다 실린 경우
+  const worst = {
+    g: 2, since: 1788391267294, cand: 2, candSince: 1788391267294, candN: 1,
+    cyc: 1788391267294, lastRe: 1788391267294, b: true, bb: true, lost: 0,
+    epAt: 1788391267294, alarmG: 2, imp: 1, sf: 1, sfs: 1788391267294, sfc: 1788391267294,
+    gr: { v: { key: 'flatline', label: '플랫라인', gi: 2,
+      detail: '값이 거의 변하지 않습니다 — 센서 정지·케이블 탈락 의심' }, at: 1788391267294 },
+    im: { v: { crest: 22.313096406778342, kurt: 474.1315523222581 }, at: 1788391267294 },
+    iso: 1.5738057983462597, isoAt: 1788391267294,
+    pat: 1, patR: 4.1928374651, patK: '외륜(BPFO)', patIso: 1.5738057983462597,
+    patAt: 1788391267294, patW: 0,
+    elat: { envBPFO: { r: 1.4465715184893877, at: 1788391267294 },
+            envBSF: { r: 1.309249891417762, at: 1788391267294 } },
+  };
+  const encLen = encodeURIComponent(JSON.stringify(worst)).split("'").join('%27').length;
+  chk(encLen < CAP, '최악 상태도 VAL 폭 안에 들어간다 — 넘치면 조용히 잘린다', encLen + ' / ' + CAP);
+
+  // 파생 가능한 산문을 상태에 넣지 않는가 — text 하나가 260자다
+  chk(tql.indexOf('res.next.im={v:{crest:') >= 0, '충격성 근거는 숫자만 저장한다 (text·kind는 파생물)');
+  chk(tql.indexOf('res.next.im={v:IMP[key]') < 0, '객체를 통째로 저장하지 않는다');
+
+  // DDL만 넓혀서는 기존 설치가 안 바뀐다 — CREATE 실패를 삼키므로 폭 검사가 함께 있어야 한다
+  const dbSrc = fs2.readFileSync(new URL('../../cgi-bin/db/db.js', import.meta.url), 'utf8');
+  chk(dbSrc.indexOf('.then(widenMonState)') >= 0, '자동 생성 훅이 폭 검사를 함께 돈다');
+  chk(dbSrc.indexOf('MONSTATE_VAL_MIN = ' + CAP) >= 0, '마이그레이션 기준값이 DDL 폭과 같다', 'MONSTATE_VAL_MIN vs ' + CAP);
 }
 
 console.log(fail ? `\n=== FAIL ${fail}건 ===` : '\n=== 전부 통과 ===');

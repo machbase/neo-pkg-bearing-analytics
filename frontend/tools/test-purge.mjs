@@ -12,14 +12,14 @@ const chk = (ok, msg, extra) => {
 
 // ── 문장 ───────────────────────────────────────────────────────────────────
 {
-  const q = SQL.metaPurgeOrphans('NEO_VIBE_BAND');
-  chk(/^delete from NEO_VIBE_BAND metadata\b/.test(q), '이름 삭제는 METADATA 절을 쓴다', q);
+  const q = SQL.metaPurgeOrphans('BAND');
+  chk(/^delete from BAND metadata\b/.test(q), '이름 삭제는 METADATA 절을 쓴다', q);
   /* 조건이 "데이터가 남은 이름의 여집합"이어야 한다. 구간을 조건에 넣으면 안 된다 —
      일부만 지운 태그의 이름까지 지워져, 살아 있는 설비가 목록에서 사라진다. */
-  chk(/not in \(select NAME from NEO_VIBE_BAND group by NAME\)/.test(q), '데이터가 남은 이름은 건드리지 않는다', q);
+  chk(/not in \(select NAME from BAND group by NAME\)/.test(q), '데이터가 남은 이름은 건드리지 않는다', q);
   chk(!/TIME|between/i.test(q), '이름 삭제에는 기간 조건이 없다', q);
 
-  chk(/NEO_VIBE_EVENTS metadata/.test(SQL.metaPurgeOrphans('NEO_VIBE_EVENTS')), '이벤트 표에도 같은 규칙');
+  chk(/EVENTS metadata/.test(SQL.metaPurgeOrphans('EVENTS')), '이벤트 표에도 같은 규칙');
 }
 
 // ── 삭제 경로가 두 문장을 모두 낸다 ────────────────────────────────────────
@@ -40,12 +40,29 @@ const chk = (ok, msg, extra) => {
 
   // db.js 내부 함수를 그대로 재현한다(모듈이 fetch를 물고 있어 직접 import가 안 된다)
   const purgeNames = (t) => fake.q(SQL.metaPurgeOrphans(t)).catch(() => null);
+  const runAll = (list) => list.reduce((p2, sql) => p2.then(() => fake.q(sql)), Promise.resolve());
+  /* 기간 삭제는 이름마다 한 문장이다 — 표를 계정이 공유하므로 시간만으로 지우면 남의 행까지
+     날아간다. TAG 표는 LIKE 로 좁힐 수도 없다(ERR-2073: NAME 정확일치 + 시간범위만 받는다). */
+  const KEYS = ['T:A:fault', 'T:B:fault'];
   await run('기간 삭제(대역) — 행과 이름을 함께 지운다', () =>
-    fake.q(SQL.bandDeleteRange(1, 2)).then(() => purgeNames('NEO_VIBE_BAND')));
+    runAll(SQL.bandDeleteRange(KEYS, 1, 2)).then(() => purgeNames('BAND')));
   await run('기간 삭제(이벤트) — 행과 이름을 함께 지운다', () =>
-    fake.q(SQL.eventsDeleteRange(1, 2)).then(() => purgeNames('NEO_VIBE_EVENTS')));
+    runAll(SQL.eventsDeleteRange(KEYS, 1, 2)).then(() => purgeNames('EVENTS')));
   await run('태그 삭제(이벤트) — 행과 이름을 함께 지운다', () =>
-    fake.q(SQL.eventsDeleteTag('T', 'A')).then(() => purgeNames('NEO_VIBE_EVENTS')));
+    fake.q(SQL.eventsDeleteTag('T', 'A')).then(() => purgeNames('EVENTS')));
+}
+
+// ── 기간 삭제가 남의 행을 건드리지 않는가 ─────────────────────────────────
+{
+  /* 시간 조건만 있는 DELETE 가 하나라도 나오면 공용 표에서 전 계정의 데이터가 지워진다.
+     에러가 아니라 "남의 데이터가 사라짐"으로 나타나므로 화면으로는 절대 알 수 없다. */
+  SQL.setScope('NEO_BEARING_STORE', 'JOY');
+  const stmts = SQL.bandDeleteRange(['T:A:fault'], 1, 2).concat(SQL.eventsDeleteRange(['T:A'], 1, 2));
+  chk(stmts.length === 2, '이름 하나당 문장 하나', `${stmts.length}건`);
+  chk(stmts.every((q) => q.includes("NAME='JOY:")), '지울 이름에 계정 접두가 붙는다', stmts[0]);
+  chk(stmts.every((q) => /NAME=/.test(q)), '시간 조건만으로 지우는 문장이 없다', stmts.join(' | '));
+  chk(SQL.bandDeleteRange([], 1, 2).length === 0, '지울 이름이 없으면 문장도 없다');
+  SQL.setScope('', '');
 }
 
 // ── 실제 소스에 배선돼 있는가 ──────────────────────────────────────────────

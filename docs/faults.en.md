@@ -215,3 +215,9 @@ degradation, and **four of six bearings were completely silent**. Since these ar
 If the top two ratios are close, the app **lists both candidates and says "insufficient separation"**. In measurements `BPFO ×1.42 / BSF ×1.39` — a 2 % gap — was being declared "outer race".
 
 **Either way the bearing gets replaced, so the maintenance plan stands on detection alone.** The type matters for **root-cause analysis**: an inner race defect points to overload or misalignment, an outer race defect to the housing or current passage — which is what changes the prevention measure.
+
+## Navigation
+
+- [Previous: How detection works](./detection.en.md)
+- [Back to contents](./index.en.md)
+- [Next: What this tool does and does not do](./scope.en.md)

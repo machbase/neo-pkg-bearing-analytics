@@ -35,6 +35,8 @@ This exists so that "no events" can be told apart: equipment is fine, versus mon
 
 The event list below shows recorded events with time · tag · type · measured value vs. limit · grade. Click any row to open detail analysis at the moment that event occurred.
 
+Values are written in the equipment's original unit. For acceleration (g) and displacement (μm) sensors the grade comes from the ISO value converted to velocity, so there is no limit that can be stated in the original unit. Their grade events therefore show the grade basis in place of a limit number (e.g. `0.077 g · ISO 위험 구간 · 결함 패턴 외륜(BPFO)`). Notifications and the limit column of exported files follow the same rule.
+
 - Period chips and the **tag** and **type** dropdowns narrow the list.
 - Only the most recent **200** events are rendered. Use export to see beyond that.
 - Types are **observation** (a single cycle, no alert), threshold, sustained, improved, recovered, instrumentation fault, and signal lost. What each means is laid out in [How detection works](./detection.en.md).
@@ -71,6 +73,12 @@ A saturated signal reads lower in amplitude than reality, and a single impulse i
 ### Severity assessment
 
 The top card shows the overall risk grade and a zone-boundary bar, with four headline indicators below it, each with its value, threshold, and change.
+
+**That grade is not set by the vibration magnitude (ISO) shown next to it.** Exactly one axis raises it: the **defect pattern** — whether evidence stands at a bearing defect frequency (BPFO / BPFI / BSF / FTF) in the [envelope](./glossary.en.md#envelope-demodulation). Only then does the grade rise, and the ISO zone decides **how high** it rises.
+
+So a machine that shakes hard but shows no defect pattern **stays at its grade**, while one with ordinary amplitude but a clear pattern moves up — which is exactly where early bearing damage lives, before it reaches the amplitude. Baseline and band values never move the grade; they appear **as supporting evidence** only.
+
+The monitoring cards use the **same detector**, so the two screens never disagree. [How detection works](./detection.en.md) has the full principle.
 
 ### Switching the display unit
 
@@ -127,7 +135,7 @@ Where you turn analysis into a document.
 3. Optionally turn on **Include LLM opinion** and pick a provider.
 4. Press **Generate report**.
 
-Generation runs in four steps — query data → compute indicators → generate opinion → save — with progress shown. If it takes too long, **Cancel generation** stops it. Finished reports are saved to `/vibration-reports`.
+Generation runs in four steps — query data → compute indicators → generate opinion → save — with progress shown. If it takes too long, **Cancel generation** stops it. Finished reports are saved under the signed-in account's folder (`<account>/vibration-reports/`).
 
 ### Report structure
 
@@ -141,6 +149,8 @@ Generation runs in four steps — query data → compute indicators → generate
 | Conclusions and recommendations | Verdict and actions |
 
 A switch at the top of the report toggles between **Summary** and **Full**. Summary is built for a 30-second read; Full expands every chart and all evidence. Printing includes the full content.
+
+> **Print with the print button at the top of the report** (Print · Save as PDF). A report opened from the app sits in a frame isolated from the console (so the report file cannot reach your login), and the browser's Ctrl+P prints only that outer frame.
 
 Saved reports are **self-contained HTML** with no external references, and their charts are live rather than baked images — wheel zoom, drag, and tooltips work, and they redraw to match the theme. Handing over the single file is enough for someone else to explore it the same way.
 

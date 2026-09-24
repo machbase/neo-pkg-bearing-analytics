@@ -60,9 +60,10 @@ const env = {
    기본은 경계를 훌쩍 넘는 값으로 둬서 지름길이 끼어들지 않게 하고, 지름길 검사에서만 낮춘다. */
 const WVAL = { 'T:A': [{ rms: 99, cnt: FS }] };
 // gateFromRaw·GRAW — isoValue가 원본을 받는 김에 계측 게이트도 태운다(같은 샘플 재사용)
-const mkIsoValue = (db) => new Function('isoNeeded', 'isoRms', 'isoSkippable', 'esc', 'dtms', 'LAST', 'WVAL', 'db', 'getNow', 'gateFromRaw', 'GRAW', 'impactEvidence', 'IMP',
+// srcOf — 데이터 표의 수식된 이름을 돌려주는 TQL 내부 헬퍼(여기선 표가 하나라 그대로 통과)
+const mkIsoValue = (db) => new Function('isoNeeded', 'isoRms', 'isoSkippable', 'esc', 'dtms', 'LAST', 'WVAL', 'db', 'getNow', 'gateFromRaw', 'GRAW', 'impactEvidence', 'IMP', 'srcOf',
   'var now; ' + m[0] + '; return function(t,w,p,k,n){ now = getNow(); return isoValue(t,w,p,k,n); };'
-)(env.isoNeeded, env.isoRms, VC.isoSkippable, env.esc, env.dtms, env.LAST, WVAL, db, () => NOW, VC.gateFromRaw, {}, VC.impactEvidence, {});
+)(env.isoNeeded, env.isoRms, VC.isoSkippable, env.esc, env.dtms, env.LAST, WVAL, db, () => NOW, VC.gateFromRaw, {}, VC.impactEvidence, {}, (t) => t);
 const isoValue = mkIsoValue(env.db);
 
 const TAG = { tbl: 'T', tag: 'A', fs: FS, zones: [1.12, 2.8, 7.1] };

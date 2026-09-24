@@ -99,9 +99,9 @@ chk(!has(MON, 'ev.etype=="band"') && !has(MON, 'ev.etype=="baseline"'),
 // ── 점수 계열 ───────────────────────────────────────────────────────────
 chk(/function bandInsert\(key, ms, v\)/.test(SQL), '계열 한 점을 넣는 SQL이 있다');
 chk(/insertBandPoint\(r\.key \+ ':pattern'/.test(SRC), '앱이 매 회차 격자 점수를 계열로 남긴다');
-chk(/NEO_VIBE_BAND[\s\S]{0,120}:pattern/.test(MON), '서버 타이머도 같은 키로 남긴다');
+chk(/BAND[\s\S]{0,120}:pattern/.test(MON), '서버 타이머도 같은 키로 남긴다');
 // 두 경로가 동시에 쓰면 같은 시각에 두 행이 쌓인다
-chk(/S\.monMode !== 'server'/.test(SRC), '앱은 서버 모드일 때 쓰지 않는다 — 중복 적재 방지');
+chk(/[SC]\.monMode !== 'server'/.test(SRC), '앱은 서버 모드일 때 쓰지 않는다 — 중복 적재 방지');
 
 // ── 계열 키 규칙 ────────────────────────────────────────────────────────
 /* 대역·포락선과 같은 표·같은 키 규칙이어야 한 차트에 겹쳐 그리고, 태그 정리도 한 번에 지운다

@@ -60,5 +60,41 @@ const chk = (c, label, extra) => {
   chk(f1.BPFO > 0, '회전수가 있으면 BPFO가 선다', f1.BPFO.toFixed(2));
 }
 
+// ── 배너가 사라지는가 ────────────────────────────────────────────────────────
+/* "회전수를 넣어라"는 배너는 사람이 설비 정보를 채워야만 풀린다. 그 계산이 서명(sig) 검사
+   뒤에 있으면, 다른 경고가 그대로일 때 위에서 return 해 배너만 다시 재지 않는다 —
+   값을 다 채워도 경고가 남고, 새로 걸린 태그는 반대로 안 뜬다. */
+{
+  const app = Object.create(App.prototype);
+  const eqs = ['s1-c1', 's1-c2'].map((n) => ({
+    id: 'NASA_LIVE:' + n, table: 'NASA_LIVE', name: n, alias: n,
+    rpm: 0, bearing: { model: '', n: 0 }, lastSeen: Date.now(), stat: {},
+  }));
+  app.data = { now: Date.now(), equipment: eqs, events: [], reports: [] };
+  app.state = { srcSel: ['NASA_LIVE'], equipRpm: {}, equipBearing: {}, equipGeo: {},
+    monMode: 'app', monitorInterval: '10s', bandOn: false, knownTags: [], revived: {} };
+  app._toast = () => {};
+  let health = null;
+  app.setState = (o) => { Object.assign(app.state, o); if ('health' in o) health = o.health; };
+
+  app._applyHealth({}, null);
+  const nogeo = (health || []).filter((w) => w.k === 'nogeo');
+  chk(nogeo.length === 1, '회전수가 없으면 배너가 뜬다', nogeo.length ? nogeo[0].text.slice(0, 40) : '없음');
+
+  // 값을 채운다 — 실제로는 설정 저장 뒤 _reloadLive 가 equipment 를 다시 굽는다
+  eqs.forEach((e) => { e.rpm = 1800; e.bearing = { model: '6206', n: 9 }; });
+  app._applyHealth({}, null);
+  chk((health || []).filter((w) => w.k === 'nogeo').length === 0,
+    '값을 채우면 배너가 사라진다 — sig 검사보다 먼저 재야 한다',
+    JSON.stringify((health || []).map((w) => w.k)));
+
+  // 반대 방향도 — 한 대만 다시 비면 배너가 돌아와야 한다
+  eqs[0].rpm = 0;
+  app._applyHealth({}, null);
+  const back = (health || []).filter((w) => w.k === 'nogeo');
+  chk(back.length === 1 && /1대/.test(back.text || back[0].text),
+    '다시 비면 배너가 돌아온다', back.length ? back[0].text.slice(0, 34) : '없음');
+}
+
 console.log(fail ? `\n=== FAIL ${fail}건 ===` : '\n=== 전부 통과 ===');
 process.exit(fail ? 1 : 0);

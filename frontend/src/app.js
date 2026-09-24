@@ -3,15 +3,25 @@
 import { Component } from 'preact/compat';
 import { view } from './view.js';
 import { pickerOpen } from './daterange.js';
-import { listTagTables, tagSchemas, listTags, tagStats, rollupTrend, loadConfig, saveConfig, saveConfigPartial, buildLiveData, liveDetail, sweepAnchors, monPattern, emptyDet, rollupBatch, loadTrendChunks , timerStates, MON_TIMER, BAND_TIMER, WD_TIMER, createWdTimer, deleteWdTimer, rawWindow, CAPS, pkgBase} from './data/live.js';
+import { listTagTables, tagSchemas, listTags, tagStats, rollupTrend, loadConfig, saveConfig, saveConfigPartial, buildLiveData, liveDetail, sweepAnchors, monPattern, emptyDet, rollupBatch, loadTrendChunks , timerStates, monTimer, bandTimer, wdTimer, createWdTimer, deleteWdTimer, rawWindow, CAPS, pkgBase} from './data/live.js';
 import { ensureMonTables, loadEventsRange, countEvents, loadBaselines, saveBaseline, deleteBaseline, insertEvent, insertBandPoint, loadMonState, saveMonState, createMonitorTimer, deleteMonitorTimer, createBandTimer, deleteBandTimer, bandRaw, bandLatest, bandTrend, bandBackfill, bandTimes } from './data/live.js';
 import { usageStats, countRange, tagUsage, deleteEventsRange, deleteEventsOfTag, deleteBandRange, deleteBandOfTag, deleteMonState } from './data/live.js';
 import { runTql } from './data/live.js';
+import { jwtUser, sessionJwt, whoami, onAuthFail, setUser, checkAppDb, setupSql, createAppDb, appDb, storePrefix, userKeyPrefix, configTable, srcMapOf, listUsers, grantTo, migrateConfigToDb } from './data/live.js';
 import Monitor from '../../cgi-bin/monitor/monitor.js';
 import Band from '../../cgi-bin/monitor/band.js';
-import Watchdog from '../../cgi-bin/monitor/watchdog.js';
 import Notify from '../../cgi-bin/notify/notify.js';
 // 별칭 편집이 한 번에 그리는 줄 수 — 목록 자체는 전부이고, 넘치는 만큼은 검색으로 좁혀 찾는다
+/* 토큰 보관 — 브라우저가 1차 보관소다. 설정 파일을 읽으려면 토큰이 먼저 있어야 하므로
+   토큰만은 서버에 둘 수 없다(닭과 달걀). 서버 사본은 감시 타이머가 읽으려고 두는 것이고,
+   그건 신원이 확인된 뒤에 설정과 함께 저장된다. */
+/* Neo 콘솔 로그인 계정 — 같은 origin 이라 콘솔이 둔 JWT 를 읽을 수 있다. 이 값은 신원 확인에
+   쓰지 않는다(그건 토큰이 한다). 토큰 계정과 어긋났을 때 알리는 용도다: 콘솔은 JOY 로 열어
+   두고 앱에는 SYS 토큰을 넣으면 화면 전체가 SYS 것이 되는데, 지금은 아무 표시도 없다.
+   앱이 콘솔 밖에서 열려 JWT 가 아예 없는 것은 정상이므로 막지는 않는다. */
+/* 신원은 Neo 콘솔 로그인 세션에서 온다. 앱이 자격증명을 따로 받지도 보관하지도 않으므로
+   "콘솔에 로그인한 사람"과 "앱이 보는 데이터"가 어긋날 수 없다. */
+
 var ALIAS_ROWS_MAX = 200;
 var GRADE_WORDS = ['양호', '주의', '위험', '심각']; // 이벤트 GRADE 저장·표시용(인덱스 ↔ 단어)
 // 대역 학습 기간 — 표본이 성겨서 RMS보다 긴 선택지가 필요하다. 1시간은 어떤 추출 주기로도
@@ -68,6 +78,10 @@ var CFG_KEYS = ['srcSel', 'machineClass', 'classThresh', 'unitThresh',
   'evalWindow', 'monitorOn', 'notifCh', 'notifTo', 'routes', 'aliases',
   'monitorInterval', 'monMode', 'renotify', 'bandOn', 'bandInterval', 'bandWin',
   'llmProvider', 'llmKeys', 'llmModels', 'ollamaUrl', 'genLLM'];
+/* 설정 폼이 편집하는 키 — "저장 안 함"이 되돌리는 대상. 나머지(카드 순서·알던 태그·되살아남·리포트 LLM 토글)는
+   앱이 바꾸는 즉시 저장하는 값이라 편집본과 저장본이 갈리지 않는다. */
+var FORM_KEYS = CFG_KEYS.filter(function (k) { return ['cardOrder', 'knownTags', 'revived', 'genLLM'].indexOf(k) < 0; });
+function cfgClone(v) { return v === undefined ? undefined : JSON.parse(JSON.stringify(v)); }
 /* 일괄 적용 항목 ↔ 설정 입력칸 — 칩 하나가 입력칸 하나다(뷰모델과 적용이 같은 표를 쓴다).
    형상·벨트는 값마다 칸이 따로라 여기서도 따로 다룬다. */
 var GEO_F = { geoN: 'n', geoBd: 'Bd', geoPd: 'Pd', geoPhi: 'phi' };
@@ -122,6 +136,20 @@ var EVT_LIVE_TYPES = ['observe', 'threshold', 'sustained', 'improve', 'recovery'
    엉뚱한 축 이름이 된다. 축이 늘거나 이름이 바뀌면 여기만 고친다. */
 var GRADE_SRC_KO = { iso: 'ISO 존', baseline: '베이스라인', band: '대역·포락선', pattern: '결함 패턴' };
 var TYPEKO = { observe: '관찰', threshold: '임계 초과', sustained: '상태 지속', recovery: '정상 복귀', improve: '상태 개선', signal_lost: '신호 두절', sensor_fault: '계측 이상', sensor_ok: '계측 복귀', baseline: '베이스라인 이탈', band: '대역 이탈', bandrec: '대역 복귀' };
+/* 등급 이벤트 — 값이 판정값인 행. 가속도·변위 설비의 이 행은 원본 단위 값에 기준 숫자가 없고
+   근거를 말로 적는다(판정기가 DETAIL 머리에 'ISO <존> 구간'을 적는다 — _judgeLive·monitor.js). */
+var GRADE_ETYPES = { observe: 1, threshold: 1, sustained: 1, improve: 1, recovery: 1 };
+/* 리포트를 여는 새 탭의 틀 — 리포트 본문은 샌드박스 iframe(불투명 오리진) 안에서만 돈다(_openReport).
+   ⚠ sandbox에 allow-same-origin·allow-top-navigation·allow-popups를 넣지 않는다 — 하나라도 넣으면
+      남이 올린 HTML이 콘솔 토큰을 읽거나 콘솔 창을 다른 곳으로 보낼 수 있다. */
+var REPORT_SANDBOX = 'allow-scripts allow-modals';
+function reportShell(title, src) {
+  var esc = function (s) { return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'); };
+  return '<!DOCTYPE html><html lang="ko"><head><meta charset="UTF-8"><title>' + esc(title) + '</title>'
+    + '<style>html,body{margin:0;height:100%;background:#1a1b1e}iframe{display:block;border:0;width:100%;height:100%}</style></head>'
+    + '<body><iframe sandbox="' + REPORT_SANDBOX + '" src="' + esc(src) + '"></iframe></body></html>';
+}
+function natRow(etype, unit) { return !!GRADE_ETYPES[etype] && !!unit && unit !== 'mm/s'; }
 /* 생성된 TQL의 짧은 지문(FNV-1a) — 서버 타이머 재굽기 판단에 쓴다.
    길이만 비교하면 같은 길이의 다른 코드를 놓친다. 충돌 확률보다 "안 구워지는 것"이 위험하다. */
 function srcSig(s) {
@@ -129,7 +157,7 @@ function srcSig(s) {
   for (i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = (h * 16777619) >>> 0; }
   return h.toString(36);
 }
-// 심각도별 기본 라우팅 — 채널만 켜면 위험·심각은 바로 알림이 가야 한다(주의는 소음이라 기본 꺼짐).
+// 심각도별 기본 라우팅 — 채널만 켜면 전 행이 바로 알림이 간다(기본값 근거는 아래 ROUTE_DEFAULT_TIMING).
 // 사용자가 한 번이라도 건드린 심각도는 저장된 값이 그대로 우선한다.
 /* 라우팅 행 — 앞 셋은 설비 등급, 마지막은 **감시 건강**(두절·계측 이상)이다.
    감시 이상을 등급 표에 섞지 않는 이유: "이 설비가 얼마나 나쁜가"와 "이 값을 믿을 수 있는가"는 다른 질문이고,
@@ -144,13 +172,14 @@ var ROUTE_ORDER = GRADE_ROUTES.concat([HEALTH_ROUTE]);
    실측 이력에서 threshold 1339건 중 1336건이 주의라, 끄면 이 도구가 잡는 것의 99.8%가 알림 없이 묻힌다.
    섀도 검증 기준 측정점·월당 0.92건이므로 켜도 소음이 되지 않는다. */
 var ROUTE_DEFAULT_TIMING = { '주의': '즉시', '위험': '즉시', '심각': '즉시', '감시 이상': '즉시' };
+/* 미설정 행 채우기는 notify.notifyCfgFrom 한 곳이 한다 — 서버 감시가 발송 때 같은 함수로
+   저장된 설정을 해석하므로(이 기본값은 스펙에 실려 간다) 화면 체크 상태와 실제 발송이 갈리지 않는다. */
+var ROUTE_DEFS = { order: ROUTE_ORDER, timing: ROUTE_DEFAULT_TIMING };
+// 설정 영역(db CONFIG_FILES의 도메인) → [화면 이름, 설정 탭 섹션] — 손상 안내가 고칠 곳을 가리킨다
+var CFG_DOMAIN_UI = { source: ['데이터 소스', 'source'], equipment: ['설비 정보', 'equip'], criteria: ['판정 기준', 'criteria'],
+  monitor: ['알람 설정', 'monitor'], llm: ['LLM 연동', 'llm'] };
 function routesWithDefaults(routes) {
-  var out = {};
-  ROUTE_ORDER.forEach(function (k) {
-    var r = (routes || {})[k];
-    out[k] = r ? r : { timing: ROUTE_DEFAULT_TIMING[k] };
-  });
-  return out;
+  return Notify.notifyCfgFrom({ routes: routes }, ROUTE_DEFS).routes;
 }
 // 조회 기간 프리셋(시간 단위). 짧은 창일수록 고해상도 버킷(≤2h=초·≤3d=분)이 잡힌다.
 var PERIOD_H = { '1h': 1, '6h': 6, '24h': 24, '7d': 168 };
@@ -187,6 +216,14 @@ function durKo(ms) {
 /* 판정 틱과 카탈로그 틱을 분리한다 — 태그 증감은 사람이 하는 일이라 매 판정마다 확인할 이유가 없다.
    판정 조회는 배치(NAME IN)로 묶어 테이블당 1회다. */
 var CAT_TICK_MS = 10000;   // 카탈로그(태그 증감) 확인 주기
+// 불러오기 실패 재시도 — 10초에서 시작해 두 배씩, 5분에서 멈춘다
+var LOAD_RETRY_MS = 10000, LOAD_RETRY_MAX_MS = 300000;
+// 테이블 조회 실패를 오류로 — 적재 결과에서 빠진 테이블 이름을 싣는다(배너가 원인 후보로 보여 준다)
+function loadError(tables) {
+  var e = new Error('테이블 조회 실패: ' + tables.join(', '));
+  e.tables = tables.slice();
+  return e;
+}
 /* RMS 구간의 끝을 지금으로 잡으면 마지막 버킷이 아직 적재 중이다.
    여유를 두고 조회하고, 미완성 버킷은 windowRms가 cnt로 걸러낸다. */
 var WIN_LAG_MS = 4000;
@@ -372,7 +409,7 @@ export { judgeTick, durMs, detailSrc }; // 테스트·서버 타이머 재사용
 import VC from '../../cgi-bin/calc/calc.js';
 import LLM from '../../cgi-bin/llm/llm.js';
 import Report from '../../cgi-bin/report/report.js';
-import { REPORT_DIR, ensureDir, saveFile, listDir, deleteFile, readFileBlob, chartLibSrc } from './data/live.js';
+import { REPORT_ROOT, reportDir, ensureDir, saveFile, listDir, deleteFile, readFileBlob, chartLibSrc } from './data/live.js';
 import CH from '../../cgi-bin/chart/chart.js';
 // E(구 vibe-engine) = 이제 차트 모듈만 (목데이터 제거 — 라이브 전용, mock은 frontend/tools/에 테스트용으로만 잔존)
 var ENGINE = CH;
@@ -385,6 +422,9 @@ export class App extends Component {
     var theme = savedTheme ? (savedTheme === 'light' ? 'light' : 'dark') : ((props && props.defaultTheme === 'light') ? 'light' : 'dark');
     this.state = {
       ready: false, tab: (props && props.defaultTab) || 'monitor', theme: theme,
+      user: '', authMsg: '', cfgFail: null,
+      needsDb: false, dbExists: false, dbSetup: null, dbWhy: '', dbAdmin: false, dbBusy: false,
+      grantUsers: null, grantPick: '', grantBusy: false, grantMsg: '',
       configured: true, monitorOn: true,
       selTag: null, period: '1h', from: '', to: '', // 기본 1시간 — 진동은 짧은 창이라야 초 단위 해상도가 잡힌다
       diagTag: null, evtTag: 'all', evtType: 'all', evtScope: 'today', // 이벤트 목록 기간: today | 7d | all
@@ -434,6 +474,7 @@ export class App extends Component {
       aliases: {}, // 태그 별칭 {"TABLE:TAG": 별칭}
       srcSel: [], evalWindow: '10s', // 소스 기본값 = 미선택 · evalWindow=RMS 구간(판정 주기 이상)
       srcNotice: '', // 데이터 소스 변동(테이블/태그 제거) 감지 배너 문구
+      loadFail: null, // 불러오기 실패 — { why, tables, missing, tries, nextAt }. 옛 데이터로 감시하며 재시도 중
       /* 설비 카드 순서 — 드래그로 바꾼다. 기본은 심각도 내림차순이지만, 현장에서 늘 먼저 보는
          설비는 등급과 무관하게 앞에 두고 싶을 때가 있다. 저장된 순서에 없는 태그는 뒤에 붙는다. */
       cardOrder: [], cardDragId: null, cardPreview: null,
@@ -492,13 +533,192 @@ export class App extends Component {
     document.addEventListener('mouseout', function (e) { if (!e.relatedTarget) tip.style.display = 'none'; });
   }
   _clock() { var el = document.getElementById('vclock'); if (!el) return; var d = new Date(); function z(n){return n<10?'0'+n:''+n;} el.textContent = d.getFullYear()+'-'+z(d.getMonth()+1)+'-'+z(d.getDate())+' '+z(d.getHours())+':'+z(d.getMinutes())+':'+z(d.getSeconds()); }
-  componentWillUnmount() { window.removeEventListener('resize', this._onResize); if (this._raf) clearTimeout(this._raf); if (this._pt) clearTimeout(this._pt); if (this._tt) clearTimeout(this._tt); if (this._live) clearInterval(this._live); if (this._clk) clearInterval(this._clk); if (this._gt) clearTimeout(this._gt); if (this._resyncT) clearTimeout(this._resyncT); }
+  componentWillUnmount() { window.removeEventListener('resize', this._onResize); if (this._raf) clearTimeout(this._raf); if (this._pt) clearTimeout(this._pt); if (this._tt) clearTimeout(this._tt); if (this._live) clearInterval(this._live); if (this._clk) clearInterval(this._clk); if (this._gt) clearTimeout(this._gt); if (this._resyncT) clearTimeout(this._resyncT); if (this._loadRetryT) clearTimeout(this._loadRetryT); }
   _poll() { this._boot(ENGINE); } // 모듈 import라 로드 대기 불필요 (구 window.VibeEngine 폴링 제거)
-  // 라이브 부팅: Neo API가 닿고 TAG 테이블이 있으면 실데이터, 아니면 mock(데모) 폴백
+  /* 신원 확인이 먼저다. 로그인 세션이 없으면 서버를 한 번도 부르지 않는다 — 부르면 서버가
+     헤더 없는 요청을 기본 신원으로 통과시켜 "로그인 안 해도 다 보이는" 화면이 된다.
+     인증 실패가 조용한 성공으로 번역되는 것을 여기서 끊는다. */
   _boot(E) {
     var self = this;
     this.E = E;
-    loadConfig().catch(function () { return null; })
+    var who = jwtUser();
+    if (!who) { this._initNoAuth('Neo 콘솔에 로그인되어 있지 않습니다'); return; }
+    onAuthFail(function () { self._onAuthLost(); });
+    /* 세션의 sub 와 실제 실행 계정을 대조한다. 둘이 어긋나면(서버가 다른 커넥션으로 돌리는 등)
+       응답은 정상인데 남의 권한으로 도는 것이라 화면만 보고는 알 수 없다. */
+    whoami().then(function (user) {
+      if (user !== who) {
+        self._initNoAuth('로그인 계정(' + who + ')과 실제 실행 계정(' + user + ')이 다릅니다 — 관리자에게 알리세요');
+        return null;
+      }
+      self.user = user;
+      setUser(user);
+      self.setState({ user: user, authMsg: '' });
+      /* 앱 저장소는 전용 DB 의 계정 스키마에 있다. DB 가 없거나 권한이 없으면 아무것도 못 하므로
+         관리자가 실행할 SQL 을 그대로 보여준다 — 빈 화면보다 다음 행동이 보이는 쪽이 낫다. */
+      return checkAppDb().then(function (usable) {
+        if (!usable) { self._initNeedsDb(); return false; }
+        return ensureMonTables()
+          .then(function () { return migrateConfigToDb(); })
+          .then(function () { return true; })
+          // DB 는 있는데 여기서 걸렸다면 권한 문제다 — 안내가 갈려야 무엇을 요청할지 알 수 있다
+          .catch(function (e) { self._initNeedsDb((e && e.message) || String(e), true); return false; });
+      });
+    }).then(function (ok) {
+      if (ok) self._bootAs(E);
+      // 권한을 줄 수 있는 계정 목록 — 저장소가 준비됐든 아니든 관리자에게는 필요하다
+      if (self.state.user === 'SYS') self._loadGrantUsers();
+    }).catch(function (e) {
+      self._initNoAuth('로그인 계정을 확인하지 못했습니다 — ' + ((e && e.message) || e));
+    });
+  }
+  /* 인증 전/끊김 화면 — "데이터가 없다"가 아니라 "아직 누구인지 모른다"이므로 조회를 걸지 않고
+     설정의 사용자 섹션만 열어 둔다. 사유를 그대로 실어 빈 화면과 구분되게 한다. */
+  _initNoAuth(why) {
+    this.live = false;
+    this.data = { now: Date.now(), equipment: [], events: [], reports: [] };
+    if (this._live) clearInterval(this._live);
+    if (this._cat) clearInterval(this._cat);
+    this.setState({
+      ready: true, authMsg: why || '인증이 필요합니다', user: '',
+      srcSel: [], selTag: null, diagTag: null, events: [], reports: [],
+      tab: 'settings', setSection: 'source',
+    });
+  }
+  /* 설정을 못 읽은 화면 — 데이터도 타이머도 올리지 않고 사유에 맞는 다음 행동만 준다.
+     조회 실패는 설정이 DB에 그대로 있으므로 다시 시도만 준다(재설정을 권하면 멀쩡한 설정을 지운다).
+     조각 손상은 다시 읽어도 안 풀리므로 그 영역만 기본값으로 여는 길을 함께 준다.
+     세션이 끊겨 실패한 것이면 인증 화면이 먼저다 — 덮지 않는다. */
+  _initCfgFail(err) {
+    if (this.state.authMsg) return;
+    this.live = false;
+    this._cfgOk = false;
+    this.data = { now: Date.now(), equipment: [], events: [], reports: [] };
+    if (this._live) clearInterval(this._live);
+    if (this._cat) clearInterval(this._cat);
+    this.setState({
+      ready: true, srcSel: [], selTag: null, diagTag: null, events: [], reports: [], tab: 'monitor',
+      cfgFail: { kind: (err && err.kind) || 'query', msg: (err && err.message) || String(err), domains: (err && err.domains) || [] },
+    });
+  }
+  _retryCfg() {
+    this.setState({ cfgFail: null, ready: false });
+    this._bootAs(this.E);
+  }
+  /* 손상된 영역만 기본값으로 연다 — 누르는 것만으로는 아무것도 저장되지 않는다.
+     그 영역의 설정 화면으로 보내고, 사용자가 확인해 저장할 때 비로소 새 값으로 다시 쓰인다. */
+  _repairCfg() {
+    var self = this, doms = ((this.state.cfgFail || {}).domains || []).slice();
+    this.setState({ cfgFail: null, ready: false });
+    loadConfig({ allowBroken: true }).then(function (cfg0) {
+      self._cfgFresh = false;
+      self._bootWith(cfg0 || {});
+      var ui = CFG_DOMAIN_UI[doms[0]] || CFG_DOMAIN_UI.source;
+      self.setState({ tab: 'settings', setSection: ui[1] });
+      self._toast(doms.map(function (d) { return (CFG_DOMAIN_UI[d] || [d])[0]; }).join('·')
+        + ' 설정을 기본값으로 열었습니다 — 확인 후 저장하면 복구됩니다', 'warn');
+    }, function (err) { self._initCfgFail(err); });
+  }
+  // 설정 저장 잠금 — 걸려 있으면 사유를 알리고 true(_bootWith 주석 참조)
+  _cfgLocked(silent) {
+    if (this._cfgOk) return false;
+    if (!silent) this._toast('설정을 불러오지 못한 상태라 저장하지 않았습니다 — 새로고침 후 다시 시도하세요', 'err');
+    return true;
+  }
+  _initNeedsDb(why, hasDb) {
+    this.live = false;
+    this.data = { now: Date.now(), equipment: [], events: [], reports: [] };
+    if (this._live) clearInterval(this._live);
+    if (this._cat) clearInterval(this._cat);
+    this.setState({
+      ready: true, needsDb: true, dbExists: !!hasDb, dbSetup: setupSql(), dbWhy: why || '',
+      dbAdmin: (this.state.user === 'SYS'),
+      srcSel: [], selTag: null, diagTag: null, events: [], reports: [],
+      tab: 'settings', setSection: 'source',
+    });
+  }
+  /* 저장소를 만들고 이어서 부팅한다. 관리자로 접속해 있으면 SQL 을 복사해 다른 창에서
+     실행하고 돌아올 이유가 없다 — 권한이 없으면 서버가 거부하고 그 사유를 그대로 보여준다. */
+  _makeDb() {
+    var self = this;
+    if (this.state.dbBusy) return;
+    this.setState({ dbBusy: true });
+    createAppDb()
+      .then(function () { return self._resumeAfterDb(); })
+      .catch(function (e) {
+        self.setState({ dbBusy: false, dbWhy: (e && e.message) || String(e) });
+        self._toast('저장소를 만들지 못했습니다 — 아래 SQL 을 관리자에게 요청하세요', 'err');
+      });
+  }
+  /* 저장소가 준비됐는지 다시 본다 — 권한을 받았는지 확인할 때 쓴다(직접 만들 수 없는 계정). */
+  _checkDb() {
+    var self = this;
+    if (this.state.dbBusy) return;
+    this.setState({ dbBusy: true });
+    checkAppDb().then(function (ok) {
+      if (!ok) {
+        self.setState({ dbBusy: false });
+        self._toast('아직 준비되지 않았습니다', 'warn');
+        return;
+      }
+      return self._resumeAfterDb();
+    }).catch(function (e) {
+      self.setState({ dbBusy: false });
+      self._toast('확인 실패: ' + ((e && e.message) || e), 'err');
+    });
+  }
+  /* 권한 주기 — SQL 여섯 줄을 사람이 옮겨 적게 하지 않는다. 계정 목록은 처음 펼칠 때 한 번 읽고,
+     실패는 문장별 사유를 그대로 올린다(이미 준 권한은 다시 줘도 무해하다). */
+  _loadGrantUsers() {
+    var self = this;
+    if (this.state.grantUsers) return;
+    listUsers()
+      .then(function (us) { self.setState({ grantUsers: us, grantPick: self.state.grantPick || us[0] || '' }); })
+      .catch(function (e) { self.setState({ grantUsers: [], grantMsg: '계정 목록을 읽지 못했습니다 — ' + ((e && e.message) || e) }); });
+  }
+  _grantTo() {
+    var self = this, u = this.state.grantPick;
+    if (!u || this.state.grantBusy) return;
+    this.setState({ grantBusy: true, grantMsg: '' });
+    grantTo(u).then(function (r) {
+      self.setState({ grantBusy: false,
+        grantMsg: r.failed ? u + ' — ' + (r.total - r.failed) + '/' + r.total + ' 적용, 실패: ' + r.reasons[0]
+          : u + ' 에 권한을 부여했습니다 (' + r.total + '건)' });
+      self._toast(u + ' 권한 부여 완료', r.failed ? 'warn' : 'ok');
+    }).catch(function (e) {
+      self.setState({ grantBusy: false, grantMsg: '실패 — ' + ((e && e.message) || e) });
+      self._toast('권한 부여 실패', 'err');
+    });
+  }
+  // 저장소가 생긴 뒤 — 테이블 생성·설정 이관까지 이어가려면 부팅을 처음부터 다시 태운다
+  _resumeAfterDb() {
+    this.setState({ needsDb: false, dbBusy: false, dbWhy: '' });
+    this._boot(ENGINE);
+  }
+  // 세션 도중 토큰이 죽은 경우 — 폴링을 멈추지 않으면 3초마다 401을 때린다
+  _onAuthLost() {
+    if (this.state.authMsg) return;
+    this._initNoAuth('세션이 만료되었습니다 — Neo 콘솔에서 다시 로그인한 뒤 새로고침하세요');
+  }
+  // 라이브 부팅: Neo API가 닿고 TAG 테이블이 있으면 실데이터, 아니면 mock(데모) 폴백
+  /* 부팅 — 설정 읽기 결과로 갈린다(db.loadConfig): 읽음·저장한 적 없음은 그대로 부팅하고,
+     실패는 기본값으로 삼키지 않고 사유 화면(_initCfgFail)으로 보낸다. */
+  _bootAs(E) {
+    var self = this;
+    this.E = E;
+    this._cfgOk = false;
+    loadConfig().then(function (cfg0) {
+      self._cfgFresh = !cfg0;
+      self._bootWith(cfg0);
+    }, function (err) { self._initCfgFail(err); });
+  }
+  /* 설정 저장 잠금(_cfgOk)은 읽은 설정이 화면 상태에 들어간 뒤(_applyLive)에만 푼다 — 그 전의 state는
+     기본값이라 저장하면 실제 설정을 덮는다(데이터 적재 실패로 _initEmpty에 떨어진 경우도 같다).
+     저장한 적이 없으면(cfg0 null) 덮어쓸 것이 없으므로 바로 연다. */
+  _bootWith(cfg0) {
+    var self = this, E = this.E;
+    this._cfgOk = !cfg0;
+    Promise.resolve(cfg0)
       .then(function (cfg0) {
         var cfg = cfg0 || {};
         /* 옛 설정 이관 — evalWindow는 'now'/'6h'/'24h'/'7d'(집계 대상 기간)였고 지금은 RMS 구간 길이다.
@@ -548,7 +768,12 @@ export class App extends Component {
         // 저장된 선택이 없으면 아무것도 선택하지 않은 상태로 시작 (설정 → 데이터 소스에서 선택)
         var sel = (cfg.srcSel || []).filter(function (t) { return tables.indexOf(t) >= 0; });
         buildLiveData(E, sel, cfg).then(function (data) {
+          var failed = data.failed || [];
           self.data = data;
+          self._loadedSel = sel.filter(function (t) { return failed.indexOf(t) < 0; });
+          /* 실패 표시를 먼저 세운다 — _applyLive가 켜는 판정·카탈로그 틱이 서버 타이머를 동기화하는데,
+             빠진 테이블을 "태그 없음"으로 읽어 도는 타이머를 지우면 안 된다. */
+          if (failed.length) self._onLoadFail(loadError(failed), sel);
           self._applyLive(data, cfg, sel);
         }).catch(function (e) { console.warn('[vibe] live build failed', e); self._initEmpty('데이터 적재 실패: ' + (e.message || e)); });
       });
@@ -572,7 +797,12 @@ export class App extends Component {
       if (k === 'srcSel') return;             // 위에서 실제 테이블 목록과 대조해 이미 넣었다
       if (cfg[k] != null) patch[k] = cfg[k];
     });
+    // 적용본은 setState를 기다리지 않고 바로 세운다 — 곧이어 켜지는 판정·타이머가 읽는다
+    var applied = {}, S0 = this.state;
+    CFG_KEYS.forEach(function (k) { applied[k] = (k in patch) ? patch[k] : S0[k]; });
+    this._applied = cfgClone(applied);
     this.setState(patch);
+    this._cfgOk = true;   // 읽은 설정이 state에 들어갔다 — 이제 저장해도 덮어쓰지 않는다
     this._loadReports();
     var self = this;
     // 판정 상태·베이스라인 로드 후 따라잡기 판정 — 앱이 닫혀 있던 사이의 순변화를 이벤트로 소급
@@ -583,24 +813,43 @@ export class App extends Component {
       /* 되살아남 검사는 반드시 베이스라인을 읽은 뒤에 — 학습값이 있는지가 판단 근거인데,
          로드 전에 부르면 전부 "학습값 없음"으로 보여 아무것도 안 걸린다.
          그리고 따라잡기 판정보다 먼저 — 확인 대기 태그는 옛 기준으로 소급 판정하면 안 된다. */
-      self._checkRevived(sorted.map(function (e) { return e.table + ':' + e.name; }), sel);
+      // 조회에 실패한 테이블은 범위에서 뺀다 — 그 태그들을 사라진 것으로 치면 멀쩡한 학습을 되살아남으로 오판한다
+      self._checkRevived(sorted.map(function (e) { return e.table + ':' + e.name; }),
+        sel.filter(function (t) { return (d.failed || []).indexOf(t) < 0; }));
       return self._judgeLive(true);
     }).then(function () { self._loadEventsLive(); });
     if (this._live) clearInterval(this._live);
     this._startTimers();
   }
-  // 설정 저장 후 재적재 (소스 테이블 변경 반영)
-  _reloadLive() {
+  /* 설정 저장 후 재적재 (소스 테이블 변경 반영).
+     실패하면 옛 데이터를 그대로 두고 판정을 다시 켠 뒤 재시도한다 — 판정 틱은 적재 동안 멈춰 두므로,
+     실패에서 다시 켜지 않으면 새로고침 전까지 감시가 조용히 멈춘다.
+     quiet는 재시도용이다: 화면을 적재 중으로 바꾸지 않고 판정도 멈추지 않는다(옛 데이터로 계속 감시). */
+  _reloadLive(quiet) {
     var self = this, E = this.E;
     if (!this.live) return;
-    if (this._live) clearInterval(this._live);
-    this._detailCache = {}; this._rfCache = {}; this._trCacheL = {};
-    this._tickCostMs = null;  // 감시 대상이 바뀌면 옛 소요는 근거가 아니다 — 다시 잰다
-    this._tagCache = {}; // 재적재 시 별칭 편집 태그 목록도 새로 조회 (새 태그 반영)
-    this._noticeMuted = false;
-    this.setState({ ready: false, srcNotice: '' });
-    var sel = this.state.srcSel || [];
-    buildLiveData(E, sel, this._cfgFromState()).then(function (data) {
+    // 겹치지 않는다 — 진행 중에 들어온 요청은 끝난 뒤 한 번으로 모은다(그 사이 바뀐 선택까지 반영된다)
+    if (this._reloading) { this._reloadAgain = (this._reloadAgain === 'full' || !quiet) ? 'full' : 'quiet'; return; }
+    this._reloading = true;
+    if (this._loadRetryT) { clearTimeout(this._loadRetryT); this._loadRetryT = null; }
+    if (!quiet) {
+      if (this._live) clearInterval(this._live);
+      this.setState({ ready: false, srcNotice: '' });
+    }
+    var AC = this._ac(), sel = (AC.srcSel || []).slice();   // 저장된 선택·설비 설정으로 — 폼의 편집본이 섞이면 안 된다
+    var done = function () {
+      self._reloading = false;
+      var again = self._reloadAgain;
+      self._reloadAgain = null;
+      if (again) self._reloadLive(again === 'quiet');
+    };
+    buildLiveData(E, sel, AC).then(function (data) {
+      // 테이블 하나라도 못 읽었으면 실패다 — 그대로 받으면 그 테이블의 카드가 사라지고 서버 감시에서도 빠진다
+      if (data.failed && data.failed.length) throw loadError(data.failed);
+      self._detailCache = {}; self._rfCache = {}; self._trCacheL = {};
+      self._tickCostMs = null;  // 감시 대상이 바뀌면 옛 소요는 근거가 아니다 — 다시 잰다
+      self._tagCache = {}; // 재적재 시 별칭 편집 태그 목록도 새로 조회 (새 태그 반영)
+      self._noticeMuted = false;
       if (!data.now) data.now = self.data && self.data.now ? self.data.now : Date.now();
       self.data = data; // 빈 선택도 그대로 반영 (모니터링 빈 상태 표시)
       var sorted = self.data.equipment.slice().sort(function (a, b) { return b.grade - a.grade; });
@@ -612,20 +861,78 @@ export class App extends Component {
       self._refreshRunState(self.data.now || Date.now());
       // 사용자가 고른 태그가 아직 있으면 유지, 없어졌으면 worst로 — 재적재 때마다 선택이 튕기지 않게
       var keep = self.state.selTag && sorted.some(function (e) { return e.id === self.state.selTag; });
-      self.setState({ ready: true, srcCap: data.cap || null, selTag: keep ? self.state.selTag : (sorted.length ? sorted[0].id : null) });
+      self.setState({ ready: true, srcNotice: '', srcCap: data.cap || null, selTag: keep ? self.state.selTag : (sorted.length ? sorted[0].id : null) });
+      self._loadedSel = sel;
+      self._onLoadOk();
       self._loadEventsLive();
       self._startTimers();
-    }).catch(function (e) { self.setState({ ready: true }); self._toast('재적재 실패: ' + e.message, 'err'); });
+    }).catch(function (e) {
+      self.setState({ ready: true });
+      self._startTimers();
+      self._onLoadFail(e, sel);
+    }).then(done, done);
+  }
+  /* 불러오기 실패 — 옛 데이터로 감시를 이어 가며 재시도를 건다.
+     _loadFail이 서 있는 동안은 서버 타이머를 다시 굽지 않는다(_syncMonitorTimer·_syncBandTimer):
+     빠진 테이블을 "태그 없음"으로 읽어 도는 타이머를 지우거나 줄이면 안 된다. */
+  _onLoadFail(e, sel) {
+    var self = this;
+    var first = !this._loadFail;
+    this._loadFail = true;
+    var n = this._loadTries = (this._loadTries || 0) + 1;
+    var wait = Math.min(LOAD_RETRY_MAX_MS, LOAD_RETRY_MS * Math.pow(2, n - 1));
+    var loaded = this._loadedSel || [];
+    this.setState({ loadFail: {
+      why: (e && e.message) || String(e || ''),
+      tables: (e && e.tables) || [],
+      missing: (sel || []).filter(function (t) { return loaded.indexOf(t) < 0; }),
+      tries: n, nextAt: Date.now() + wait,
+    } });
+    if (this._loadRetryT) clearTimeout(this._loadRetryT);
+    this._loadRetryT = setTimeout(function () { self._loadRetryT = null; self._reloadLive(true); }, wait);
+    if (first) this._toast('데이터를 다시 불러오지 못했습니다 — 이전 데이터로 감시하며 재시도합니다', 'err');
+  }
+  /* 불러오기 실패 배너 — 감시 이상 배너와 같은 줄에 올린다.
+     무엇이 계속 감시되고 무엇이 빠졌는지, 정상으로 돌아오는 조건(재시도 성공)을 함께 말한다. */
+  _loadFailWarns() {
+    var self = this, LF = this.state.loadFail;
+    if (!LF) return [];
+    function z(n) { return n < 10 ? '0' + n : '' + n; }
+    var d = new Date(LF.nextAt);
+    var t = '데이터를 다시 불러오지 못했습니다 — 화면과 감시는 마지막으로 불러온 데이터로 계속됩니다.';
+    if (LF.missing.length) {
+      t += ' 아직 못 불러온 테이블(' + LF.missing.join(', ') + ')은 감시되지 않습니다.'
+        + ' 선택은 저장되어 있어 다시 저장할 필요는 없습니다.';
+    }
+    t += ' 재시도 ' + LF.tries + '회 실패 · 다음 시도 ' + z(d.getHours()) + ':' + z(d.getMinutes()) + ':' + z(d.getSeconds()) + '.';
+    if (LF.tries >= 3 && LF.tables.length) {
+      t += ' 계속 실패하면 ' + LF.tables.join(', ') + ' 테이블이 지워졌거나 권한이 없는지 확인하고, 필요하면 설정에서 선택을 해제하세요.';
+    }
+    if (LF.why) t += ' (' + LF.why + ')';
+    return [{ lv: 'err', text: t, act: LF.busy ? '다시 시도 중…' : '지금 다시 시도', onAct: function () {
+      if (self.state.loadFail && self.state.loadFail.busy) return;
+      self.setState({ loadFail: Object.assign({}, self.state.loadFail, { busy: true }) });
+      self._reloadLive(true);
+    } }];
+  }
+  _onLoadOk() {
+    var was = this._loadFail;
+    this._loadFail = false;
+    this._loadTries = 0;
+    if (this._loadRetryT) { clearTimeout(this._loadRetryT); this._loadRetryT = null; }
+    if (this.state.loadFail) this.setState({ loadFail: null });
+    if (was) this._toast('데이터를 다시 불러왔습니다 — 정상 감시로 돌아왔습니다', 'ok');
   }
   // 5초 주기 라이브 갱신 — 통계 뷰(V$_STAT, 초경량) 기반 변동 감지:
   //  · 태그별 MAX_TIME이 전진했을 때만 해당 태그의 새 구간을 sec-롤업으로 갱신 (실시간·과거 벌크 유입 모두 감지)
   //  · 통계에 처음 보는 태그가 나타나면 자동 재적재 (테이블 변동 반영)
   /* 타이머 두 개 — 판정과 카탈로그. 하나로 묶으면 태그 증감 확인이 판정 주기마다 붙어 조회의 대부분을 차지한다. */
   _startTimers() {
+    var C = this._ac();   // 적용된 설정 — 폼의 저장 안 한 편집은 판정에 쓰지 않는다
     var self = this;
     if (this._live) clearInterval(this._live);
     if (this._cat) clearInterval(this._cat);
-    var iv = durMs(this.state.monitorInterval) || 3000;
+    var iv = durMs(C.monitorInterval) || 3000;
     this._live = setInterval(function () { self._tickLive(); }, iv);
     this._cat = setInterval(function () { self._catalogTick(); }, CAT_TICK_MS);
   }
@@ -634,11 +941,12 @@ export class App extends Component {
      · 태그 증감 확인(tagStats)은 여기서 하지 않는다 — _catalogTick이 따로 본다
      · 화면은 이 틱 끝에서 갱신한다. 별도 조회가 없으므로 갱신을 자주 해도 비용이 없다 */
   _tickLive() {
+    var C = this._ac();   // 적용된 설정 — 폼의 저장 안 한 편집은 판정에 쓰지 않는다
     var self = this, E = this.E, S = this.state;
     if (!this.live || !this.data || this._ticking) return;
-    if (this.state.tab !== 'monitor' && !this.state.monitorOn) return; // 알람 켜져 있으면 어느 탭에서든 판정 지속
+    if (this.state.tab !== 'monitor' && !C.monitorOn) return; // 알람 켜져 있으면 어느 탭에서든 판정 지속
     this._ticking = true;
-    var winMs = Math.max(durMs(S.evalWindow) || 10000, durMs(S.monitorInterval) || 3000);
+    var winMs = Math.max(durMs(C.evalWindow) || 10000, durMs(C.monitorInterval) || 3000);
     var now = Date.now(), from = now - winMs - WIN_LAG_MS;
     var byTable = {};
     this._activeEqs().forEach(function (eq) { (byTable[eq.table] = byTable[eq.table] || []).push(eq); });
@@ -695,8 +1003,9 @@ export class App extends Component {
      판정은 두 경우 모두 얼린다 — 정지를 "좋아졌다"로 읽으면 복귀 알림이 나가고
      사람은 설비가 고쳐진 줄 안다. */
   _refreshRunState(now) {
+    var C = this._ac();   // 적용된 설정 — 폼의 저장 안 한 편집은 판정에 쓰지 않는다
     var self = this, S = this.state;
-    var iv = durMs(S.monitorInterval) || 3000;
+    var iv = durMs(C.monitorInterval) || 3000;
     var lostMs = Math.max(60000, iv * 6);
     var m = {};
     this._activeEqs().forEach(function (eq) {
@@ -734,7 +1043,7 @@ export class App extends Component {
     /* 표시 등급은 _judgeLive가 채우는데 그건 앱 모드 + 알람 켜짐일 때만 돈다.
        나머지 경우(서버 모드 · 알람 꺼짐)에도 카드는 등급을 보여줘야 하므로 여기서 같은 규칙으로 채운다.
        안 채우면 _severityOf가 폴백으로 떨어져 게이트 없는 ISO 등급이 화면에 나온다. */
-    if (this.state.monMode === 'server' || !this.state.monitorOn) this._refreshDisplayGrade();
+    if (C.monMode === 'server' || !C.monitorOn) this._refreshDisplayGrade();
   }
   /* 이벤트를 내지 않고 표시 등급만 구한다 — 판정과 같은 규칙(결함 패턴 게이트), 같은 값.
      이벤트 발화는 서버 타이머가 하고, 앱은 같은 규칙으로 화면만 맞춘다. */
@@ -764,14 +1073,19 @@ export class App extends Component {
          여기서 ISO·베이스라인·대역을 최댓값으로 얹으면 서버가 쓴 등급과 카드가 갈린다. */
       var _p = (self._patNow || {})[key] || null;
       var _hz = (_p && _p.iso != null) ? VC.gradeFor(_p.iso, self._isoZones(eq)) : zg;
-      var wg = VC.worstGrade(0, 0, 0, VC.patternGate(!!(_p && _p.on), _hz));
+      // 판정과 같은 보류 규칙 — 잴 수 있는데 이번에 못 잰 태그는 직전 표시 등급을 유지한다(calc.patternRound)
+      var _prevGs = self._gradeState[key];
+      var _pr = VC.patternRound(_p, self._patCapable(eq), _prevGs ? { g: _prevGs.gi } : null, _hz);
+      var wg = VC.worstGrade(0, 0, 0, _pr.rg);
       /* 카드가 네 축을 한 줄로 보여주려면 각 축의 "값"이 필요하다 — 등급만으로는
          왜 그 등급인지 설명이 안 된다. 베이스라인은 한계 대비 배수, 대역은 최대 배수,
          결함 패턴은 격자 배수다. 등급을 만드는 것은 패턴 하나이고 나머지 셋은 근거로만 실린다. */
       wg.iso = isoV; wg.wide = wide; wg.limited = VC.isoNeeded(eq.fs); wg.basis = iso.basis || 'wide';
+      wg.isoRaw = iso.pending ? null : iso.vr;   // 화면 표시용 — 같은 대역의 원본 단위 RMS
       wg.isoOk = isoUsable; wg.isoUnit = isoUsable ? 'mm/s' : eq.unit;
       wg.blOk = lim != null; wg.bandOk = !!bj;
       wg.patOk = !!_p; wg.patOn = !!(_p && _p.on); wg.patR = _p ? _p.r : null;
+      wg.patMiss = _pr.miss; wg.patWait = _pr.miss && !self._patNow;
       wg.patWide = !!(_p && _p.demodSrc === 'wideband');   // 저샘플 전대역 복조 — 화면이 근거를 낮춰 적는다
       wg.blR = (lim != null && lim > 0) ? wide / lim : null;
       wg.bandR = bj ? bj.maxR : null;
@@ -791,14 +1105,16 @@ export class App extends Component {
      앱 모드는 타이머가 없으니 마지막 판정 시각만 본다. 탭이 가려져 있으면 브라우저가 타이머를
      늦추므로(정상 동작) 보이는 동안만, 넉넉한 기준으로 판단한다. */
   _healthTick() {
+    var C = this._ac();   // 적용된 설정 — 폼의 저장 안 한 편집은 판정에 쓰지 않는다
     var self = this, S = this.state;
     if (!this.live) return Promise.resolve();
-    if (!S.monitorOn) { if (this.state.health) this.setState({ health: null }); return Promise.resolve(); }
+    // 알람이 꺼져 있어도 대역 추출은 돌 수 있다 — 그 타이머 상태는 계속 봐야 한다
+    if (!C.monitorOn && !C.bandOn) { if (this.state.health) this.setState({ health: null }); return Promise.resolve(); }
     /* 대역 추출은 앱 감시 모드에서도 서버 타이머로 돈다(추세는 앱이 닫혀도 이어져야 하므로) —
        그래서 앱 모드여도 켜져 있으면 타이머 상태를 봐야 한다. 심박(__hb)은 감시 타이머가
        쓰는 것이라 서버 모드에서만 의미가 있다. */
-    var srv = S.monMode === 'server';
-    if (!srv && !S.bandOn) { this._applyHealth(null, null); return Promise.resolve(); }
+    var srv = C.monMode === 'server';
+    if (!srv && !C.bandOn) { this._applyHealth(null, null); return Promise.resolve(); }
     return Promise.all([
       timerStates(),
       srv ? loadMonState().catch(function () { return null; }) : Promise.resolve(null),
@@ -811,7 +1127,7 @@ export class App extends Component {
          안에서 세면 그 경로까지 막혀 꺼둔 기능의 옛 배너가 남는다. */
       if (r[0]) self._timersMiss = 0;
       else if ((self._timersMiss = (self._timersMiss || 0) + 1) < TIMER_MISS_MIN) return;
-      self._applyHealth(r[0], (r[1] || {}).__hb || null);
+      self._applyHealth(r[0], (r[1] || {}).__hb || null, (r[1] || {}).__nferr || null);
     }).catch(function () {});
   }
   /* 최근 회차 소요의 중앙값 — 헬스 틱이 판정보다 자주 도니 같은 회차를 여러 번 읽는다.
@@ -830,6 +1146,8 @@ export class App extends Component {
   /* 결함 패턴 축을 못 세우는 태그 — 회전수와 베어링 기하가 **둘 다** 있어야 격자를 긋는다
      (서버 patValue·앱 monPattern이 같은 조건으로 먼저 걸러낸다). 미끄럼 베어링은 구름체가
      없어 n=0이라 여기 걸린다 — 이 게이트 구조에서는 등급이 설 수 없는 설비다. */
+  // 결함 패턴을 잴 수 있는 태그인가 — monPattern·서버 patValue와 같은 조건(회전수와 구름체 기하가 둘 다 있어야 격자를 세운다)
+  _patCapable(eq) { return eq.rpm > 0 && !!(eq.bearing && eq.bearing.n > 0); }
   _patBlocked() {
     var eqs = this.data ? this._activeEqs() : [];
     var noRpm = 0, noGeo = 0;
@@ -841,9 +1159,10 @@ export class App extends Component {
       why: (noRpm && noGeo) ? '회전수 ' + noRpm + '대 · 베어링 형식 ' + noGeo + '대 미입력'
         : noRpm ? '회전수 미입력' : '베어링 형식 미입력' };
   }
-  _applyHealth(timers, hb) {
+  _applyHealth(timers, hb, nferr) {
+    var C = this._ac();   // 적용된 설정 — 폼의 저장 안 한 편집은 판정에 쓰지 않는다
     var self = this, S = this.state, now = Date.now();
-    var iv = durMs(S.monitorInterval) || 3000;
+    var iv = durMs(C.monitorInterval) || 3000;
     var warns = [];
     var reMon = function () { self._toast('서버 감시를 다시 등록합니다'); self._specSig = null; self._syncMonitorTimer(); };
     var reBand = function () { self._toast('대역 추출을 다시 등록합니다'); self._bandSig = null; self._syncBandTimer(); };
@@ -859,11 +1178,11 @@ export class App extends Component {
       rec: function (ago, why) { return '대역 추출이 ' + ago + ' 전 멈췄다가 자동으로 복구됐습니다 — ' + why
         + '. 그 사이 대역 값이 쌓이지 않아 대역 기준이 판정에서 빠져 있었습니다'; } };
     var dead = null, dband = null;   // 죽었다고 볼 사유 — 자동 복구가 이걸 받아 판단한다
-    if (S.monMode === 'server') {
+    if (C.monMode === 'server') {
       if (!timers) {
         warns.push({ k: 'unknown', lv: 'warn', text: '감시 타이머 상태를 확인할 수 없습니다 — Neo 연결을 확인하세요' });
       } else {
-        var t = timers[MON_TIMER];
+        var t = timers[monTimer()];
         if (!t) {
           warns.push({ k: 'nomon', lv: 'err', text: '서버 감시 타이머가 등록되어 있지 않습니다 — 감시가 돌지 않습니다', act: '다시 등록', onAct: reMon });
         } else if (!/^RUNNING/.test(t.state || '')) {
@@ -878,7 +1197,7 @@ export class App extends Component {
         if (hb.pat > 0) this._patZeroAt = 0;
         if (age > Math.max(60000, iv * 6)) {
           // 타이머는 RUNNING인데 판정이 안 도는 경우 — STOP과 같은 조치(재등록)를 쓴다
-          var _st = '마지막 판정이 ' + durKo(age) + ' 전입니다 (주기 ' + S.monitorInterval + ')';
+          var _st = '마지막 판정이 ' + durKo(age) + ' 전입니다 (주기 ' + C.monitorInterval + ')';
           if (!dead) dead = { k: 'stale', text: _st, why: _st };
         } else if (hb.pat != null && hb.n > 0 && hb.pat === 0) {
           /* 훑기는 하는데 결함 패턴을 잰 태그가 하나도 없는 상태 — 등급을 켜는 축이 통째로 비어
@@ -908,12 +1227,22 @@ export class App extends Component {
             warns.push({
               k: 'slowtick', lv: _over ? 'err' : 'warn',
               text: '서버 감시 1회차가 ' + (_med / 1000).toFixed(1) + '초 걸립니다 (최근 회차 중앙값 · 주기 '
-                + S.monitorInterval + ' · 태그 ' + hb.n + '개)'
+                + C.monitorInterval + ' · 태그 ' + hb.n + '개)'
                 + (_over ? ' — 회차가 겹쳐 일부 주기를 건너뜁니다. 주기를 늘리거나 감시 태그를 줄이세요.' : ' — 주기를 늘리는 것을 권합니다.'),
               act: '설정 열기', onAct: function () { self.setState({ tab: 'settings', setSection: 'monitor' }); },
             });
           }
         }
+      }
+      /* 발송 설정을 못 읽은 회차 — 서버는 보낼 때마다 계정 설정 표에서 알림 설정을 읽으므로,
+         그 읽기가 실패하면 이벤트는 기록되지만 알림은 나가지 않는다. 읽기에 성공한 회차가 오면
+         서버가 이 기록을 지운다(t:0). */
+      if (nferr && nferr.t > 0) {
+        warns.push({ k: 'nferr', lv: 'err',
+          text: '서버 감시가 알림 설정을 읽지 못해 이벤트 ' + (nferr.n || 0) + '건을 알리지 못했습니다 ('
+            + durKo(Math.max(0, now - nferr.t)) + ' 전 · ' + (nferr.m || '사유 미상')
+            + ') — 이벤트 이력에는 남아 있습니다. 알림 설정을 다시 저장해 보세요',
+          act: '알림 설정 열기', onAct: function () { self.setState({ tab: 'settings', setSection: 'monitor' }); } });
       }
       /* 타이머 상태를 못 읽었으면(timers null) 복구도 "복구됐다"는 말도 하지 않는다 —
          모르는 것을 살아났다고 적으면 배너가 거짓말을 한다. */
@@ -922,7 +1251,7 @@ export class App extends Component {
         if (_rw) warns.push(_rw);
       }
     }
-    if (S.monMode !== 'server' && this._lastJudgeAt
+    if (C.monMode !== 'server' && this._lastJudgeAt
       && (typeof document === 'undefined' || document.visibilityState !== 'hidden')) {
       var lag = now - this._lastJudgeAt;
       if (lag > Math.max(60000, iv * 20)) {
@@ -932,8 +1261,8 @@ export class App extends Component {
     /* 대역 추출은 감시 모드를 안 가린다 — 서버 감시를 꺼도 알람이 켜져 있으면 계속 돈다.
        그래서 확인·복구도 모드 분기 밖에 둔다. 서버 분기 안에 두면 앱 모드 사용자는 대역이
        죽어도 모른 채, 근거 축 하나가 빠진 화면을 "이상 없음"으로 보게 된다. */
-    if (S.bandOn && timers) {
-      var b = timers[BAND_TIMER];
+    if (C.bandOn && timers) {
+      var b = timers[bandTimer()];
       /* 없는 이유를 갈라 말한다. 대상 태그가 0이면 앱이 스스로 안 구운 것이라 '다시 등록'을
          눌러도 같은 자리에서 또 지워진다 — 버튼이 아무것도 못 고치면서 사용자를 붙잡는다.
          그럴 때는 고칠 수 있는 곳(설비 정보의 RPM)으로 보낸다. */
@@ -946,7 +1275,7 @@ export class App extends Component {
       else if (!/^RUNNING/.test(b.state || '')) dband = { k: 'bandstop', text: '대역 추출이 멈춰 있습니다 — ' + (b.state || '상태 불명'), why: b.state || '상태 불명' };
       var _bw = this._recoverWarn(BAND_T, dband, now, reBand);
       if (_bw) warns.push(_bw);
-    } else if (!S.bandOn && this._recover) { delete this._recover.band; }   // 꺼둔 기능의 흔적은 남기지 않는다
+    } else if (!C.bandOn && this._recover) { delete this._recover.band; }   // 꺼둔 기능의 흔적은 남기지 않는다
     /* 표시 상한에 걸려 감시에서 빠진 태그 — 알람이 안 오는 이유가 "정상이라서"가 아닌 경우다.
        화면에 없다는 것만으로는 감시 밖인지 알 수 없으므로, 빠진 수를 여기서 명시한다. */
     var _cap = S.srcCap;
@@ -962,7 +1291,7 @@ export class App extends Component {
        데이터만으로는 같은 설비인지 알 수 없으므로(이름이 유일한 단서다) 묻는 수밖에 없다. */
     var revKeys = Object.keys(S.revived || {});
     if (revKeys.length) {
-      var alias = function (k) { return (S.aliases || {})[k] || k.split(':')[1] || k; };
+      var alias = function (k) { return (C.aliases || {})[k] || k.split(':')[1] || k; };
       warns.push({
         k: 'revived', lv: 'warn',
         text: revKeys.length === 1
@@ -971,12 +1300,11 @@ export class App extends Component {
         act: '설정에서 확인', onAct: function () { self.setState({ tab: 'settings', setSection: 'criteria' }); },
       });
     }
-    var sig = warns.map(function (w) { return w.k + ':' + w.text; }).join('|');
-    if (sig === this._healthSig) return;      // 같은 상태면 리렌더하지 않는다
-    this._healthSig = sig;
     /* 결함 패턴 축을 세울 수 없는 태그 — 다른 보류 사유(정지·두절·계측·대기)는 시간이 풀지만
        이건 사람이 설비 정보를 채워야만 풀린다. 그래서 카드 호버가 아니라 배너로 올린다:
-       그 태그들은 등급이 영원히 서지 않는데 화면은 조용하다. 사라지지 않는 것이 이 배너의 일이다. */
+       그 태그들은 등급이 영원히 서지 않는데 화면은 조용하다. 사라지지 않는 것이 이 배너의 일이다.
+       ⚠ 반드시 서명(sig) 계산 **앞**에 둔다 — 뒤에 두면 다른 경고가 그대로일 때 위에서 return 해
+       이 배너만 다시 재지 않는다. 설비 정보를 다 채워도 배너가 안 사라지고, 새로 걸린 태그도 안 뜬다. */
     var _blk = this._patBlocked();
     if (_blk.n) {
       warns.push({ k: 'nogeo', lv: 'warn',
@@ -984,6 +1312,9 @@ export class App extends Component {
           + '. 이 설비들의 "이상 없음"은 확인된 것이 아닙니다',
         act: '설비 정보 열기', onAct: function () { self.setState({ tab: 'settings', setSection: 'equip' }); } });
     }
+    var sig = warns.map(function (w) { return w.k + ':' + w.text; }).join('|');
+    if (sig === this._healthSig) return;      // 같은 상태면 리렌더하지 않는다
+    this._healthSig = sig;
     this.setState({ health: warns.length ? warns : null });
   }
   /* 죽었으면 다시 등록하고, 살아났으면 "죽었었다"는 사실을 남긴다.
@@ -1057,7 +1388,8 @@ export class App extends Component {
          돌아와도 "아는 태그"로 통과한다. 조회에 성공한 테이블 범위 안에서만 비교한다
          (조회 실패한 테이블의 태그를 사라진 것으로 처리하면 멀쩡한 학습을 되살아남으로 오판한다). */
       if (okTables.length) self._checkRevived(liveKeys, okTables);
-      if (added && !self._reloadPending) {
+      // 불러오기 실패 중에는 재시도가 전체를 다시 읽는다 — 여기서 따로 걸면 백오프를 건너뛰고 화면이 매번 적재 중으로 바뀐다
+      if (added && !self._reloadPending && !self._loadFail) {
         self._reloadPending = true;
         self._toast('새 태그 감지 — 데이터를 다시 불러옵니다');
         setTimeout(function () { self._reloadPending = false; self._reloadLive(); }, 400);
@@ -1075,31 +1407,74 @@ export class App extends Component {
       self._syncWdTimer(true);
     }).catch(function () { self._cating = false; });
   }
-  // 현재 state → 설정 객체 (저장·재적재 공용 — 두 경로가 어긋나면 별칭 미적용 같은 버그가 된다)
+  // 현재 state(설정 폼의 편집본) → 설정 객체 — 저장할 때 쓴다
   _cfgFromState() {
     var S = this.state, o = {};
     CFG_KEYS.forEach(function (k) { o[k] = S[k]; });
     return o;
   }
+  /* 적용된 설정 — 판정·서버 타이머·재적재·모니터링 화면은 이것만 읽는다.
+     설정 폼은 입력 즉시 state를 고치는데, 판정이 state를 읽으면 저장 전 값이 앱 판정과
+     서버 타이머(10초 점검이 다시 굽는다)로 새어 나간다. 저장에 성공한 값만 여기로 옮긴다.
+     설정을 읽기 전(목 모드)에는 state를 그대로 쓴다. */
+  _ac() { return this._applied || this.state; }
+  _setApplied(src, keys) {
+    var a = Object.assign({}, this._applied || this._cfgFromState());
+    (keys || CFG_KEYS).forEach(function (k) { if (src[k] !== undefined) a[k] = cfgClone(src[k]); });
+    this._applied = a;
+  }
   /* 표시에만 영향을 주는 설정(카드 순서 등)은 이걸로 저장한다 — 타이머를 다시 굽지 않는다.
      _persistCfg는 판정에 쓰이는 값이 바뀔 때용이라 서버 TQL 재등록과 토스트가 따라붙는다. */
   _persistView(keys, ov) {
     var self = this;
+    if (this._cfgLocked()) return Promise.resolve();
     // ov로 값을 직접 넘긴다 — setState 직후엔 state가 아직 옛 값이라 그대로 읽으면 한 박자 전 순서가 저장된다
-    return saveConfigPartial(Object.assign(this._cfgFromState(), ov || {}), keys)
+    var obj = Object.assign(this._cfgFromState(), ov || {});
+    return saveConfigPartial(obj, keys)
+      .then(function () { self._setApplied(obj, keys); })
       .catch(function (e) { self._toast('설정 저장 실패: ' + (e.message || e), 'err'); });
+  }
+  /* 설정 폼 밖에서 곧바로 적용하는 값(헤더 알람 토글·진동 배지의 RMS 구간·대역 추출 주기 확정) —
+     그 키만 저장하고 적용한다. 설정 전체를 저장하면 설정 탭의 저장 안 한 편집까지 딸려 들어간다.
+     편집본에도 같은 값을 넣는다 — 폼이 옛 값을 들고 있다가 다음 저장 때 되돌리지 않게. */
+  _applyNow(ov) {
+    var self = this, keys = Object.keys(ov), prev = {}, A = this._ac();
+    if (this._cfgLocked()) return Promise.resolve(false);
+    keys.forEach(function (k) { prev[k] = cfgClone(A[k]); });
+    // 먼저 적용한다 — 헤더·판정이 저장 왕복을 기다리지 않게. 저장이 실패하면 되돌린다
+    this._setApplied(ov, keys);
+    this.setState(ov);
+    return saveConfigPartial(ov, keys).then(function () {
+      // 타이머 동기화 실패는 저장 실패가 아니다 — 다음 10초 점검이 다시 굽는다
+      return self._syncMonitorTimer(true)
+        .then(function () { return self._syncBandTimer(true); })
+        .catch(function () {})
+        .then(function () { return true; });
+    }, function (e) {
+      self._setApplied(prev, keys);
+      self.setState(prev);
+      self._toast('설정 저장 실패: ' + (e.message || e), 'err');
+      return false;
+    });
   }
   _persistCfg() {
     var self = this;
-    return saveConfig(this._cfgFromState())
-      .then(function () { return self._syncMonitorTimer(); }) // 저장 후 서버 타이머 생성/삭제 반영
+    if (this._cfgLocked()) return Promise.resolve(false);
+    var cfg = this._cfgFromState();
+    return saveConfig(cfg)
+      .then(function () { self._setApplied(cfg); return self._syncMonitorTimer(); }) // 저장 후 서버 타이머 생성/삭제 반영
       .then(function () { return self._syncBandTimer(); })      // 대역 추출 타이머도 함께
       .then(function () { return self._syncWdTimer(); })        // 감시자도 — 감시가 꺼지면 같이 지워진다
-      .catch(function (e) { self._toast('설정 저장 실패: ' + (e.message || e), 'err'); });
+      .then(function () { self._cfgFresh = false; return true; })
+      .catch(function (e) { self._toast('설정 저장 실패: ' + (e.message || e), 'err'); return false; });
   }
   // 현재 설정 → 서버 판정 TQL 스펙 (태그·존·베이스라인 + 시나리오 파라미터 ms)
   _monSpec() {
+    var C = this._ac();   // 적용된 설정 — 폼의 저장 안 한 편집은 판정에 쓰지 않는다
     var self = this, S = this.state;
+    /* 서버 TQL 이 볼 저장소 위치와 행 키 접두. 표는 공용(SYS 스키마) 한 벌이고
+       계정 구분은 키 접두가 한다 — 둘 중 하나만 틀려도 남의 행을 읽거나 쓴다. */
+    var tblPrefix = storePrefix(), keyPrefix = userKeyPrefix(), srcMap = srcMapOf(C.srcSel || []);
     var tags = this._activeEqs().map(function (eq) {
       var b = (self._blMap || S.baselines || {})[eq.table + ':' + eq.name];
       // 대역 베이스라인도 같이 굽는다 — 없으면 null이라 서버가 대역 판정을 조용히 건너뛴다
@@ -1121,11 +1496,15 @@ export class App extends Component {
         rpm: eq.rpm > 0 ? eq.rpm : 0,
         geo: (eq.bearing && eq.bearing.n > 0)
           ? { n: eq.bearing.n, Bd: eq.bearing.Bd, Pd: eq.bearing.Pd, phi: eq.bearing.phi || 0 } : null,
-        zones: eq.zones, bl: (b && !self._isRevived(eq.table + ':' + eq.name)) ? { mu: b.mu, sigma: b.sigma, k: b.k || 3 } : null,
+        /* zones = 원본 단위 존(조용한지 판단용) · isoZones = ISO 등급용 mm/s 존.
+           서버도 가속도·변위를 속도로 바꿔 ISO를 재므로 등급은 isoZones로 매긴다(앱 _isoZones와 같은 값). */
+        zones: eq.zones, isoZones: self._isoZones(eq),
+        bl: (b && !self._isRevived(eq.table + ':' + eq.name)) ? { mu: b.mu, sigma: b.sigma, k: b.k || 3 } : null,
         bb: self._isRevived(eq.table + ':' + eq.name) ? null : bb,
       };
     });
     return {
+      tblPrefix: tblPrefix, keyPrefix: keyPrefix, srcMap: srcMap,
       judgeSrc: judgeTick.toString(), // 앱과 동일 규칙을 서버에 그대로 임베드 (드리프트 0)
       detailSrc: detailSrc(), // 이벤트 사유 문구도 같은 함수 — 두 모드의 이력이 갈리지 않게(durKo 포함 자체 완결형)
       limitSrc: VC.baselineLimit.toString(), // 한계식(클램프 포함)도 같은 방식 — 앱/서버 판정식 단일 소스
@@ -1137,76 +1516,29 @@ export class App extends Component {
       /* ISO 존 판정 — 세 함수가 서로를 이름으로 부르므로 calc가 한 스코프로 묶어 준다
          (따로 붙이면 압축된 몸통 안 이름과 어긋나 TQL에서 죽는다). */
       isoSrc: VC.isoSrc(),
+      // 가속도·변위 원본을 속도로 바꾸는 함수와 패턴 높이용 대역 평균 — 앱과 같은 소스
+      convSrc: VC.convSrc(),
       /* 계측 게이트 — 파형이 계측 문제로 보이면 서버도 진동 판정을 멈추고 계측 이상으로 알린다.
          gateFromRaw→signalQuality→kurtosis로 서로를 부르므로 calc가 한 스코프로 묶어 준다. */
       gateSrc: VC.gateSrc(),
       /* 결함 패턴 — 등급을 켜는 축이라 서버도 같은 소스를 돌려야 앱과 갈리지 않는다.
          재계산 간격은 대역 추출 주기와 맞춘다 — 둘 다 원시 파형을 읽으므로 같이 도는 게 맞다. */
       patSrc: VC.patSrc(),
-      patTtlMs: durMs(S.bandInterval || '10m') || 600000,
-      isoTtlMs: ISO_TTL_MS, isoWinMs: ISO_WIN_MS,
-      tickMs: durMs(S.monitorInterval) || 3000,   // 두절 기준(주기의 6배)의 근거
-      winMs: Math.max(durMs(S.evalWindow) || 10000, durMs(S.monitorInterval) || 3000),
+      patTtlMs: durMs(C.bandInterval || '10m') || 600000,
+      isoTtlMs: ISO_TTL_MS, isoQuietMs: ISO_TTL_QUIET_MS, isoWinMs: ISO_WIN_MS,
+      tickMs: durMs(C.monitorInterval) || 3000,   // 두절 기준(주기의 6배)의 근거
+      winMs: Math.max(durMs(C.evalWindow) || 10000, durMs(C.monitorInterval) || 3000),
       lagMs: WIN_LAG_MS,
       bandOrder: VC.BAND_ORDER,
       // 대역 추출 주기의 4배를 룩백으로 — 한두 번 걸러도 마지막 값을 놓치지 않는다
-      bandWinMs: Math.max(3600000, durMs(S.bandInterval) * 4),
+      bandWinMs: Math.max(3600000, durMs(C.bandInterval) * 4),
       tags: tags,
       cfg: { escHold: SENSOR_HOLD_MS, recHold: SENSOR_CLEAR_MS,
-        reno: { 1: durMs((S.renotify || {})['주의']), 2: durMs((S.renotify || {})['위험']), 3: durMs((S.renotify || {})['심각']) } },
-      notify: { src: Notify.serverSrc(), cfg: this._notifyCfg() }, // 발송도 앱과 같은 함수로
-      wd: this._wdSpec('mon'),   // 대역 추출이 멎으면 여기서 되살린다
+        reno: { 1: durMs((C.renotify || {})['주의']), 2: durMs((C.renotify || {})['위험']), 3: durMs((C.renotify || {})['심각']) } },
+      /* 발송도 앱과 같은 함수로. 발송 설정(웹훅 URL)은 싣지 않는다 — 서버가 보낼 때 계정 설정 표에서
+         읽는다. 스크립트는 파일 API로 저장돼 다른 계정도 열 수 있고, 저장한 값만 발송에 쓰이게 된다. */
+      notify: { src: Notify.serverSrc(), cfgTable: configTable(), defs: ROUTE_DEFS },
     };
-  }
-  /* 감시자와 감시 대상들이 서로를 보는 고리. 앱 자동 복구는 앱이 열려 있을 때만 돌므로
-     서버 쪽에도 감시자가 필요하다. 별개 프로세스라 한쪽이 죽어도 다른 쪽이 남는다.
-
-       NEO_VIBE_WD(5분)  → 감시·대역 추출을 본다
-       감시(10초)·대역(10분) → 감시자를 본다
-
-     감시자를 따로 둔 이유는 감시의 생존이 대역 추출 같은 선택 기능의 on/off에 걸리면 안 되기
-     때문이다. 대역 추출은 원인 분석용이고, 감시가 살아있는지는 안전 기능이다.
-     죽었다고 볼 기준은 상대의 주기에서 나온다 — 감시는 앱과 같은 규칙(주기의 6배), 대역 추출은
-     한 회차가 길고 건너뛰는 회차도 있어 넉넉히 3배·최소 30분, 감시자는 하는 일이 적어 3배. */
-  /* 브라우저가 접속한 포트는 "힌트"일 뿐이다 — 우리가 필요한 건 서버가 자기 자신을 부르는
-     포트인데, 리버스 프록시가 끼면 둘이 다르다(:8080으로 보이지만 Neo는 5654). 브라우저는
-     그 뒤를 볼 수 없고 서버의 127.0.0.1을 찔러볼 수도 없다(mixed content·다른 호스트).
-     확인은 jsh 쪽에서 한다 — 거기선 127.0.0.1이 Neo 자신이다. 여기서는 힌트만 넘긴다. */
-  _wdBase() {
-    var port = String((typeof location !== 'undefined' && location.port) || '5654');
-    return { port: port, base: 'http://127.0.0.1:' + port,
-      authPath: '/work' + pkgBase() + '/cgi-bin/config/neo-auth.json',
-      // 확정된 포트를 남길 자리 — 언인스톨은 앱이 없는 시점에 돌아서 이 파일로만 알 수 있다
-      endpointPath: '/work' + pkgBase() + '/cgi-bin/config/neo-endpoint.json' };
-  }
-  _wdTarget(who) {
-    var S = this.state;
-    var tick = durMs(S.monitorInterval) || 3000;
-    var bandIv = durMs(S.bandInterval) || 600000;
-    var common = { gap: 300000, max: 3, calm: 3600000 };
-    if (who === 'mon') return Object.assign({ peer: MON_TIMER, hb: '__hb', key: '__wd_mon', stale: Math.max(60000, tick * 6) }, common);
-    if (who === 'band') return Object.assign({ peer: BAND_TIMER, hb: '__hbband', key: '__wd_band', stale: Math.max(1800000, bandIv * 3) }, common);
-    return Object.assign({ peer: WD_TIMER, hb: '__hbwd', key: '__wd_wd', stale: Math.max(900000, WD_TICK_MS * 3) }, common);
-  }
-  /* who = 이 TQL이 누구인가. 자기 자신은 안 본다(죽은 자가 자기를 되살릴 수는 없다). */
-  _wdSpec(who) {
-    var S = this.state;
-    if (!S.monitorOn) return null;
-    var srv = S.monMode === 'server';
-    /* 켜짐 여부가 아니라 "실제로 구워졌는가"를 본다 — 대상 태그가 없어 앱이 스스로 지운
-       타이머를 감시자가 죽은 것으로 보면, 되살릴 수 없는 이름에 start를 세 번 던지고 포기한다
-       (감시자는 start만 하고 create는 못 한다). */
-    var band = this._bandLive();
-    if (who === 'wd') {
-      if (!srv && !band) return null;
-      var tg = [];
-      if (srv) tg.push(this._wdTarget('mon'));
-      if (band) tg.push(this._wdTarget('band'));
-      return Object.assign(this._wdBase(), { targets: tg, selfHb: '__hbwd' });
-    }
-    // 감시·대역 추출은 감시자만 본다 — 서로를 겹쳐 보면 같은 상대를 두 곳에서 되살린다
-    if (!this._wdSpec('wd')) return null;
-    return Object.assign(this._wdBase(), { targets: [this._wdTarget('wd')], selfHb: who === 'band' ? '__hbband' : '__hb' });
   }
   // 타이머 목록 조회 — 테스트가 갈아끼울 수 있도록 메서드로 감싼다
   _timerStates() { return timerStates(); }
@@ -1224,40 +1556,33 @@ export class App extends Component {
       return del().then(function (r) { self[sigKey] = SIG_NONE; return r; });
     });
   }
-  /* 등록 직전에 "지금 그 타이머가 있는가"를 아는 만큼만 알려준다 — 서명이 그 기억이다.
-     SIG_NONE은 없음을 확인한 상태(끄면 여기로 온다), 서명 문자열은 우리가 만든 것이 도는 상태,
-     null은 모름(앱을 새로 열었거나 직전 등록이 실패했다). 모르면 등록 쪽이 목록을 읽는다. */
-  _timerKnown(sigKey) {
-    var s = this[sigKey];
-    return s === SIG_NONE ? 'absent' : (s ? 'present' : null);
-  }
   /* 감시자 타이머 생성/삭제 — 감시가 꺼져 있으면 볼 것이 없으니 지운다(고아 방지). */
-  _syncWdTimer(silent) {
-    var self = this, S = this.state;
-    if (!this.live) return Promise.resolve();
-    var spec = this._wdSpec('wd');
-    if (!spec || !spec.targets.length) return this._dropTimer('_wdSig', deleteWdTimer, WD_TIMER);
-    var tql = Watchdog.buildWatchdogTql(spec);
-    var sig = JSON.stringify(spec) + '|' + WD_SCHED + '|' + srcSig(tql);
-    if (silent && sig === this._wdSig) return Promise.resolve();
-    var known = this._timerKnown('_wdSig');   // 새 서명을 넣기 전에 읽는다 — 넣고 나면 항상 '있음'이 된다
-    this._wdSig = sig;
-    return createWdTimer(tql, WD_SCHED, known)
-      .then(function () { if (!silent) self._toast('감시자 켜짐 · ' + WD_SCHED, 'ok'); })
-      .catch(function (e) { self._wdSig = null; if (!silent) self._toast('감시자 설정 실패: ' + (e.message || e), 'err'); });
+  /* 감시자 타이머는 더 두지 않는다 — 있으면 지운다.
+     감시자가 하던 일은 "예외로 STOP 된 타이머를 되살리기"였는데, 이제 감시·대역 TQL 이
+     회차 전체를 try/catch 로 감싸 애초에 죽지 않는다. 감시자 자신도 같은 이유로 죽을 수 있었고,
+     되살리려면 Neo 에 인증 요청을 보내야 해서 계정 비밀번호를 TQL 에 구워야 했다 —
+     그 파일은 토큰만 있으면 읽힌다. 안 죽게 만드는 쪽이 싸고 안전하다. */
+  _syncWdTimer() {
+    if (!this.live || this._cfgLocked(true)) return Promise.resolve();
+    return this._dropTimer('_wdSig', deleteWdTimer, wdTimer());
   }
+
   /* 서버 상시감시 타이머 생성/삭제 — 앱 모드/알람 OFF면 삭제(고아 방지).
      TQL은 자체 완결형이라 태그 목록·존·베이스라인이 값으로 구워진다 → 그 값들이 바뀌면 다시 구워야
      화면과 서버 판정이 일치한다. 설정 저장 외에도 베이스라인 학습·태그 증감에서 호출되므로,
      silent=true면 토스트를 생략하고 실제 변경이 있을 때만 재등록한다(재등록 사이 판정 주기가 빈다). */
   _syncMonitorTimer(silent) {
+    var C = this._ac();   // 적용된 설정 — 폼의 저장 안 한 편집은 판정에 쓰지 않는다
     var self = this, S = this.state;
-    if (!this.live) return Promise.resolve();
-    if (S.monMode !== 'server' || !S.monitorOn) return this._dropTimer('_specSig', deleteMonitorTimer, MON_TIMER);
+    // 설정이 state에 안 들어간 동안은 굽지 않는다 — 기본값(앱 감시)이 서버 타이머를 지운다
+    if (!this.live || this._cfgLocked(true)) return Promise.resolve();
+    if (C.monMode !== 'server' || !C.monitorOn) return this._dropTimer('_specSig', deleteMonitorTimer, monTimer());
+    // 불러오기가 불완전한 동안은 굽지 않는다 — 빠진 테이블을 "태그 없음"으로 읽어 도는 타이머를 지우게 된다
+    if (this._loadFail) return Promise.resolve();
     var spec = this._monSpec();
-    var sched = { '1s': '@every 1s', '3s': '@every 3s', '5s': '@every 5s', '10s': '@every 10s', '30s': '@every 30s', '1m': '@every 1m', '10m': '@every 10m' }[S.monitorInterval] || '@every 3s';
+    var sched = { '1s': '@every 1s', '3s': '@every 3s', '5s': '@every 5s', '10s': '@every 10s', '30s': '@every 30s', '1m': '@every 1m', '10m': '@every 10m' }[C.monitorInterval] || '@every 3s';
     if (!spec.tags.length) {
-      return this._dropTimer('_specSig', deleteMonitorTimer, MON_TIMER)
+      return this._dropTimer('_specSig', deleteMonitorTimer, monTimer())
         .then(function () { if (!silent) self._toast('감시할 태그가 없어 서버 감시를 만들지 않았습니다', 'warn'); });
     }
     /* 서명에 생성된 TQL 자체를 넣는다 — 설정뿐 아니라 코드가 바뀌어도 다시 구워야 한다
@@ -1276,7 +1601,7 @@ export class App extends Component {
       this._toast('서버 감시 코드 검증 실패 — 타이머를 바꾸지 않았습니다: ' + bad, 'err');
       return Promise.resolve();
     }
-    return createMonitorTimer(tql, sched, this._timerKnown('_specSig'))
+    return createMonitorTimer(tql, sched)
       .then(function () { self._specSig = sig; if (!silent) self._toast('서버 상시감시 켜짐 · ' + sched, 'ok'); })
       .catch(function (e) { self._specSig = null; if (!silent) self._toast('서버 감시 설정 실패: ' + (e.message || e), 'err'); });
   }
@@ -1295,21 +1620,22 @@ export class App extends Component {
   //  · 베이스라인 이탈(μ+kσ) — 상태만 추적(next.b). 이벤트는 내지 않는다(이벤트는 10분 패턴 축 전용)
   //  MONSTATE에 후보(cand/candSince)·마지막 알림(lastRe)까지 저장 → 서버 타이머(무상태 실행)와 규칙 동일.
   _judgeLive(force) {
+    var C = this._ac();   // 적용된 설정 — 폼의 저장 안 한 편집은 판정에 쓰지 않는다
     var self = this, S = this.state;
-    if (!this.live || !S.monitorOn || !this.data) return Promise.resolve();
-    if (S.monMode === 'server') return Promise.resolve(); // 서버 타이머가 판정 — 앱은 표시만(이중발화 방지)
+    if (!this.live || !C.monitorOn || !this.data) return Promise.resolve();
+    if (C.monMode === 'server') return Promise.resolve(); // 서버 타이머가 판정 — 앱은 표시만(이중발화 방지)
     this._lastJudgeAt = Date.now();   // 앱 모드 심박 — 판정이 실제로 돌고 있는지 배너가 이걸 본다
     var nowW = Date.now();   // 주기는 _startTimers의 타이머가 정한다 — 여기서 다시 스로틀하지 않는다
-    var iv = durMs(S.monitorInterval) || 3000;
+    var iv = durMs(C.monitorInterval) || 3000;
     if (!this._monState) this._monState = {};
     /* 확정은 회차로 세므로 진입·복귀 시간이 필요 없다 — 설정에도 그 항목을 두지 않는다.
        계측 이상(sensorTick)은 10초 축이라 시간 기준이 그대로 유효하다 — 거기만 상수를 준다. */
     var cfg = {
       escHold: SENSOR_HOLD_MS, recHold: SENSOR_CLEAR_MS,
-      reno: { 1: durMs((S.renotify || {})['주의']), 2: durMs((S.renotify || {})['위험']), 3: durMs((S.renotify || {})['심각']) },
+      reno: { 1: durMs((C.renotify || {})['주의']), 2: durMs((C.renotify || {})['위험']), 3: durMs((C.renotify || {})['심각']) },
     };
     var jobs = [], nEv = 0;
-    var zoneLim = function (eq, g) { return g > 0 ? eq.zones[g - 1] : eq.zones[0]; };
+    var zoneLim = function (zs, g) { return g > 0 ? zs[g - 1] : zs[0]; };
     // 최신 대역값·결함 패턴 적재 — 판정 주기(10초)보다 추출 주기(10분)가 훨씬 느리므로 여기서
     // 매번 읽지 않고 캐시를 쓴다. 추출 주기의 절반이 지났을 때만 갱신한다(불필요한 조회 방지).
     this._refreshBandNow();
@@ -1342,7 +1668,9 @@ export class App extends Component {
          10초마다 움직여 10분 주기인 패턴과 시간축이 어긋난다(이벤트 시각의 뜻이 흐려진다).
          패턴 계산 때 ISO를 못 쟀으면 10초 축 값으로 물러선다 — 등급을 0으로 떨어뜨리진 않는다. */
       var _hG = (_pat && _pat.iso != null) ? VC.gradeFor(_pat.iso, self._isoZones(eq)) : _isoG;
-      var rg = VC.patternGate(!!(_pat && _pat.on), _hG);
+      /* 잴 수 있는 태그인데 이번에 결과가 없으면 판정 보류 — 직전 등급·회차를 넘겨 거짓 복귀를 막는다(calc.patternRound) */
+      var _pr = VC.patternRound(_pat, self._patCapable(eq), self._monState[key] || null, _hG);
+      var rg = _pr.rg;
       var cur = wide;                                        // 베이스라인 판정값
       /* 되살아난 태그(지웠다 다시 등록)는 확인 전까지 학습 기반 판정을 멈춘다 — 옛 설비의
          기준으로 새 설비를 재면 조용히 틀린다. ISO 존은 절대 기준이라 계속 돈다. */
@@ -1381,9 +1709,9 @@ export class App extends Component {
          신호가 묻혀도 유지한다 — 되살아난 태그는 옛 설비 이력이라 넘기지 않는다. */
       if (bnow && !revived && !sens.on) bj = VC.bandJudge(bnow, self._bandBaselines(eq), !!(prev && prev.bb),
         self._softBands(eq), revived ? null : (prev && prev.elat), nowW);
-      /* 회차 식별자 = 패턴을 잰 시각. 패턴을 못 잰 태그는 null이라 매 틱이 새 회차로 취급되는데,
-         그 경우 rg가 0으로 고정이라 전이가 없어 문제가 되지 않는다. */
-      var r = judgeTick(prev, rg, breach, nowW, cfg, bj, run, _pat ? _pat.at : null);
+      /* 회차 식별자 = 패턴을 잰 시각. 잴 수 있는데 이번에 못 잰 태그는 patternRound가 직전 회차를 넘겨
+         전이를 막는다(보류). 애초에 못 재는 태그(회전수·기하 없음)는 null이고 rg가 0으로 고정이라 전이가 없다. */
+      var r = judgeTick(prev, rg, breach, nowW, cfg, bj, run, _pr.cyc);
       // 계측 이상·복귀는 진동 이벤트와 별개 축이라 그대로 이어 붙인다
       sens.events.forEach(function (ev) { r.events.push(ev); });
       // 대역 판정을 못 한 틱(추출 지연·계측 이상)에서 이력을 잃으면 latch의 뜻이 없어진다
@@ -1400,8 +1728,15 @@ export class App extends Component {
       r.events.forEach(function (ev) {
         // 이벤트에 실린 값은 그 판정이 실제로 본 값이어야 한다 — 나중에 왜 났는지 설명할 수 있게
         var isSens = ev.etype === 'sensor_fault' || ev.etype === 'sensor_ok';
-        var ev_val = isSens ? 0 : (val != null ? val : wide);
-        var ev_lim = isSens ? 0 : ev.etype === 'recovery' ? eq.zones[0] : zoneLim(eq, ev.gi);
+        /* 이벤트 값은 설비의 원본 단위로 적는다. 속도 원본이면 등급을 정한 ISO 값·ISO 경계 그대로다.
+           가속도·변위 원본이면 등급은 속도 ISO로 매기므로 원본 단위의 "기준" 숫자가 없다 —
+           값은 원본 단위 구간 RMS, 기준은 비우고 근거(ISO 존·결함 패턴)를 DETAIL 머리에 말로 적는다.
+           서버 판정기(monitor.js)와 같은 규칙이다. */
+        var nat = !isSens && ev.etype !== 'signal_lost' && !!eq.unit && eq.unit !== 'mm/s';
+        var ev_val = isSens ? 0 : nat ? wide : (val != null ? val : wide);
+        var ev_lim = (isSens || nat) ? 0 : zoneLim(self._isoZones(eq), ev.etype === 'recovery' ? 0 : ev.gi);
+        var _jd = (isSens || ev.etype === 'signal_lost') ? '' : judgeDetail(ev, _pat, self._rawImp(key));
+        if (nat) _jd = 'ISO ' + GRADE_WORDS[_hG] + ' 구간' + (_jd ? ' · ' + _jd : '');
         jobs.push(insertEvent({
           eid: key + ':' + nowW + ':' + ev.etype, ts: nowW, tbl: eq.table, tag: eq.name, etype: ev.etype,
           grade: GRADE_WORDS[ev.gi], val: ev_val, lim: ev_lim,
@@ -1409,12 +1744,12 @@ export class App extends Component {
              무엇이 일어났는지는 "얼마나 안 들어왔나"뿐이라 그것을 DETAIL에 적는다(서버 판정기와 같은 문구). */
           detail: ev._detail = (isSens ? (ev.detail || '')
             : ev.etype === 'signal_lost' ? durKo(nowW - eq.lastSeen) + ' 무수신'
-              : judgeDetail(ev, _pat, self._rawImp(key))),
+              : _jd),
         }).catch(function () {}));
         /* 즉시 보내지 않고 회차 큐에 담는다 — 같은 회차에 수십~수백 건이 동시에 나는 경우가 있어
            (수집 끊김 시 전 태그가 함께 두절) 하나씩 보내면 채널 한도에 걸려 임의의 일부만 도착한다.
-           묶음 여부는 발송 직전에 notify.planNotifications가 정한다. */
-        self._queueNotify(eq, ev, ev_val, ev_lim, nowW);
+           묶음 여부는 발송 직전에 notify.planNotifications가 정한다. 기준 숫자가 없는 행은 lim=null. */
+        self._queueNotify(eq, ev, ev_val, nat ? null : ev_lim, nowW);
       });
       /* 표시 등급 — 결함 패턴이 켜고 ISO가 높이를 정한 판정 등급, 그리고 그 원인.
          카드·KPI·필터가 이걸 쓴다. 존만 쓰면 고주파가 지배하는 센서에서 베어링이
@@ -1425,11 +1760,13 @@ export class App extends Component {
       var _wg = VC.worstGrade(0, 0, 0, r.next.g);
       // 화면이 판정값과 네 축을 그대로 보여주도록 — 등급을 만든 축이 어느 것인지도 함께
       _wg.iso = val; _wg.wide = wide; _wg.limited = VC.isoNeeded(eq.fs); _wg.basis = iso.basis || 'wide';
+      _wg.isoRaw = iso.pending ? null : iso.vr;   // 화면 표시용 — 같은 대역의 원본 단위 RMS
       _wg.isoOk = isoUsableW && !iso.pending; _wg.isoUnit = isoUsableW ? 'mm/s' : eq.unit;
       _wg.blOk = lim != null; _wg.bandOk = !!bj;
       /* 등급을 켠 축이 패턴이므로 그 값을 화면에 내린다 — "왜 이 등급인가"의 답이다.
          패턴을 못 잰 태그(회전수·기하 미입력·저샘플)는 patOk=false로 커버리지에 드러난다. */
       _wg.patOk = !!_pat; _wg.patOn = !!(_pat && _pat.on); _wg.patR = _pat ? _pat.r : null;
+      _wg.patMiss = _pr.miss; _wg.patWait = _pr.miss && !self._patNow;   // 보류 사유 — 첫 측정 전인지 측정 실패인지
       _wg.patWide = !!(_pat && _pat.demodSrc === 'wideband');
       _wg.blR = (lim != null && lim > 0) ? wide / lim : null;
       _wg.bandR = bj ? bj.maxR : null;
@@ -1493,11 +1830,12 @@ export class App extends Component {
   }
   // 기간 이벤트를 CSV/JSON으로 브라우저 다운로드
   _exportEvents() {
+    var C = this._ac();   // 적용된 설정 — 폼의 저장 안 한 편집은 판정에 쓰지 않는다
     var self = this, S = this.state, E = this.E;
     var fromMs = new Date(S.csvFrom + 'T00:00:00').getTime();
     var toMs = new Date(S.csvTo + 'T23:59:59.999').getTime();
     if (!(fromMs <= toMs)) { this._toast('기간이 올바르지 않습니다 (시작 ≤ 종료)', 'warn'); return; }
-    var aliasOf = function (r) { return (S.aliases || {})[r.tbl + ':' + r.tag] || ''; };
+    var aliasOf = function (r) { return (C.aliases || {})[r.tbl + ':' + r.tag] || ''; };
     loadEventsRange(fromMs, toMs).then(function (rows) {
       if (!rows.length) { self._toast('해당 기간에 이벤트가 없습니다', 'warn'); return; }
       var content, mime, ext;
@@ -1506,15 +1844,21 @@ export class App extends Component {
       var ts = function (ms) { return E.fmtFull(ms).slice(0, 19); };
       // 상세 — 알람이 실제로 들고 있는 내용(대역 이탈의 대역별 값·한계, 두절의 무수신 시간)
       var det = function (r) { return r.detail || ''; };
+      /* 원본 단위 행(가속도·변위 설비의 등급 이벤트)은 기준 숫자 대신 근거 문구 — 화면과 같은 규칙 */
+      var units = {};
+      ((self.data && self.data.equipment) || []).forEach(function (e) { units[e.table + ':' + e.name] = e.unit; });
+      var nat = function (r) { return natRow(r.etype, units[r.tbl + ':' + r.tag]); };
+      var limOf = function (r) { return nat(r) ? (Notify.basisText(r.detail) || '속도 ISO 기준 판정') : r.lim; };
       if (S.dlFmt === 'json') {
         content = JSON.stringify(rows.map(function (r) {
-          return { time: ts(r.ts), table: r.tbl, tag: r.tag, alias: aliasOf(r), type: TYPEKO[r.etype] || r.etype, grade: r.grade, value: r.val, limit: r.lim, detail: det(r) };
+          return { time: ts(r.ts), table: r.tbl, tag: r.tag, alias: aliasOf(r), type: TYPEKO[r.etype] || r.etype, grade: r.grade, value: r.val,
+            limit: nat(r) ? null : r.lim, basis: nat(r) ? limOf(r) : undefined, detail: det(r) };
         }), null, 2);
         mime = 'application/json'; ext = 'json';
       } else {
         var cell = function (v) { v = String(v == null ? '' : v); return /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; };
         var lines = ['시각,테이블,태그,별칭,유형,등급,지표값,기준값,상세'];
-        rows.forEach(function (r) { lines.push([ts(r.ts), r.tbl, r.tag, aliasOf(r), TYPEKO[r.etype] || r.etype, r.grade, r.val, r.lim, det(r)].map(cell).join(',')); });
+        rows.forEach(function (r) { lines.push([ts(r.ts), r.tbl, r.tag, aliasOf(r), TYPEKO[r.etype] || r.etype, r.grade, r.val, limOf(r), det(r)].map(cell).join(',')); });
         content = '﻿' + lines.join('\r\n'); // BOM — Excel 한글 정상 표시
         mime = 'text/csv;charset=utf-8'; ext = 'csv';
       }
@@ -1529,7 +1873,7 @@ export class App extends Component {
   }
   /* ── 태그 되살아남 차단 ──────────────────────────────────────────────────
 
-     학습값(NEO_VIBE_BASELINE)과 판정 상태(NEO_VIBE_MONSTATE)는 '테이블:태그' 문자열 하나를
+     학습값(BASELINE)과 판정 상태(MONSTATE)는 '테이블:태그' 문자열 하나를
      키로 쓴다. 태그를 지워도 이 LOOKUP 행들은 남는다 — TAG 테이블에서만 사라지기 때문이다.
      나중에 같은 이름으로 다른 설비를 붙이면 옛 μ·σ가 말없이 적용된다.
 
@@ -1539,6 +1883,7 @@ export class App extends Component {
      데이터만으로는 같은 설비인지 알 수 없으므로(이름이 유일한 단서다) 사람에게 묻는다.
      확인 전까지 그 태그의 베이스라인·대역 판정은 멈춘다 — ISO 존은 절대 기준이라 계속 돈다. */
   _checkRevived(keys, scopeTables) {
+    var C = this._ac();   // 적용된 설정 — 폼의 저장 안 한 편집은 판정에 쓰지 않는다
     var self = this, S = this.state;
     /* 베이스라인을 아직 안 읽었으면 판단할 수 없다 — 이때 돌면 전부 "학습값 없음"으로 보여
        조용히 아무것도 안 걸린다. _blMap이 없으면 미로드, 빈 객체({})면 로드했는데 학습값이
@@ -1559,7 +1904,7 @@ export class App extends Component {
        그 테이블의 태그가 목록에서 빠졌다 돌아오는데, 그건 화면 설정이지 설비가 바뀐 게 아니다.
        선택 밖 테이블의 키는 건드리지 않고 그대로 둔다. */
     var sel = {};
-    (scopeTables || S.srcSel || []).forEach(function (t) { sel[t] = 1; });
+    (scopeTables || C.srcSel || []).forEach(function (t) { sel[t] = 1; });
     var inScope = function (k) { return !!sel[k.slice(0, k.indexOf(':'))]; };
 
     var known = {};
@@ -1636,7 +1981,7 @@ export class App extends Component {
     if (!this.live) return Promise.resolve();
     return loadBaselines().then(function (m) { self._blMap = m; self.setState({ baselines: m }); }).catch(function () {});
   }
-  // 정상 상태 학습: 태그의 정상 기간을 sec 롤업으로 조회 → μ·σ 적합 → NEO_VIBE_BASELINE 저장.
+  // 정상 상태 학습: 태그의 정상 기간을 sec 롤업으로 조회 → μ·σ 적합 → BASELINE 저장.
   //  · 해상도는 sec 고정 — 판정 값(eq.rms=최신 sec 버킷)과 학습 통계의 해상도를 일치시킨다.
   //  · 학습 구간(blWin)은 "얼마나 긴 정상 기간을 학습할지"만 결정(대표성 knob), 해상도와 무관.
   /* 베이스라인 맵·진행중 표시의 동시 갱신 —
@@ -1662,6 +2007,7 @@ export class App extends Component {
   }
   _isBusy(field, key) { return !!((this._busyMap && this._busyMap[field]) || this.state[field] || {})[key]; }
   _learnBaseline(eq) {
+    var C = this._ac();   // 적용된 설정 — 폼의 저장 안 한 편집은 판정에 쓰지 않는다
     var self = this, S = this.state;
     var key = eq.table + ':' + eq.name;
     if (this._isBusy('blBusy', key)) return;
@@ -1670,7 +2016,7 @@ export class App extends Component {
     this._busySet('blBusy', key, true);
     function unbusy() { self._busySet('blBusy', key, false); }
     // 학습 단위를 판정 구간과 맞춘다 — μ·σ가 실제 판정값의 분포를 설명해야 한다
-    var winSec = Math.round(Math.max(durMs(S.evalWindow) || 10000, durMs(S.monitorInterval) || 3000) / 1000);
+    var winSec = Math.round(Math.max(durMs(C.evalWindow) || 10000, durMs(C.monitorInterval) || 3000) / 1000);
     rollupTrend(eq.table, eq.name, 'sec', from, to).then(function (buckets) {
       var vals = VC.windowSeries(buckets, winSec);
       // 정상상태 게이트 — 정지·기동/정지 램프 버킷은 학습에서 제외. 섞이면 median이 내려가거나
@@ -1701,11 +2047,12 @@ export class App extends Component {
       self._toast('베이스라인 학습 실패: ' + (e.message || e), 'err');
     });
   }
-  /* 대역 베이스라인 학습 — NEO_VIBE_BAND에 쌓인 대역 시계열로 대역마다 μ·σ를 학습한다.
+  /* 대역 베이스라인 학습 — BAND에 쌓인 대역 시계열로 대역마다 μ·σ를 학습한다.
      전체 RMS 학습과 같은 함수(steadyStateFilter → baselineFit)를 쓴다. 대역값은 이미 대역제한된
      스칼라 시계열이라 구조가 같고, 정지 구간 제외·스파이크 내성도 그대로 필요하다.
-     키는 "테이블:태그:대역" — 기존 NEO_VIBE_BASELINE에 그대로 들어간다(스키마 변경 없음). */
+     키는 "테이블:태그:대역" — 기존 BASELINE에 그대로 들어간다(스키마 변경 없음). */
   _learnBandBaseline(eq) {
+    var C = this._ac();   // 적용된 설정 — 폼의 저장 안 한 편집은 판정에 쓰지 않는다
     var self = this, S = this.state;
     var base = eq.table + ':' + eq.name;
     var H = BAND_WIN_H[S.bandWin] || 24;   // 대역 전용 기간 — RMS와 표본 밀도가 달라 따로 둔다
@@ -1714,7 +2061,7 @@ export class App extends Component {
        데이터 뒤에 놓여 "값 없음"이 된다. */
     var to = eq.lastSeen || Date.now(), from = to - H * 3600000;
     var k = parseFloat(S.blK) || 3;
-    var grid = durMs(S.bandInterval); // 밀도 균일화 격자 = 의도된 추출 주기
+    var grid = durMs(C.bandInterval); // 밀도 균일화 격자 = 의도된 추출 주기
     return Promise.all(VC.BAND_ORDER.map(function (bn) {
       var key = base + ':' + bn;
       return bandRaw(key, from, to).then(function (rows) {
@@ -1762,9 +2109,10 @@ export class App extends Component {
   /* 최신 대역값 캐시 — 추출은 10분 주기인데 판정은 10초마다 돈다. 매 판정마다 조회하면
      아무것도 안 바뀐 값을 60번 다시 읽는다. 추출 주기의 절반이 지났을 때만 갱신한다. */
   _refreshBandNow() {
+    var C = this._ac();   // 적용된 설정 — 폼의 저장 안 한 편집은 판정에 쓰지 않는다
     var self = this, S = this.state;
-    if (!S.bandOn) { this._bandNow = null; return; }
-    var iv = durMs(S.bandInterval || '10m') || 600000;
+    if (!C.bandOn) { this._bandNow = null; return; }
+    var iv = durMs(C.bandInterval || '10m') || 600000;
     var now = Date.now();
     if (this._bandNowAt && now - this._bandNowAt < iv / 2) return;
     if (this._bandNowBusy) return;
@@ -1796,13 +2144,16 @@ export class App extends Component {
      원시 파형을 태그마다 읽어야 해서 10초 판정마다 돌릴 수 없다(91태그면 회차 3.2초·14 MB).
      베어링 열화는 며칠 단위라 10분이면 충분하고, 급변은 10초 축(ISO·베이스라인)이 따로 본다. */
   _refreshPatNow() {
+    var C = this._ac();   // 적용된 설정 — 폼의 저장 안 한 편집은 판정에 쓰지 않는다
     var self = this, S = this.state;
     /* 알람 여부로 막지 않는다 — 카드 등급은 알람과 무관하게 게이트 규칙이어야 한다.
        막아 두면 알람을 끈 동안 _gradeState가 비고, 카드가 폴백으로 **게이트 없는 ISO 존 등급**을
        보여준다(그 축은 이 검증 풀에서 단독 오탐 69%다) — 알람만 끄면 옛 판정이 되살아나는 셈이다.
        대신 감시 화면을 보고 있지도 않고 알람도 꺼져 있으면 돌 이유가 없다(조회가 원시 파형이라 비싸다). */
-    if (!S.monitorOn && S.tab !== 'monitor') { this._patNow = null; return; }
-    var iv = durMs(S.bandInterval || '10m') || 600000;   // 대역과 같은 주기를 쓴다 — 둘 다 원시 파형이라
+    /* 비울 때 잰 시각도 지운다 — 남겨 두면 알람을 다시 켰을 때 주기의 절반(최대 5분)이 지나야 다시 재고,
+       그동안 잴 수 있는 태그가 전부 "첫 측정 대기" 보류로 묶인다. */
+    if (!C.monitorOn && S.tab !== 'monitor') { this._patNow = null; this._patNowAt = 0; return; }
+    var iv = durMs(C.bandInterval || '10m') || 600000;   // 대역과 같은 주기를 쓴다 — 둘 다 원시 파형이라
     var now = Date.now();
     if (this._patNowAt && now - this._patNowAt < iv / 2) return;
     if (this._patNowBusy) return;
@@ -1821,7 +2172,7 @@ export class App extends Component {
          점수가 채택선 근처에서 노는 구간은 이력 어디에도 안 남았다.
          대역·포락선과 같은 표에 넣어야 한 차트에 겹쳐 그린다(따로 두면 조회·정리가 두 벌이 된다).
          서버 감시 모드에서는 판정 타이머가 같은 키로 쓴다 — 둘 다 돌지는 않는다. */
-      if (S.monMode !== 'server') {
+      if (C.monMode !== 'server') {
         res.forEach(function (r) {
           if (r.pat && r.pat.r != null) insertBandPoint(r.key + ':pattern', r.pat.at || Date.now(), r.pat.r).catch(function () {});
         });
@@ -1885,7 +2236,7 @@ export class App extends Component {
   _softBands(eq) {
     var det = (this._detailCache[eq.id] || {}).det;
     var fr = (det && det.frMeas && det.frMeas.f > 0) ? det.frMeas.f : (eq.rpm / 60);
-    var mount = ((this.state.equipMeta || {})[eq.id] || {}).mount || (eq.meta || {}).mount;
+    var mount = ((this._ac().equipMeta || {})[eq.id] || {}).mount || (eq.meta || {}).mount;
     return VC.softBands(fr, eq.fs, mount);
   }
   /* 대역 추출 타이머 — 판정 타이머와 같은 서명 비교 방식. 태그가 늘거나 회전수 설정이 바뀌면
@@ -1895,20 +2246,22 @@ export class App extends Component {
      조용히 거르면 "왜 6개 중 1개만 채워지나"를 알 수 없으므로 제외 사유를 함께 돌려준다. */
   /* 이 태그의 베어링 형상 — 카탈로그 품번이면 표에서, 직접 입력이면 저장된 형상에서.
      품번이 없거나 슬리브(구름체가 없다)면 결함주파수 자체가 정의되지 않는다. */
-  _bearingGeo(eq) {
-    var S = this.state, model = (S.equipBearing || {})[eq.id] || '';
+  // cfg 생략 = 적용된 설정(판정용). 설정 화면의 미리보기는 편집본(state)을 넘긴다
+  _bearingGeo(eq, cfg) {
+    var S = cfg || this._ac(), model = (S.equipBearing || {})[eq.id] || '';
     if (!model || model === 'sleeve') return null;
     return VC.BEARINGS[model] || Object.assign({}, eq.bearing, (S.equipGeo || {})[eq.id] || {});
   }
   /* 대역 추출 대상 태그 선별만 떼어 둔다 — _bandSpec은 감시자 스펙(wd)을 물고, 감시자는
      "대역이 실제로 돌 수 있는가"를 물어야 해서 한 함수로 두면 서로를 부른다. */
   _bandTags() {
+    var C = this._ac();   // 적용된 설정 — 폼의 저장 안 한 편집은 판정에 쓰지 않는다
     var self = this;
     var all = this._activeEqs().map(function (eq) {
       var det = (self._detailCache[eq.id] || {}).det;
       // 실측 1×가 있으면 그걸 쓴다 — 명판과 다르면 대역이 통째로 어긋난다
       var fr = (det && det.frMeas && det.frMeas.f > 0) ? det.frMeas.f : (eq.rpm / 60);
-      var mount = ((self.state.equipMeta || {})[eq.id] || {}).mount || (eq.meta || {}).mount;
+      var mount = ((C.equipMeta || {})[eq.id] || {}).mount || (eq.meta || {}).mount;
       return { tbl: eq.table, tag: eq.name, fr: Math.round(fr * 100) / 100, fs: eq.fs,
         /* 복조 대역은 설정에서만 정해지는 값이라 앵커마다 같다 — 추세가 성립하려면 고정이어야 한다.
            결함주파수는 굽지 않고 계수만 굽는다: 서버가 앵커마다 fr을 실측하므로 그때 곱해야 따라간다. */
@@ -1920,15 +2273,17 @@ export class App extends Component {
     return { tags: all.filter(function (t) { return t.fs > 0 && t.fr > 0; }), skipped: skipped, total: all.length };
   }
   _bandSpec() {
+    var C = this._ac();   // 적용된 설정 — 폼의 저장 안 한 편집은 판정에 쓰지 않는다
     var t = this._bandTags();
-    return { tags: t.tags, skipped: t.skipped, total: t.total, wd: this._wdSpec('band') };
+    return { tags: t.tags, skipped: t.skipped, total: t.total, selfHb: '__hbband',
+      tblPrefix: storePrefix(), keyPrefix: userKeyPrefix(), srcMap: srcMapOf(C.srcSel || []) };
   }
   /* 대역 추출이 실제로 도는 상태인가 — 켜 두어도 조건을 갖춘 태그가 하나도 없으면 타이머를
      굽지 않는다. 감시자도 이 답을 봐야 없는 타이머를 되살리려 들지 않는다.
      여기서 다시 세지 않고 _syncBandTimer가 내린 결론(_bandNoTarget)을 본다 — 굽는 쪽과
      지키는 쪽이 각자 계산하면 한쪽만 옛 상태로 남는다. 아직 한 번도 안 돌았으면 '모름'이고,
      모르는 동안은 지켜본다(있는데 안 지키는 쪽이 없는 걸 지키는 쪽보다 나쁘다). */
-  _bandLive() { return !!this.state.bandOn && !this._bandNoTarget; }
+  _bandLive() { return !!this._ac().bandOn && !this._bandNoTarget; }
   /* 대상이 0인 이유 — 사유가 하나면 그것, 섞여 있으면 둘 다 적는다. */
   _bandNoTargetWhy(spec) {
     var why = {}, n = 0;
@@ -1946,7 +2301,8 @@ export class App extends Component {
   _bandPlan(ov) {
     var S = this.state, spec = this._bandTags();
     ov = ov || {};
-    var iv = durMs(ov.bandInterval || S.bandInterval) || 600000;
+    // 주기는 적용된 값(타이머가 도는 격자), 채울 구간은 폼의 학습 기간 — 채우기·학습은 설정 화면의 버튼이다
+    var iv = durMs(ov.bandInterval || this._ac().bandInterval) || 600000;
     var H = BAND_WIN_H[ov.bandWin || S.bandWin] || 24;   // 채울 구간도 대역 학습 기간에 맞춘다
     var span = H * 3600000;
     var perTag = Math.floor(span / iv);
@@ -2092,9 +2448,8 @@ export class App extends Component {
   _applyFlapFix(needMin) {
     var self = this;
     var v = Math.round(needMin * 60) + 's';
-    this.setState({ evalWindow: v, dirty: true });
-    this._persistCfg().then(function () {
-      self._toast('RMS 구간을 ' + needMin + '분으로 변경했습니다 — 판정값이 그 구간으로 평균됩니다', 'ok');
+    this._applyNow({ evalWindow: v }).then(function (ok) {
+      if (ok) self._toast('RMS 구간을 ' + needMin + '분으로 변경했습니다 — 판정값이 그 구간으로 평균됩니다', 'ok');
     });
   }
   /* 주기를 바꾸면 무엇이 달라지는지 — 숫자로 먼저 보여준다.
@@ -2115,51 +2470,62 @@ export class App extends Component {
   // 주기 확정 — 선택한 이전 구간 처리까지 수행한 뒤 타이머를 새 주기로 다시 굽는다
   _applyBandInterval() {
     var self = this, S = this.state, next = S.bandIvNext, act = S.bandIvAct || 'keep';
+    this.setState({ bandIvOpen: false });
     // 주기가 바뀌면 격자가 달라져 보유 칸이 다시 계산된다 — 반영 후에 읽는다(배치 지연 회피)
-    this.setState({ bandInterval: next, bandIvOpen: false, dirty: true });
     this._refreshBandCov({ bandInterval: next });
-    var after = function () {
-      return self._syncBandTimer().then(function () { return self._syncMonitorTimer(true); });
-    };
+    /* 확정은 곧바로 저장·적용한다 — 타이머를 새 주기로 굽고 이전 구간까지 처리하는 동작이라
+       "저장 대기"로 두면 타이머(적용본)와 채운 값(새 주기)이 서로 다른 격자가 된다. */
+    var applied = this._applyNow({ bandInterval: next });
     if (act === 'reset') {
-      var eqs = this._activeEqs();
-      return Promise.all(eqs.map(function (eq) { return self._delBandBaseline(eq); })).then(after)
-        .then(function () { self._toast('추출 주기 ' + (IV_KO[next] || next) + ' · 대역 베이스라인 초기화됨', 'ok'); });
+      return applied.then(function (ok) {
+        if (!ok) return;
+        var eqs = self._activeEqs();
+        // 서버 판정 타이머에 구워진 대역 학습값도 지운 뒤 다시 굽는다
+        return Promise.all(eqs.map(function (eq) { return self._delBandBaseline(eq); }))
+          .then(function () { return self._syncMonitorTimer(true); })
+          .then(function () { self._toast('추출 주기 ' + (IV_KO[next] || next) + ' · 대역 베이스라인 초기화됨', 'ok'); });
+      });
     }
-    if (act === 'refill') return after().then(function () { return self._runBandBackfill(); });
-    return after().then(function () { self._toast('추출 주기 ' + (IV_KO[next] || next) + '로 변경', 'ok'); });
+    if (act === 'refill') return applied.then(function (ok) { if (ok) return self._runBandBackfill(); });
+    return applied.then(function (ok) { if (ok) self._toast('추출 주기 ' + (IV_KO[next] || next) + '로 변경', 'ok'); });
   }
   _syncBandTimer(silent) {
+    var C = this._ac();   // 적용된 설정 — 폼의 저장 안 한 편집은 판정에 쓰지 않는다
     var self = this, S = this.state;
-    if (!this.live) return Promise.resolve();
-    // 대역 추출은 서버 감시 여부와 무관하게 "알람이 켜져 있으면" 돈다 — 추세는 앱이 닫혀도 이어져야 한다
-    if (!S.monitorOn || !S.bandOn) return this._dropTimer('_bandSig', deleteBandTimer, BAND_TIMER);
+    // 설정이 state에 안 들어간 동안은 굽지 않는다 — 기본값(대역 끔)이 타이머를 지운다
+    if (!this.live || this._cfgLocked(true)) return Promise.resolve();
+    /* 대역 추출은 알람과 별개다 — 자기 스위치(bandOn)만 본다.
+       알람을 꺼도 추세는 이어져야 하고, 베이스라인 학습도 이 값으로 한다.
+       알람에 묶어 두면 알람만 껐는데 대역 타이머가 같이 사라져 "켜 뒀는데 안 쌓인다"가 된다. */
+    if (!C.bandOn) return this._dropTimer('_bandSig', deleteBandTimer, bandTimer());
+    if (this._loadFail) return Promise.resolve();   // 판정 타이머와 같은 이유 — 불완전한 목록으로 굽지 않는다
     var spec = this._bandSpec();
     /* 대상 유무를 먼저 기록한다 — 감시자 동기화가 곧바로 뒤따르는데(체인이 아니라 같은 틱),
        비동기 삭제가 끝난 뒤에 남기면 감시자가 한 박자 옛 결론으로 구워진다. */
     this._bandNoTarget = !spec.tags.length;
     this._bandSkipWhy = this._bandNoTarget ? this._bandNoTargetWhy(spec) : '';
-    var sched = '@every ' + (S.bandInterval || '10m');
+    var sched = '@every ' + (C.bandInterval || '10m');
     /* 대상이 하나도 없으면 지운다 — 다만 조용히 지우지 않는다. 설정은 '켜짐'인데 타이머만
        없는 상태가 되므로, 왜 안 도는지 말하지 않으면 사용자는 고장으로 읽는다. */
     if (!spec.tags.length) {
       var why = this._bandNoTargetWhy(spec);
       if (!silent) this._toast('대역 추출을 켤 수 없습니다 — ' + why, 'warn');
-      return this._dropTimer('_bandSig', deleteBandTimer, BAND_TIMER);
+      return this._dropTimer('_bandSig', deleteBandTimer, bandTimer());
     }
     // 판정 타이머와 같은 이유로 생성된 TQL을 서명에 넣는다 — 코드가 바뀌면 다시 구워야 한다
     var tql = Band.buildBandTql(spec);
     var sig = JSON.stringify(spec.tags) + '|' + sched + '|' + srcSig(tql);
     if (silent && sig === this._bandSig) return Promise.resolve();
-    return createBandTimer(tql, sched, this._timerKnown('_bandSig'))
+    return createBandTimer(tql, sched)
       .then(function () { self._bandSig = sig; if (!silent) self._toast('대역 추출 켜짐 · ' + sched, 'ok'); })
       .catch(function (e) { self._bandSig = null; if (!silent) self._toast('대역 추출 설정 실패: ' + (e.message || e), 'err'); });
   }
   /* 서버 타이머 재동기화 예약 — 전체 학습은 태그마다 병렬로 끝나므로 그때마다 구우면 N번 재등록된다.
      짧게 디바운스해 마지막 한 번만 굽는다(재등록 사이 판정 주기가 비는 것을 최소화). */
   _resyncMonSoon() {
+    var C = this._ac();   // 적용된 설정 — 폼의 저장 안 한 편집은 판정에 쓰지 않는다
     var self = this;
-    if (this.state.monMode !== 'server' || !this.state.monitorOn) return;
+    if (C.monMode !== 'server' || !C.monitorOn) return;
     if (this._resyncT) clearTimeout(this._resyncT);
     this._resyncT = setTimeout(function () { self._resyncT = null; self._syncMonitorTimer(true); }, 800);
   }
@@ -2724,7 +3090,7 @@ export class App extends Component {
     var self = this;
     if (!p || p === this.state.llmProvider) return;
     this.setState({ llmProvider: p, llmConfigured: false, llmTest: null, dxAiText: null });
-    setTimeout(function () { self._persistCfg(); }, 0);
+    this._persistView(['llmProvider'], { llmProvider: p });   // 이 값만 — 설정 탭의 저장 안 한 편집을 딸려 저장하지 않는다
   }
   /* ---- LLM 소견: 상세분석 전 차트의 실측값을 데이터팩으로 묶어 전문가 리포트 생성 ---- */
   // FFT 상위 피크(로컬 최대) N개 — 진폭 내림차순
@@ -3489,10 +3855,13 @@ export class App extends Component {
     var self = this;
     return tagSchemas().then(function (m) {
       self.liveSchemas = m || {};
-      var sel = self.state.srcSel || [];
-      var drop = sel.filter(function (t) { return !!self._srcBlock(t); });
+      var sel = self.state.srcSel || [], asel = self._ac().srcSel || [];
+      var blocked = function (t) { return !!self._srcBlock(t); }, keep = function (t) { return !blocked(t); };
+      var drop = sel.concat(asel).filter(function (t, i, a) { return blocked(t) && a.indexOf(t) === i; });
       if (drop.length) {
-        self.setState({ srcSel: sel.filter(function (t) { return drop.indexOf(t) < 0; }) });
+        // 편집본과 적용본 양쪽에서 — 판정은 적용본을 보므로 편집본만 거르면 계속 감시된다
+        self.setState({ srcSel: sel.filter(keep) });
+        if (self._applied) self._setApplied({ srcSel: asel.filter(keep) }, ['srcSel']);
         self._toast('컬럼 구성이 다른 table을 감시에서 제외했습니다 — ' + drop.join(', '), 'warn');
       }
       self.forceUpdate();
@@ -3510,7 +3879,7 @@ export class App extends Component {
       listTags(tb, 100000).then(function (tags) { self._tagCache[tb] = tags; self.forceUpdate(); }).catch(function () {});
     });
   }
-  _activeEqs() { var sel = this.state.srcSel || []; return this.data.equipment.filter(function (e) { return sel.indexOf(e.table) >= 0; }); }
+  _activeEqs() { var sel = this._ac().srcSel || []; return this.data.equipment.filter(function (e) { return sel.indexOf(e.table) >= 0; }); }
   // 태그 표시 라벨 통일: 별칭 (태그명), 별칭 없으면 태그명만
   _tagLabel(e) { return e.alias && e.alias !== e.name ? e.alias + ' (' + e.name + ')' : e.name; }
   /* 판정값 — RMS 구간의 실효값 하나. 표시·판정·이벤트가 모두 이 값을 쓴다.
@@ -3535,11 +3904,12 @@ export class App extends Component {
      경계를 넘은 태그만 1초 원본 + 4차 밴드패스로 정확히 잰다. 결과는 태그당 30초 캐시한다.
      반환 { v, pending } — pending이면 아직 계산 전이라 존 등급을 올리지 않고 직전 값을 유지한다
      (전대역 값으로 대신 판정하면 고치려던 그 헛알람이 그대로 난다). */
+  // 반환 v = 존 판정용 속도 ISO · vr = 같은 대역의 원본 단위 RMS(화면 표시용, 못 쟀으면 null)
   _isoValue(eq, wide) {
-    if (!isFinite(wide)) return { v: wide, pending: false, basis: 'wide' };
+    if (!isFinite(wide)) return { v: wide, vr: wide, pending: false, basis: 'wide' };
     /* 이 샘플레이트에 1 kHz 위가 없으면 전대역이 곧 ISO 대역이다 — 단 원본이 이미 속도일 때만.
        가속도·변위는 대역이 맞아도 물리량이 달라 변환이 필요하므로 이 지름길을 쓸 수 없다. */
-    if (!VC.isoNeeded(eq.fs) && eq.unit === 'mm/s') return { v: wide, pending: false, basis: 'wide' };
+    if (!VC.isoNeeded(eq.fs) && eq.unit === 'mm/s') return { v: wide, vr: wide, pending: false, basis: 'wide' };
     // 구간 안 가장 큰 초 버킷도 경계 아래면 어떤 1초 창의 ISO도 그보다 작다 — 계산 없이 양호 확정
     var key = eq.table + ':' + eq.name;
     if (!this._isoCache) this._isoCache = {};
@@ -3548,10 +3918,11 @@ export class App extends Component {
        임박 판단은 두 갈래다 — 전대역이 존 경계를 넘었거나(상한 성질로 양호가 안 깨짐),
        베이스라인 한계를 넘었거나(그 한계는 존 경계보다 낮을 수 있다). */
     var near = !VC.isoSkippable(eq.secBuckets, eq.zones[0]) || this._alarmNear(eq, wide);
-    if (c && now - c.at < (near ? ISO_TTL_MS : ISO_TTL_QUIET_MS)) return { v: c.v, pending: false, basis: 'iso' };
+    var vr = c && c.vr != null ? c.vr : null;
+    if (c && now - c.at < (near ? ISO_TTL_MS : ISO_TTL_QUIET_MS)) return { v: c.v, vr: vr, pending: false, basis: 'iso' };
     this._isoRefresh(eq, key, now);
     // 아직 한 번도 못 쟀으면 전대역을 임시로 쓴다 — pending이라 등급은 직전 값을 유지한다
-    return c ? { v: c.v, pending: false, basis: 'iso' } : { v: wide, pending: true, basis: 'wide' };
+    return c ? { v: c.v, vr: vr, pending: false, basis: 'iso' } : { v: wide, vr: null, pending: true, basis: 'wide' };
   }
   // 베이스라인 쪽으로 알람이 날 상황인가 — 그때도 원본을 받아 계측을 확인한다
   // 원본으로 본 계측 판정 — 유효기간이 지났으면 없는 것으로 본다(딱지가 안 떨어지는 것을 막는다)
@@ -3588,7 +3959,10 @@ export class App extends Component {
         var _raw = (w && w.values) || [];
         var _vel = eq.unit === 'mm/s' ? _raw : VC.convertDomain(_raw, eq.fs, eq.unit, 'mm/s', eq.rpm / 60);
         var v = VC.isoRms(_vel, eq.fs);
-        if (v != null) self._isoCache[key] = { v: v, at: Date.now() };
+        /* 표시는 원본 단위다 — 속도 환산값(v)은 존 판정에만 쓰고, 화면에는 같은 대역(10~1000 Hz)의
+           원본 단위 RMS(vr)를 보인다. 속도 원본이면 둘이 같다. */
+        var vr = eq.unit === 'mm/s' ? v : VC.isoRms(_raw, eq.fs);
+        if (v != null) self._isoCache[key] = { v: v, vr: vr, at: Date.now() };
         /* 같은 샘플로 계측 게이트도 본다 — 클리핑·스파이크·첨도는 파형 모양이라 원본이
            있어야 보이고, 원본을 받는 시점이 곧 알람이 날 조건이 선 시점이다. 공짜로 얹는다. */
         if (!self._gateRaw) self._gateRaw = {};
@@ -3632,13 +4006,16 @@ export class App extends Component {
        사유는 카드 호버가 적는다(결함 패턴 — 판정 못 함). */
     var gs = (this._gradeState || {})[key];
     if (!gs) return { kind: 'wait', label: '판정 대기' };
+    // 잴 수 있는 태그인데 이번에 못 쟀다 — 등급은 직전 값을 유지하고 있다(calc.patternRound)
+    if (gs.patMiss) return { kind: 'patmiss', label: gs.patWait ? '결함 패턴 첫 측정 대기' : '결함 패턴 측정 실패' };
     if (gs.patOk === false) return { kind: 'nojudge', label: '판정 못 함' };
     return null;
   }
   /* 사용자 임계값은 "입력한 문자열 그대로" 저장된다(THRESH_RAW) — 판정에 쓸 때 여기서 숫자로 만든다.
      비었거나 숫자가 아니면 규격 기본값으로 되돌린다. 옛 설정은 숫자로 저장돼 있어 그대로 통과한다. */
-  _effZones(eq) {
-    var S = this.state;
+  // cfg 생략 = 적용된 설정. 설정 화면의 미리보기만 편집본(state)을 넘긴다
+  _effZones(eq, cfg) {
+    var S = cfg || this._ac();
     var num = function (v, d) { var n = parseFloat(v); return isFinite(n) ? n : d; };
     if (eq.unit === 'mm/s') {
       var d = VC.ISO_ZONES[eq.cls] || VC.ISO_ZONES.II, o = S.classThresh[eq.cls] || [];
@@ -3650,8 +4027,8 @@ export class App extends Component {
   /* ISO 축 전용 존 — 규격은 속도(mm/s) 기준이므로 원본 단위와 무관하게 클래스가 정한다.
      _effZones는 원본 단위 존이고 카드·정지 판정·ISO 계산 스킵 임계가 그걸 쓴다.
      둘을 섞으면 가속도 값을 속도 경계에 대는 셈이 되어 다른 양을 비교한다. */
-  _isoZones(eq) {
-    var S = this.state, d = VC.ISO_ZONES[eq.cls] || VC.ISO_ZONES.II, o = S.classThresh[eq.cls] || [];
+  _isoZones(eq, cfg) {
+    var S = cfg || this._ac(), d = VC.ISO_ZONES[eq.cls] || VC.ISO_ZONES.II, o = S.classThresh[eq.cls] || [];
     var num = function (v, dd) { var n = parseFloat(v); return isFinite(n) ? n : dd; };
     return [num(o[0], d[0]), num(o[1], d[1]), num(o[2], d[2])];
   }
@@ -3758,7 +4135,7 @@ export class App extends Component {
   }
   _toggleGenTag(id) { var g = this.state.genTags.slice(), i = g.indexOf(id); if (i >= 0) g.splice(i, 1); else g.push(id); this._setGenTags(g); }
   // 리포트 생성 — 선택 태그별로: 데이터 조회(0) → 지표 계산(1) → 소견 생성(2, 옵션) → 저장(3)
-  // 저장: <워크스페이스 루트>/vibration-reports/RPT_<태그>_<기간>_<생성일시>[_LLM].html (파일 API)
+  // 저장: <워크스페이스 루트>/<계정>/vibration-reports/<태그>_<생성일시>.html (파일 API)
   // 생성 중단 — 누르는 즉시 끝난다: 화면은 바로 대기 상태로 돌아가고, LLM 요청은 실제로 끊고(AbortController),
   // 실행 토큰(_genRun)을 올려 그 뒤로는 어떤 파일도 저장되지 않게 한다. 이미 저장된 리포트만 남는다
   _cancelGen() {
@@ -3787,7 +4164,7 @@ export class App extends Component {
     this._genAC = (typeof AbortController !== 'undefined') ? new AbortController() : null;
     this.setState({ genRunning: true, genStep: 0 });
     var ids = ids0; // 데이터가 없는 태그는 위에서 이미 뺐다
-    ensureDir(REPORT_DIR)
+    ensureDir(reportDir())
       .then(function () {
         return ids.reduce(function (chain, id) {
           return chain.then(function () {
@@ -3827,7 +4204,7 @@ export class App extends Component {
           self._toast('리포트 ' + self._genSaved + '건 저장 · ' + _f.length + '건 실패 — ' + _f[0].tag + ': ' + _f[0].msg
             + (_f[0].at ? '  [' + _f[0].at + ']' : '') + (_f.length > 1 ? ' 외 ' + (_f.length - 1) + '건' : ''), 'err');
         } else if (self._genLlmErr) self._toast('리포트 ' + self._genSaved + '건 저장 — LLM 소견 실패로 지표만 저장됨 · ' + self._genLlmErr, 'err');
-        else self._toast('리포트 ' + self._genSaved + '건 저장 · vibration-reports/');
+        else self._toast('리포트 ' + self._genSaved + '건 저장 · ' + reportDir().replace(/^\//, '') + '/');
         self._loadReports();
       })
       .catch(function (e) {
@@ -3934,7 +4311,9 @@ export class App extends Component {
     var self = this, S = this.state;
     var live = {};
     (this.data ? this._activeEqs() : []).forEach(function (e) { live[e.table + ':' + e.name] = 1; });
-    var keys = Object.keys(this._monState || {}).filter(function (k) { return !live[k]; });
+    /* '__'로 시작하는 키는 태그가 아니라 서버 감시의 예약 키다(__hb 심박·__lock·__err·__nferr·__hbband) —
+       지우면 건강 배너가 근거를 잃는다. 태그 키(<테이블>:<태그>)만 정리 대상이다. */
+    var keys = Object.keys(this._monState || {}).filter(function (k) { return !live[k] && k.indexOf('__') !== 0; });
     if (!keys.length) { this._toast('정리할 항목이 없습니다'); return Promise.resolve(); }
     return keys.reduce(function (pr, k) {
       return pr.then(function () { return deleteMonState(k).catch(function () { }); });
@@ -3943,6 +4322,34 @@ export class App extends Component {
       self._toast(keys.length + '개 정리했습니다', 'ok');
       return self._refreshUsage();
     });
+  }
+  /* 유저 정보 — 신원은 콘솔 로그인 세션에서 오므로 여기서 할 일은 보여주는 것뿐이다.
+     계정을 바꾸려면 Neo 콘솔에서 다시 로그인한다. */
+  _userVals(base) {
+    var self = this, S = this.state;
+    base.userName = S.user || '';
+    base.userAuthMsg = S.authMsg || '';
+    base.needsDb = !!S.needsDb;
+    base.dbExists = !!S.dbExists;      // 저장소는 있는데 권한이 없는 경우 — 안내가 갈린다
+    base.dbWhy = S.dbWhy || '';
+    /* 저장소가 준비된 뒤에도 권한 쿼리는 남긴다 — 유저를 추가할 때마다 필요한데,
+       준비되자마자 화면에서 사라지면 그때 어디서 찾아야 할지 알 수 없다. */
+    var setup = setupSql();
+    base.dbReady = !S.needsDb && !!S.user;
+    base.dbAdmin = (S.user === 'SYS');
+    base.dbName = setup.db;
+    base.dbGrantSql = setup.grant;
+    base.grantUsers = S.grantUsers;
+    base.grantPick = S.grantPick || '';
+    base.grantBusy = !!S.grantBusy;
+    base.grantMsg = S.grantMsg || '';
+    base.onGrantOpen = function () { self._loadGrantUsers(); };
+    base.onGrantPick = function (e) { self.setState({ grantPick: e.target.value, grantMsg: '' }); };
+    base.onGrantRun = function () { self._grantTo(); };
+    base.dbBusy = !!S.dbBusy;
+    base.onMakeDb = function () { self._makeDb(); };
+    base.onCheckDb = function () { self._checkDb(); };
+    base.appDbName = appDb();
   }
   _dataVals(base) {
     var self = this, S = this.state, E = this.E;
@@ -3976,7 +4383,7 @@ export class App extends Component {
     var openOrphan = function () { self.setState({ orphanOpen: true, orphanBusy: null }); };
     base.dataRows = u ? [
       {
-        id: 'events', name: '이벤트 이력', table: 'NEO_VIBE_EVENTS', kind: 'TAG',
+        id: 'events', name: '이벤트 이력', table: 'EVENTS', kind: 'TAG',
         stat: this._num(u.events.rows || 0) + '건 · ' + span(u.events.span)
           + (orphanTot.events ? ' · 감시 대상 밖 ' + this._num(orphanTot.events) + '건' : ''),
         note: '알람 이력입니다. 지우면 그 기간을 다룬 리포트를 다시 만들 수 없습니다. 설비를 철거했다면 그 태그의 이력만 따로 지울 수 있습니다.',
@@ -3984,7 +4391,7 @@ export class App extends Component {
         act2: orphanRows.length ? { label: '태그별 정리…', onClick: openOrphan } : null,
       },
       {
-        id: 'band', name: '대역 에너지 추이', table: 'NEO_VIBE_BAND', kind: 'TAG',
+        id: 'band', name: '대역 에너지 추이', table: 'BAND', kind: 'TAG',
         stat: this._num(u.band.rows || 0) + '행 · ' + span(u.band.span)
           + (orphanTot.band ? ' · 감시 대상 밖 ' + this._num(orphanTot.band) + '행' : ''),
         note: '대역 이탈 판정과 추세 차트가 쓰는 데이터입니다. 넷 중 유일하게 시간에 비례해 커집니다 — 학습에 쓰인 구간을 지우면 대역 베이스라인을 다시 학습해야 합니다.',
@@ -3992,7 +4399,7 @@ export class App extends Component {
         act2: orphanRows.length ? { label: '태그별 정리…', onClick: openOrphan } : null,
       },
       {
-        id: 'monstate', name: '판정 상태', table: 'NEO_VIBE_MONSTATE', kind: 'LOOKUP',
+        id: 'monstate', name: '판정 상태', table: 'MONSTATE', kind: 'LOOKUP',
         stat: this._num(u.monstate.rows || 0) + '행' + (msOrphan ? ' · 감시 대상 밖 ' + msOrphan + '행' : ''),
         note: '직전 판정 결과입니다. 지워도 다음 판정 주기에 다시 만들어집니다 — 넷 중 유일하게 잃을 것이 없는 데이터라 확인 없이 정리합니다.',
         // 되살릴 수 있는 데이터라 확인 대화상자를 두지 않는다(다른 둘과 다른 점이다)
@@ -4001,12 +4408,12 @@ export class App extends Component {
           : null,
       },
     ] : [];
-    /* 학습값(NEO_VIBE_BASELINE)은 여기에 행을 두지 않는다 — 이 화면이 다루는 것은 "쌓여서 지워야 하는 것"인데
+    /* 학습값(BASELINE)은 여기에 행을 두지 않는다 — 이 화면이 다루는 것은 "쌓여서 지워야 하는 것"인데
        학습값은 재학습이 같은 키를 덮어써 늘지 않고(태그당 최대 6행), 상한까지 채워도 150 KB 남짓이다.
        감시 대상에서 빠진 키는 아무도 읽지 않으며(판정은 활성 설비 기준으로만 조회), 같은 이름 태그가
        돌아오면 되살아남 확인이 오용을 막는다. 표가 있다는 사실만 각주로 남기고 관리는 판정 기준에서 한다. */
     base.dataFootnote = u
-      ? '학습값(NEO_VIBE_BASELINE · ' + this._num(u.baseline.rows || 0) + '행)은 재학습이 같은 자리를 덮어써 늘지 않습니다 — 정리 대상이 아니라 판정 기준에서 관리합니다.'
+      ? '학습값(BASELINE · ' + this._num(u.baseline.rows || 0) + '행)은 재학습이 같은 자리를 덮어써 늘지 않습니다 — 정리 대상이 아니라 판정 기준에서 관리합니다.'
       : '';
     base.onGoCriteria = function () { self.setState({ setSection: 'criteria' }); self._refreshBandCov(); };
     /* 태그별 정리 — 기간 삭제로는 못 하는 일이다. 설비 하나를 철거했는데 그 이력만 지우려면
@@ -4065,7 +4472,7 @@ export class App extends Component {
     if (p) {
       var isBand = p.kind === 'band';
       base.purgeTitle = isBand ? '대역 에너지 추이 삭제' : '이벤트 이력 삭제';
-      base.purgeSub = isBand ? 'NEO_VIBE_BAND' : 'NEO_VIBE_EVENTS';
+      base.purgeSub = isBand ? 'BAND' : 'EVENTS';
       var unit = isBand ? '행' : '건';
       base.purgeWhen = E.fmtDT(p.fromMs).slice(0, 10) + ' ~ ' + E.fmtDT(p.toMs).slice(0, 10);
       base.purgeCounting = !!p.counting;
@@ -4086,7 +4493,7 @@ export class App extends Component {
       /* 마지막 관문 — 테이블 이름을 직접 입력해야 버튼이 열린다.
          버튼 하나로 끝나면 확인 대화상자가 "누르는 절차"가 되어 버린다. 되돌릴 수 없는 삭제라
          손이 한 번 더 가게 만든다(건수·기간을 다시 읽게 되는 부수 효과가 더 크다). */
-      base.purgeTable = isBand ? 'NEO_VIBE_BAND' : 'NEO_VIBE_EVENTS';
+      base.purgeTable = isBand ? 'BAND' : 'EVENTS';
       base.purgeTyped = S.purgeTyped || '';
       base.purgeTypeOk = base.purgeTyped.trim().toUpperCase() === base.purgeTable;
       base.onPurgeType = function (ev) { self.setState({ purgeTyped: ev.target.value }); };
@@ -4334,7 +4741,7 @@ export class App extends Component {
         // 파일명은 짧게(태그_생성일시) — 기간·별칭·LLM 여부는 .index.json에 기록해 보관함 컬럼 유지
         var fname = eq.name.replace(/[^A-Za-z0-9._-]/g, '-') + '_' + ts + '.html';
         live(); // 쓰기 직전 마지막 확인 — 중단 후에는 파일이 생기지 않는다
-        return saveFile(REPORT_DIR + '/' + fname, html, 'text/html').then(function () {
+        return saveFile(reportDir() + '/' + fname, html, 'text/html').then(function () {
           return self._updateReportIndex(function (idx) {
             idx[fname] = { tag: eq.alias || eq.name, from: winFrom, to: winTo, llm: !!opinion, ms: genMs };
           });
@@ -4508,12 +4915,16 @@ export class App extends Component {
       mon: (function () {
         var gs = (self._gradeState || {})[eq.table + ':' + eq.name] || {};
         var gi = self._severityOf(eq);
-        var v = isFinite(gs.iso) ? gs.iso : eq.rms;
+        // 원본 단위로 적는다 — 가속도·변위 설비의 gs.iso는 존 판정용 속도 환산값이다
+        var _vi = (eq.unit && eq.unit !== 'mm/s') ? gs.isoRaw : gs.iso;
+        var _viOk = _vi != null && isFinite(_vi);
+        var v = _viOk ? _vi : eq.rms;
         return {
           rms: E.fmt(v), gradeKo: E.STATUS[gi].ko, color: E.STATUS[gi].color, unit: eq.unit,
           /* 대역제한을 안 걸었으면 그 이유까지 적는다. 샘플레이트를 모르는 것과 1 kHz 위가
              없는 것은 다르다 — 전자에서 "성분 없음"이라고 쓰면 못 본 것을 없다고 단언하게 된다. */
-          basis: gs.limited ? 'ISO 10~1000 Hz 대역제한 구간 RMS'
+          basis: (gs.limited && _viOk) ? 'ISO 10~1000 Hz 대역제한 구간 RMS'
+            : gs.limited ? '전대역 구간 RMS(ISO 대역값 계산 전)'
             : (eq.fs > 0 ? '전대역 구간 RMS(샘플레이트 ' + self._num(eq.fs) + ' Hz — 1 kHz 위를 측정하지 않음)'
               : '전대역 구간 RMS(샘플레이트 불명 — 대역제한 미적용)'),
           /* 등급을 만든 축 — 정본 맵(GRADE_SRC_KO)을 쓴다. 사본을 두면 축이 늘 때 한쪽만 뒤처진다.
@@ -4568,64 +4979,108 @@ export class App extends Component {
   }
   // 리포트 인덱스(.index.json) 읽기-수정-쓰기 — 파일명은 짧게 유지하고 메타는 여기에
   _updateReportIndex(mutate) {
-    return readFileBlob(REPORT_DIR + '/.index.json')
+    return readFileBlob(reportDir() + '/.index.json')
       .then(function (b) { return b.text(); }).then(function (t) { return JSON.parse(t); })
       .catch(function () { return {}; })
       .then(function (idx) {
         mutate(idx);
-        return saveFile(REPORT_DIR + '/.index.json', JSON.stringify(idx, null, 2), 'application/json');
+        return saveFile(reportDir() + '/.index.json', JSON.stringify(idx, null, 2), 'application/json');
       });
   }
   // 보관함 = vibration-reports/ 디렉터리 목록 + .index.json 메타 (구 RPT_ 파일명 인코딩도 지원)
   _loadReports() {
     var self = this;
-    var idxP = readFileBlob(REPORT_DIR + '/.index.json')
-      .then(function (b) { return b.text(); }).then(function (t) { return JSON.parse(t); })
-      .catch(function () { return {}; });
-    Promise.all([listDir(REPORT_DIR).catch(function () { return []; }), idxP]).then(function (r) {
-      var children = r[0], idx = r[1];
+    var mine = reportDir(), root = REPORT_ROOT;
+    /* 계정 폴더를 먼저 만들어 둔다 — 없는 경로를 조회하면 브라우저 콘솔에 404 가 빨갛게 남는다.
+       잡아내도 지워지지 않는 기록이라, 진짜 오류를 볼 때 방해가 된다. ensureDir 은 세션당 한 번만 나간다. */
+    ensureDir(mine).catch(function () { });   // 실패해도 목록 조회는 계속한다(리포트 저장 때 사유가 드러난다)
+    function readIdx(d) {
+      return readFileBlob(d + '/.index.json').then(function (b) { return b.text(); })
+        .then(function (t) { return JSON.parse(t); }).catch(function () { return {}; });
+    }
+    /* 목록을 먼저 보고 .index.json 이 있을 때만 읽는다 — 없는 파일을 요청하면 콘솔에 404 가
+       빨갛게 남고(잡아내도 안 지워진다), 리포트가 없는 계정에서는 매번 그 줄이 뜬다.
+       메타가 없으면 파일명에서 뽑는 폴백이 이미 있다. */
+    function listOf(d) {
+      return listDir(d).catch(function () { return []; }).then(function (children) {
+        var has = (children || []).some(function (f) { return f.name === '.index.json'; });
+        return (has ? readIdx(d) : Promise.resolve({})).then(function (idx) {
+          return { dir: d, children: children, idx: idx };
+        });
+      });
+    }
+    var sources = [listOf(mine)];
+    /* 계정 폴더가 생기기 전에 쌓인 리포트도 같이 읽는다 — 목록에서 사라지면 사용자는
+       파일이 지워진 줄 안다. 같은 이름이 양쪽에 있으면 계정 폴더 것이 이긴다.
+       다만 관리자에게만 보인다: 그 리포트들은 계정 구분 이전 것이라 주인을 알 수 없고,
+       모두에게 뿌리면 남의 설비 리포트가 목록에 섞인다. */
+    if (mine !== root && this.state.user === 'SYS') sources.push(listOf(root));
+    Promise.all(sources).then(function (sets) {
       function ymd(s) { return s.slice(0, 4) + '-' + s.slice(4, 6) + '-' + s.slice(6, 8); }
-      var reps = (children || []).filter(function (f) { return !f.isDir && /\.html$/i.test(f.name); })
-        .map(function (f) {
-          var meta = idx[f.name];
-          if (meta) return { id: f.name, fname: f.name, ms: meta.ms || f.lastModifiedUnixMillis || 0, tags: [meta.tag], period: meta.from + ' ~ ' + meta.to, llm: !!meta.llm };
-          var m = /^RPT_(.+)_(\d{8})-(\d{8})_(\d{8})_(\d{6})(_LLM)?\.html$/.exec(f.name); // 구버전 파일명
-          return {
-            id: f.name, fname: f.name, ms: f.lastModifiedUnixMillis || 0,
-            tags: [m ? m[1] : f.name.replace(/\.html$/i, '')], period: m ? ymd(m[2]) + ' ~ ' + ymd(m[3]) : '-', llm: !!(m && m[6]),
-          };
-        }).sort(function (a, b) { return b.ms - a.ms; });
+      var seen = {}, reps = [];
+      sets.forEach(function (set) {
+        (set.children || []).filter(function (f) { return !f.isDir && /\.html$/i.test(f.name); })
+          .forEach(function (f) {
+            if (seen[f.name]) return;
+            seen[f.name] = 1;
+            var meta = set.idx[f.name], ms = f.lastModifiedUnixMillis || 0;
+            if (meta) {
+              reps.push({ id: f.name, fname: f.name, dir: set.dir, ms: meta.ms || ms, tags: [meta.tag], period: meta.from + ' ~ ' + meta.to, llm: !!meta.llm });
+              return;
+            }
+            var m = /^RPT_(.+)_(\d{8})-(\d{8})_(\d{8})_(\d{6})(_LLM)?\.html$/.exec(f.name); // 구버전 파일명
+            reps.push({
+              id: f.name, fname: f.name, dir: set.dir, ms: ms,
+              tags: [m ? m[1] : f.name.replace(/\.html$/i, '')], period: m ? ymd(m[2]) + ' ~ ' + ymd(m[3]) : '-', llm: !!(m && m[6]),
+            });
+          });
+      });
+      reps.sort(function (a, b) { return b.ms - a.ms; });
       self.setState({ reports: reps });
     });
   }
   // 리포트는 새 탭에서 연다 — iframe 미리보기는 폭이 좁아 그리드·차트가 실제와 다르게 접히고
   // 인쇄·테마 토글·앵커 이동이 중첩 스크롤 안에 갇힌다. 자립형 HTML이라 그대로 열면 된다.
+  /* 리포트는 새 탭의 샌드박스 iframe 안에서 연다. 파일 API는 계정 구분이 없어 남이 올린 HTML이
+     목록에 섞일 수 있는데, blob URL을 그대로 열면 콘솔과 같은 오리진이라 그 스크립트가 로그인 토큰
+     (localStorage)을 읽고 콘솔을 조작할 수 있다. allow-same-origin 없이 샌드박스하면 문서가 불투명
+     오리진이 되어 토큰·쿠키에 닿지 못하고, 상위 창 이동·팝업도 막힌다.
+     차트·줌·툴팁·요약/전체 전환은 allow-scripts로, 리포트의 인쇄 버튼은 allow-modals로 그대로 동작한다
+     (테마·보기 선택 기억은 localStorage가 막혀 열 때마다 초기값이다).
+     탭은 클릭 직후 동기적으로 연다 — 파일을 받은 뒤에 열면 팝업 차단에 걸린다. */
   _openReport(r) {
     var self = this;
+    var w = window.open('', '_blank');
+    if (!w) { this._toast('팝업이 차단되었습니다 — 브라우저에서 허용 후 다시 시도하세요', 'err'); return; }
     if (this._rvBlobUrl) { URL.revokeObjectURL(this._rvBlobUrl); this._rvBlobUrl = null; }
-    readFileBlob(REPORT_DIR + '/' + r.fname).then(function (blob) {
-      self._rvBlobUrl = URL.createObjectURL(blob);
-      var w = window.open(self._rvBlobUrl, '_blank');
-      if (!w) { self._toast('팝업이 차단되었습니다 — 브라우저에서 허용 후 다시 시도하세요', 'err'); return; }
+    readFileBlob((r.dir || reportDir()) + '/' + r.fname).then(function (blob) {
+      // 서버가 준 형식과 무관하게 HTML로 해석하게 한다(iframe 안에서만 그려진다)
+      self._rvBlobUrl = URL.createObjectURL(new Blob([blob], { type: 'text/html' }));
+      var d = w.document;
+      d.open();
+      d.write(reportShell(r.fname, self._rvBlobUrl));
+      d.close();
       // blob URL은 문서가 로드된 뒤 회수해야 안전(즉시 revoke하면 새 탭이 빈 화면)
       setTimeout(function () { if (self._rvBlobUrl) { URL.revokeObjectURL(self._rvBlobUrl); self._rvBlobUrl = null; } }, 60000);
-    }).catch(function (e) { self._toast('리포트 열기 실패: ' + (e && e.message || e), 'err'); });
+    }).catch(function (e) {
+      try { w.close(); } catch (e2) { /* 이미 닫혔다 */ }
+      self._toast('리포트 열기 실패: ' + (e && e.message || e), 'err');
+    });
   }
-  _delReport(id) {
+  _delReport(id, dir) {
     var self = this;
-    deleteFile(REPORT_DIR + '/' + id)
+    deleteFile((dir || reportDir()) + '/' + id)
       .then(function () { return self._updateReportIndex(function (idx) { delete idx[id]; }).catch(function () {}); })
       .then(function () { self._toast('리포트 삭제됨'); self._loadReports(); })
       .catch(function (e) { self._toast('삭제 실패: ' + (e && e.message || e), 'err'); });
   }
   // 헤더 알람 pill 토글 — 설정탭의 저장 버튼 흐름과 달리 즉시 적용·즉시 저장
   _toggleMonitorNow() {
-    var self = this, on = !this.state.monitorOn;
-    this.setState({ monitorOn: on });
-    setTimeout(function () {
-      self._persistCfg(); // setState 반영 후 저장
-      if (self.state.monitorOn) self._judgeLive(true).then(function () { self._loadEventsLive(); }); // 켜는 즉시 1회 판정
-    }, 0);
+    if (this._cfgLocked()) return;   // 켠 것처럼 보이고 저장은 안 되는 상태를 만들지 않는다
+    var self = this, on = !this._ac().monitorOn;
+    this._applyNow({ monitorOn: on }).then(function (ok) {
+      if (ok && on) self._judgeLive(true).then(function () { self._loadEventsLive(); }); // 켜는 즉시 1회 판정
+    });
     this._toast(on ? '알람이 켜졌습니다' : '알람이 꺼졌습니다 — 임계를 넘어도 알림이 발송되지 않습니다', on ? 'ok' : 'warn');
   }
   _navTo(id) {
@@ -4643,16 +5098,30 @@ export class App extends Component {
     this._scrollTop();
   }
   _scrollTop() { setTimeout(function () { var m = document.querySelector('main'); if (m) m.scrollTop = 0; }, 30); }
-  _confirmNav(action) { var p = this.state.pendingNav; if (action === 'save') { this.setState({ dirty: false, tab: p, pendingNav: null }); this._persistCfg(); this._toast('설정이 저장되었습니다'); if (this.live) this._reloadLive(); } else if (action === 'discard') { this.setState({ dirty: false, tab: p, pendingNav: null }); } else { this.setState({ pendingNav: null }); } }
+  _confirmNav(action) { var self = this; var p = this.state.pendingNav; if (action === 'save') { this.setState({ pendingNav: null }); this._persistCfg().then(function (ok) { if (!ok) return; self.setState({ dirty: false, tab: p }); self._toast('설정이 저장되었습니다'); if (self.live) self._reloadLive(); }); } else if (action === 'discard') { this._discardEdits({ tab: p, pendingNav: null }); } else { this.setState({ pendingNav: null }); } }
   _markDirty() { if (!this.state.dirty) this.setState({ dirty: true }); }
-  _saveSettings() { this.setState({ dirty: false }); this._persistCfg(); this._toast('설정이 저장되었습니다'); if (this.live) this._reloadLive(); }
+  /* 저장 안 함 — 폼의 편집을 적용본으로 되돌린다. 표시만 지우면 편집값이 폼에 남아
+     다음 저장 때 딸려 들어가고, 화면은 저장된 것처럼 보인다. */
+  _discardEdits(extra) {
+    var A = this._ac(), back = Object.assign({ dirty: false, equipBulk: null }, extra || {});
+    if (this._applied) FORM_KEYS.forEach(function (k) { back[k] = cfgClone(A[k]); });
+    this.setState(back);
+  }
+  _saveSettings() {
+    var self = this;
+    this._persistCfg().then(function (ok) {
+      if (!ok) return;                      // 실패 사유는 _persistCfg 가 이미 띄웠다. dirty 는 남긴다
+      self.setState({ dirty: false });
+      self._toast('설정이 저장되었습니다');
+      if (self.live) self._reloadLive();
+    });
+  }
   // 알림 설정(채널·라우팅) — 앱 발송과 서버 타이머 생성이 같은 모양을 쓴다
+  // 서버 감시가 저장된 설정을 해석하는 것과 같은 함수 — 미설정 심각도는 기본값 적용(UI 체크 상태와 동일)
   _notifyCfg() {
-    var S = this.state, ch = S.notifCh || {}, to = S.notifTo || {};
-    return {
-      channels: { webhook: { on: !!ch.webhook, to: to.webhook || '' } },
-      routes: routesWithDefaults(S.routes), // 미설정 심각도는 기본값 적용 (UI 체크 상태와 동일)
-    };
+    var C = this._ac();   // 적용된 설정 — 폼의 저장 안 한 편집은 판정에 쓰지 않는다
+    var S = this.state;
+    return Notify.notifyCfgFrom({ notifCh: C.notifCh, notifTo: C.notifTo, routes: C.routes }, ROUTE_DEFS);
   }
   /* 발송 대기열에 담는다 — 실제 발송은 회차가 끝난 뒤 _flushNotify가 한 번에 정리한다.
      폭주 방지는 두 겹이다: 판정 상태머신(진입확인·재알림주기·복귀유지)이 시간축을,
@@ -4712,20 +5181,21 @@ export class App extends Component {
   }
   renderVals() {
     var self = this, S = this.state, E = this.E, isL = S.theme === 'light';
+    var AC = this._ac();   // 헤더·모니터링은 적용된 설정을 보여 준다 — 폼에서 끄기만 한 알람을 꺼진 것으로 보이면 안 된다
     var base = {
       rootClass: isL ? 'theme-light' : '',
       themeIcon: 'color-mode',
       logoFilter: isL ? '' : 'filter: brightness(1.15);',
-      monitorText: S.monitorOn ? 'ON' : 'OFF',
-      monitorDotColor: S.monitorOn ? '#3aa76d' : '#6c7079',
-      monitorDotRing: S.monitorOn ? 'rgba(58,167,109,.18)' : 'rgba(120,120,120,.15)',
+      monitorText: AC.monitorOn ? 'ON' : 'OFF',
+      monitorDotColor: AC.monitorOn ? '#3aa76d' : '#6c7079',
+      monitorDotRing: AC.monitorOn ? 'rgba(58,167,109,.18)' : 'rgba(120,120,120,.15)',
       // 알람 ON일 때 감시 방식 배지 — 서버 상시(파랑, 앱 닫아도 동작) vs 앱(회색, 열린 동안만)
-      monModeBadgeShow: S.monitorOn,
-      monModeBadgeText: S.monMode === 'server' ? '서버 상시' : '앱',
+      monModeBadgeShow: AC.monitorOn,
+      monModeBadgeText: AC.monMode === 'server' ? '서버 상시' : '앱',
       // 두 모드 모두 파란 배지 — 문구('서버 상시'/'앱')로 구분되므로 색은 통일
       monModeBadgeStyle: 'font-size: 10px; font-weight: 700; padding: 1px 6px; border-radius: 4px; color: var(--primary-light); background: rgba(0,108,210,.14); border: 1px solid rgba(0,108,210,.3);',
-      monPillTitle: S.monitorOn
-        ? (S.monMode === 'server' ? '서버 상시 감시 — 앱을 닫아도 Neo 타이머가 계속 감지합니다' : '앱 감시 — 앱이 열려 있는 동안만 감지합니다')
+      monPillTitle: AC.monitorOn
+        ? (AC.monMode === 'server' ? '서버 상시 감시 — 앱을 닫아도 Neo 타이머가 계속 감지합니다' : '앱 감시 — 앱이 열려 있는 동안만 감지합니다')
         : '클릭하여 알람 켜기/끄기',
       goSettings: function () { self._navTo('settings'); },
       onToggleMonitor: function () { self._toggleMonitorNow(); },
@@ -4736,8 +5206,10 @@ export class App extends Component {
         return { label: t.label, icon: t.icon, onClick: function () { self._navTo(t.id); }, style: 'display: inline-flex; align-items: center; gap: 7px; height: 52px; padding: 0 14px; background: transparent; border: none; border-bottom: 2px solid ' + (a ? 'var(--primary-light)' : 'transparent') + '; color: ' + (a ? 'var(--text-primary)' : 'var(--text-tertiary)') + '; font-size: 13px; font-weight: ' + (a ? '600' : '500') + '; cursor: pointer;' };
       }),
       notReady: !S.ready,
-      isMonitor: S.ready && S.tab === 'monitor', isDetail: S.ready && S.tab === 'detail',
-      isDiag: S.ready && S.tab === 'diag', isReport: S.ready && S.tab === 'report', isSettings: S.ready && S.tab === 'settings',
+      // 설정을 못 읽은 동안은 어느 탭도 그리지 않는다 — 기본값으로 채운 화면은 틀린 정보다
+      isMonitor: S.ready && !S.cfgFail && S.tab === 'monitor', isDetail: S.ready && !S.cfgFail && S.tab === 'detail',
+      isDiag: S.ready && !S.cfgFail && S.tab === 'diag', isReport: S.ready && !S.cfgFail && S.tab === 'report',
+      isSettings: S.ready && !S.cfgFail && S.tab === 'settings',
       toast: S.toast, toastMsg: S.toast ? S.toast.msg : '',
       toastIcon: S.toast && S.toast.kind === 'err' ? 'error' : (S.toast && S.toast.kind === 'warn' ? 'warning' : 'check'),
       // 오류 토스트에는 발생 위치까지 실리므로 길어질 수 있다 — 화면 밖으로 나가지 않게 폭을 묶는다
@@ -4751,7 +5223,7 @@ export class App extends Component {
        여기서 gradeFor(e.rms, …)로 다시 매기면 최신 1초·광대역·단일 축이 되어,
        같은 설비가 모니터링(_severityOf)과 상세분석(e.grade)에서 다른 등급으로 보인다.
        클래스·단위를 바꾼 직후에는 판정이 아직 안 돌았을 수 있어 _severityOf가 그 경우만 폴백한다. */
-    this.data.equipment.forEach(function (e) { e.cls = S.equipCls[e.id] || e.baseCls || e.cls; e.zones = self._effZones(e); e.grade = self._severityOf(e); });
+    this.data.equipment.forEach(function (e) { e.cls = (AC.equipCls || {})[e.id] || e.baseCls || e.cls; e.zones = self._effZones(e); e.grade = self._severityOf(e); });
     var eqsAll = this._activeEqs(), counts = [0, 0, 0, 0];
     /* 테이블 필터 — 모니터링 화면에서만 모집단을 좁힌다(판정 대상은 그대로다).
 
@@ -4759,7 +5231,7 @@ export class App extends Component {
        그대로여야 하고, 테이블은 모집단 자체를 줄이는 것이라 KPI도 같이 줄어야 한다 —
        안 그러면 "심각 2"라고 떠 있는데 목록이 비어 그 숫자를 못 믿게 된다.
        설정에서 소스를 뺀 테이블이 필터에 남아 있으면 무시한다(선택은 저장되지 않는다). */
-    var _hide = (S.tblHide || []).filter(function (t) { return (S.srcSel || []).indexOf(t) >= 0; });
+    var _hide = (S.tblHide || []).filter(function (t) { return (AC.srcSel || []).indexOf(t) >= 0; });
     var eqs = _hide.length ? eqsAll.filter(function (e) { return _hide.indexOf(e.table) < 0; }) : eqsAll;
     /* 판정 보류는 등급으로 세지 않는다 — 못 믿는 값으로 매긴 등급이 "위험 5대"에 섞이면
        그 숫자를 못 믿게 된다. 대신 자기 칸에서 세고, 내역(사유별)은 호버로 내린다. */
@@ -4799,6 +5271,22 @@ export class App extends Component {
        설정의 태그 수(activeCount)도 모니터링 화면 필터와 무관한 값이다. */
     base.activeCount = eqsAll.length;
     base.monEmpty = eqsAll.length === 0;
+    // 저장한 적이 없는 계정의 빈 화면은 "처음 설정" 안내로 — 소스를 빼서 빈 것과 문구가 달라야 한다
+    base.monEmptyFresh = !!this._cfgFresh && !(AC.srcSel || []).length;
+    base.monEmptyFail = !!S.loadFail;   // 조회 실패로 빈 것 — "소스가 없다"로 읽히면 선택을 다시 하게 된다
+    /* 설정을 못 읽은 화면(_initCfgFail) — 조회 실패는 다시 시도만, 조각 손상은 그 영역을 기본값으로 여는 길까지 */
+    var _cf = S.cfgFail;
+    var _cfDoms = (_cf && _cf.domains || []).map(function (d) { return (CFG_DOMAIN_UI[d] || [d])[0]; }).join('·');
+    base.cfgFailShow = !!_cf && S.ready;
+    base.cfgFailTitle = !_cf ? '' : _cf.kind === 'broken' ? _cfDoms + ' 설정을 읽을 수 없습니다' : '설정을 불러오지 못했습니다';
+    base.cfgFailText = !_cf ? '' : _cf.kind === 'broken'
+      ? '저장 도중 끊겨 설정 일부가 손상된 것으로 보입니다. 다시 시도해도 같다면 이 영역만 기본값으로 열어 다시 설정하세요 — 나머지 설정은 그대로 불러오고, 누르는 것만으로는 아무것도 저장되지 않습니다.'
+      : '일시적인 연결 문제일 수 있습니다. 설정은 DB에 그대로 있으니 다시 시도하세요. 그동안 화면을 기본값으로 띄우지 않는 것은, 그 상태에서 저장하면 실제 설정을 덮어쓰기 때문입니다.';
+    base.cfgFailWhy = _cf ? _cf.msg : '';
+    base.cfgRepairShow = !!_cf && _cf.kind === 'broken';
+    base.cfgRepairLabel = _cfDoms + '만 기본값으로 열기';
+    base.onCfgRetry = function () { self._retryCfg(); };
+    base.onCfgRepair = function () { self._repairCfg(); };
     base.monEventsShow = base.isMonitor && !base.monEmpty;
     base.detailShow = base.isDetail && !base.monEmpty; base.detailEmptyShow = base.isDetail && base.monEmpty;
     base.diagShow = base.isDiag && !base.monEmpty; base.diagEmptyShow = base.isDiag && base.monEmpty;
@@ -4807,7 +5295,7 @@ export class App extends Component {
        칩이 되어 화면 소음이 된다. 태그 수를 함께 적는 이유는 0개인 테이블(선택은 했는데 데이터가
        없는 경우)을 고르면 목록이 비는데, 그것이 필터 탓인지 설비가 없는 탓인지 구분하려면
        고르기 전에 수가 보여야 하기 때문이다. */
-    var _tblAll = (S.srcSel || []).slice().sort();
+    var _tblAll = (AC.srcSel || []).slice().sort();
     var _tblCnt = {};
     eqsAll.forEach(function (e) { _tblCnt[e.table] = (_tblCnt[e.table] || 0) + 1; });
     var _q = String(S.tblQuery || '').trim().toLowerCase();
@@ -4873,7 +5361,7 @@ export class App extends Component {
     base.srcNotice = S.srcNotice;
     /* 감시 이상 배너 — 알람이 안 오는 이유가 "정상이라서"인지 "감시가 죽어서"인지 알려준다.
        err는 감시가 실제로 멈춘 상태, warn은 의심스러운 상태. */
-    base.healthWarns = (S.health || []).map(function (w) {
+    base.healthWarns = this._loadFailWarns().concat(S.health || []).map(function (w) {
       return {
         text: w.text,
         err: w.lv === 'err',
@@ -4892,8 +5380,11 @@ export class App extends Component {
       listTagTables().then(function (t) {
         self.liveTables = t;
         self._loadSchemas();
-        var sel = (self.state.srcSel || []).filter(function (x) { return t.indexOf(x) >= 0; });
-        self.setState({ srcSel: sel });
+        var alive = function (x) { return t.indexOf(x) >= 0; };
+        /* 사라진 테이블을 편집본과 적용본 양쪽에서 뺀다 — 적용본은 메모리에서만(부팅이 하는 것과 같은 거르기라
+           다음 부팅도 같은 결과다). 편집본의 다른 저장 안 한 선택은 건드리지 않는다. */
+        self.setState({ srcSel: (self.state.srcSel || []).filter(alive) });
+        self._setApplied({ srcSel: (self._ac().srcSel || []).filter(alive) }, ['srcSel']);
         // 사용자가 변동을 확정한 시점 — 적재 후 감시 대상을 즉시 맞춘다(다음 틱을 기다리지 않게)
         setTimeout(function () { self._reloadLive(); self._resyncMonSoon(); }, 0);
       }).catch(function () { self._reloadLive(); });
@@ -5003,7 +5494,10 @@ export class App extends Component {
       var _ms = (self._monState || {})[e.table + ':' + e.name];
       var holdTip = '';
       if (_hold) {
-        holdTip = '지금 등급을 매기지 않습니다 — ' + _hold.label + ' 상태라 이 값이 설비를 대표하지 않습니다.';
+        holdTip = _hold.kind === 'patmiss'
+          ? '지금 등급을 새로 매기지 않습니다 — ' + _hold.label + '. 결함 패턴(원본 파형)을 이번에 재지 못해 직전 판정을 그대로 유지합니다.'
+            + '\n다음 측정(대역 추출 주기)에서 다시 판정합니다. 이 동안 복귀·악화 알림은 나가지 않습니다.'
+          : '지금 등급을 매기지 않습니다 — ' + _hold.label + ' 상태라 이 값이 설비를 대표하지 않습니다.';
         if (_ms && _ms.g != null) {
           holdTip += '\n\n직전 확정 ' + (GRADE_WORDS[_ms.g] || '-')
             + (_ms.since ? ' · ' + agoText(_ms.since) : '');
@@ -5014,11 +5508,15 @@ export class App extends Component {
       /* 큰 숫자는 등급을 만든 값(판정값)이고, 라벨이 그게 어떤 양인지 말한다.
          ISO 계산을 건너뛴 구간(양호 확정)에서는 전대역이므로 그렇게 적는다 — 정의가 상태에
          따라 바뀌는 것을 숨기면 그 숫자가 무엇인지 알 수 없다. */
-      var mainVal = (_gs.iso != null && isFinite(_gs.iso)) ? _gs.iso : e.rms;   // null은 isFinite를 통과한다
+      /* 숫자는 설비의 원본 단위로 보인다 — 가속도·변위 설비의 존 판정은 속도로 환산해서 하지만(_gs.iso)
+         화면에는 같은 대역의 원본 단위 RMS(_gs.isoRaw)를 적는다. 환산값에 원본 단위를 붙이면 틀린 숫자가 된다. */
+      var _isoShow = (e.unit && e.unit !== 'mm/s') ? _gs.isoRaw : _gs.iso;
+      var _isoHas = _isoShow != null && isFinite(_isoShow);   // null은 isFinite를 통과한다
+      var mainVal = _isoHas ? _isoShow : e.rms;
       /* 라벨은 "어느 대역에서 잰 값인가"다 — 원인이 아니다. 주파수로 적으면 그 뜻이 표기 자체로
          드러난다. Nyquist가 1 kHz 이하인 태그는 전대역이 곧 ISO 대역이라 실제 범위를 적는다. */
       var _nyq = e.fs > 0 ? Math.round(e.fs / 2) : 0;
-      var mainUnit = (_gs.basis === 'iso') ? '10~1000 Hz'
+      var mainUnit = (_gs.basis === 'iso' && _isoHas) ? '10~1000 Hz'
         : _nyq > 0 ? ('2~' + _nyq + ' Hz') : '전대역';
       /* 나머지 두 축은 카드에 안 적는다 — 신규 설치에서는 대부분 미학습이라 거의 모든 카드가
          '베이스라인 — 대역 —'이 되어 잡음이 된다. "왜 이 등급인가"는 등급 칩의 원인 표시로
@@ -5030,14 +5528,16 @@ export class App extends Component {
         /* 전대역 복조는 공진 대역을 못 골라 근거가 약하다 — 같은 문구로 적으면 고정 대역 판정과
            구분이 안 된다. 조기 베어링 결함은 이 경로로 안 잡힌다는 사실까지 밝힌다. */
         + (_gs.patWide ? ' · 전대역 복조(샘플레이트 부족으로 1–5 kHz 대역 불성립) — 근거 약함, 조기 베어링 결함은 검출되지 않습니다' : ''));
+      else if (_gs.patMiss) _ax.push('결함 패턴 — ' + (_gs.patWait ? '첫 측정 대기' : '이번 측정 실패') + ' · 직전 판정 유지');
       else if (_gs.patOk === false) _ax.push('결함 패턴 — 판정 못 함(회전수·기하·샘플레이트 확인)');
       if (_gs.blR != null && isFinite(_gs.blR)) _ax.push('베이스라인 한계 대비 ×' + _gs.blR.toFixed(1));
       if (_gs.bandR != null && isFinite(_gs.bandR)) _ax.push('대역 최대 ×' + _gs.bandR.toFixed(1));
       var valTip = '';
-      if (_gs.limited && _gs.iso != null && isFinite(_gs.iso) && isFinite(_gs.wide)) {
-        valTip = 'ISO 10~1000 Hz  ' + E.fmt(_gs.iso) + ' ' + (e.unit || '')
+      if (_gs.limited && _isoHas && isFinite(_gs.wide)) {
+        valTip = 'ISO 10~1000 Hz  ' + E.fmt(_isoShow) + ' ' + (e.unit || '')
           + '\n전대역          ' + E.fmt(_gs.wide) + ' ' + (e.unit || '')
           + '\n\n존 등급은 ISO 대역제한 값으로 매깁니다 — 표준의 존 경계가 10~1000 Hz 기준이라 전대역 값을 대면 다른 양을 재게 됩니다.'
+          + ((e.unit && e.unit !== 'mm/s') ? '\n존 경계는 속도(mm/s) 규격이라 이 설비는 속도로 환산해 비교합니다 — 표시는 원본 단위입니다.' : '')
           + '\n베이스라인 이탈은 전대역으로 봅니다 — 어느 주파수든 평소보다 커지면 잡히도록.'
           + '\n\n두 값 차이가 크면 1 kHz 위(충격·베어링·기어)에 에너지가 몰려 있다는 뜻입니다.';
       }
@@ -5451,6 +5951,10 @@ export class App extends Component {
       } else if (e.type === 'signal_lost') {
         valText = e.detail || '무수신';   // 옛 이벤트는 DETAIL이 비어 있다 — 시간 없이 사실만
         noteText = '';
+      } else if (natRow(e.type, e.unit)) {
+        // 원본 단위 행 — 등급을 속도 ISO로 매겨 원본 단위의 기준 숫자가 없다. 근거를 말로 적는다
+        valText = E.fmt(e.value) + ' ' + e.unit;
+        noteText = Notify.basisText(e.detail) || '속도 ISO 기준 판정';
       } else {
         valText = E.fmt(e.value) + ' ' + e.unit;
         noteText = '기준 ' + E.fmt(e.base);
@@ -5560,7 +6064,7 @@ export class App extends Component {
       base.delRepName = S.delRep.fname;
       base.delRepDate = E.fmtDT(S.delRep.ms);
       base.onDelRepCancel = function () { self.setState({ delRep: null }); };
-      base.onDelRepDo = function () { var r = S.delRep; self.setState({ delRep: null }); self._delReport(r.id); };
+      base.onDelRepDo = function () { var r = S.delRep; self.setState({ delRep: null }); self._delReport(r.id, r.dir); };
     }
 
     this._vmSettings(base, eqs);
@@ -5602,9 +6106,10 @@ export class App extends Component {
           : (n.id === 'criteria' && _blOldCnt > 0) ? '재학습 ' + _blOldCnt : ''; return { label: n.label, icon: n.icon, badge: bd, onClick: function () { self.setState({ setSection: n.id }); if (n.id === 'criteria') self._refreshBandCov(); if (n.id === 'data') self._refreshUsage(); }, style: 'display: flex; align-items: center; gap: 9px; padding: 9px 12px; border-radius: 6px; cursor: pointer; font-size: 13px; border-left: 2px solid ' + (a ? 'var(--primary-light)' : 'transparent') + '; background: ' + (a ? 'var(--overlay-hover)' : 'transparent') + '; color: ' + (a ? 'var(--text-primary)' : 'var(--text-tertiary)') + '; font-weight: ' + (a ? '600' : '500') + ';' }; });
     base.secSource = S.setSection === 'source'; base.secEquip = S.setSection === 'equip'; base.secCriteria = S.setSection === 'criteria'; base.secMonitor = S.setSection === 'monitor'; base.secLlm = S.setSection === 'llm';
     base.secData = S.setSection === 'data';
+    if (base.secSource) this._userVals(base);
     if (base.secData) this._dataVals(base);
     base.mcOptions = ['I', 'II', 'III', 'IV'].map(function (c) { var a = S.machineClass === c; return { label: 'Class ' + c, onClick: function () { self.setState({ machineClass: c, dirty: true }); }, style: 'flex: 1; text-align: center; padding: 10px 6px; border-radius: 6px; cursor: pointer; font-size: 13px; font-weight: ' + (a ? '600' : '500') + '; border: 1px solid ' + (a ? 'var(--primary-base)' : 'var(--border-default)') + '; background: ' + (a ? 'rgba(0,108,210,.1)' : 'var(--bg-elevated)') + '; color: ' + (a ? 'var(--primary-light)' : 'var(--text-secondary)') + ';' }; });
-    var mz = self._effZones({ unit: 'mm/s', cls: S.machineClass });
+    var mz = self._effZones({ unit: 'mm/s', cls: S.machineClass }, S);
     var MC_DESC = { I: ['Class I · 소형 기계', '15 kW 이하의 소형 전동기·펌프 등. 기계가 기초와 일체로 거동하는 설비.'], II: ['Class II · 중형 기계', '15–75 kW급 전동기, 또는 특수 기초에 강체 설치된 300 kW 이하 중형 기계.'], III: ['Class III · 대형 · 강성 기초', '강성(rigid) 기초 위에 설치된 대형 회전기계. 기초가 진동을 거의 흡수하지 않음.'], IV: ['Class IV · 대형 · 연성 기초', '연성(flexible) 기초 위의 대형·고속 터보기계(터빈·발전기 등). 허용 진동 범위가 가장 넓음.'] };
     var md = MC_DESC[S.machineClass];
     base.mcDescTitle = md ? md[0] : '머신 클래스 미선택';
@@ -6274,7 +6779,7 @@ export class App extends Component {
            분모가 대역 8개만 세면 12/8처럼 분자가 분모를 넘는다. 포락선은 복조 대역이 성립해야
            주기성 1계열이 생기고, 베어링 품번까지 있으면 결함주파수 3계열이 더 생긴다. */
         var _mnt = ((S.equipMeta || {})[eq.id] || {}).mount || (eq.meta || {}).mount;
-        var envAble = VC.demodBand(eq.fs, _mnt) ? (1 + (VC.faultCoeffs(self._bearingGeo(eq)) ? 3 : 0)) : 0;
+        var envAble = VC.demodBand(eq.fs, _mnt) ? (1 + (VC.faultCoeffs(self._bearingGeo(eq, S)) ? 3 : 0)) : 0;
         var able = VC.BAND_FREQ.filter(function (bn) { return VC.bandMeasurable(bn, _fr0, eq.fs); }).length + envAble;
         status = learned + '/' + able + ' 계열 학습됨 · ' + parts.map(function (bn) { return VC.BAND_KO[bn]; }).join('·');
         tip = parts.map(function (bn) {
@@ -6294,7 +6799,7 @@ export class App extends Component {
                 + Math.round(eq.fs / 2) + ' Hz (샘플레이트 ' + eq.fs + ' Hz)';
             }
             if (fi < 0 && !VC.demodBand(eq.fs, _mnt)) return VC.BAND_KO[bn] + '  복조 대역 불성립 — 샘플레이트가 낮거나 마운팅 상한이 낮습니다';
-            if ((bn === 'envBPFO' || bn === 'envBPFI' || bn === 'envBSF') && !VC.faultCoeffs(self._bearingGeo(eq)))
+            if ((bn === 'envBPFO' || bn === 'envBPFI' || bn === 'envBSF') && !VC.faultCoeffs(self._bearingGeo(eq, S)))
               return VC.BAND_KO[bn] + '  베어링 품번 미지정 — 설비 정보에서 품번을 넣으면 쌓이기 시작합니다';
             return VC.BAND_KO[bn] + '  표본 부족 또는 학습 실패';
           }).join('\n');

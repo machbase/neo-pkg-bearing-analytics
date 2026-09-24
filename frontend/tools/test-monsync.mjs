@@ -163,14 +163,14 @@ function instrument(app) {
   };
   const kinds = (app) => (app.state.health || []).map((w) => w.k).sort().join(',');
   const NOW = Date.now();
-  const RUN = { NEO_VIBE_MONITOR: { state: 'RUNNING', schedule: '@every 10s' } };
+  const RUN = { NEO_BEARING_MONITOR: { state: 'RUNNING', schedule: '@every 10s' } };
 
   let a = mk();
   a._applyHealth(RUN, { t: NOW - 5000, n: 4 });
   chk(a.state.health === null, '정상(RUNNING + 최근 심박)이면 배너 없음', kinds(a));
 
   a = mk();
-  a._applyHealth({ NEO_VIBE_MONITOR: { state: 'STOP, ReferenceError: tt is not defined' } }, { t: NOW - 5000, n: 4 });
+  a._applyHealth({ NEO_BEARING_MONITOR: { state: 'STOP, ReferenceError: tt is not defined' } }, { t: NOW - 5000, n: 4 });
   chk(kinds(a) === 'stopped', '타이머 STOP이면 멈춤 배너', kinds(a));
   chk(/ReferenceError/.test((a.state.health[0] || {}).text || ''), '배너에 실패 사유가 그대로 실린다');
 
@@ -235,8 +235,8 @@ function instrument(app) {
   const warn = (app) => (app.state.health || [])[0] || {};
   const kinds = (app) => (app.state.health || []).map((w) => w.k).sort().join(',');
   const NOW = Date.now();
-  const DEAD = { NEO_VIBE_MONITOR: { state: 'STOP, MACHCLI dial tcp 127.0.0.1:5656: bind: ... buffer space ...' } };
-  const RUN = { NEO_VIBE_MONITOR: { state: 'RUNNING', schedule: '@every 10s' } };
+  const DEAD = { NEO_BEARING_MONITOR: { state: 'STOP, MACHCLI dial tcp 127.0.0.1:5656: bind: ... buffer space ...' } };
+  const RUN = { NEO_BEARING_MONITOR: { state: 'RUNNING', schedule: '@every 10s' } };
 
   // 죽은 것을 보면 즉시 다시 등록한다 — 클릭을 기다리지 않는다
   let a = mk();
@@ -321,8 +321,8 @@ function instrument(app) {
 
   /* 대역 추출도 켜둔 설정이다 — 멈추면 대역 기준이 판정에서 조용히 빠진다.
      감시만 되살리고 이건 두면 세 축 중 하나가 없는 채로 "정상"처럼 보인다. */
-  const BDEAD = { NEO_VIBE_MONITOR: { state: 'RUNNING' }, NEO_VIBE_BAND: { state: 'STOP, dial tcp ...' } };
-  const BRUN = { NEO_VIBE_MONITOR: { state: 'RUNNING' }, NEO_VIBE_BAND: { state: 'RUNNING' } };
+  const BDEAD = { NEO_BEARING_MONITOR: { state: 'RUNNING' }, NEO_BEARING_BAND: { state: 'STOP, dial tcp ...' } };
+  const BRUN = { NEO_BEARING_MONITOR: { state: 'RUNNING' }, NEO_BEARING_BAND: { state: 'RUNNING' } };
   a = mk({ bandOn: true });
   a._applyHealth(BDEAD, { t: NOW - 5000, n: 4 });
   chk(a.bandResyncs === 1, '대역 추출이 멈추면 그것도 스스로 다시 등록한다', `${a.bandResyncs}회`);
@@ -335,7 +335,7 @@ function instrument(app) {
 
   // 두 타이머가 같이 죽으면 각자의 카운터로 각자 복구한다
   a = mk({ bandOn: true });
-  a._applyHealth({ NEO_VIBE_MONITOR: { state: 'STOP, x' }, NEO_VIBE_BAND: { state: 'STOP, y' } }, { t: NOW - 5000, n: 4 });
+  a._applyHealth({ NEO_BEARING_MONITOR: { state: 'STOP, x' }, NEO_BEARING_BAND: { state: 'STOP, y' } }, { t: NOW - 5000, n: 4 });
   chk(a.resyncs === 1 && a.bandResyncs === 1, '둘 다 죽으면 둘 다 되살린다', `감시 ${a.resyncs} · 대역 ${a.bandResyncs}`);
 
   /* 대역 추출은 앱 감시 모드에서도 서버 타이머로 돈다 — 추세는 앱이 닫혀도 이어져야 하니까.
@@ -350,7 +350,7 @@ function instrument(app) {
 
   // 앱 모드에서 대역이 멀쩡하면 조용하다 — 감시 타이머가 없는 것은 이상이 아니다
   a = mk({ bandOn: true, monMode: "app" });
-  a._applyHealth({ NEO_VIBE_BAND: { state: "RUNNING" } }, null);
+  a._applyHealth({ NEO_BEARING_BAND: { state: "RUNNING" } }, null);
   chk(a.state.health === null, "앱 모드에서 감시 타이머 부재는 이상이 아니다", JSON.stringify(a.state.health));
 
   /* 꺼둔 기능을 복구가 켜지 않는다 — 대역 추출을 끈 채로 남은 옛 타이머가 STOP이어도
@@ -386,25 +386,25 @@ function instrument(app) {
   // 새 설치에서 그 빨간 요청이 화면을 덮어 고장으로 읽힌다
   let states = 0;
   app._timerStates = () => { states++; return Promise.resolve({}); };   // 등록된 타이머 없음
-  await app._dropTimer('_specSig', del, 'NEO_VIBE_MONITOR');
+  await app._dropTimer('_specSig', del, 'NEO_BEARING_MONITOR');
   chk(dels === 0, '없는 타이머는 삭제 요청조차 보내지 않는다', dels + '회');
   chk(states === 1, '있는지 한 번만 확인한다', states + '회');
 
-  await app._dropTimer('_specSig', del, 'NEO_VIBE_MONITOR');
-  await app._dropTimer('_specSig', del, 'NEO_VIBE_MONITOR');
+  await app._dropTimer('_specSig', del, 'NEO_BEARING_MONITOR');
+  await app._dropTimer('_specSig', del, 'NEO_BEARING_MONITOR');
   chk(states === 1, '한 번 확인했으면 조회도 다시 하지 않는다', states + '회');
 
   // 실제로 있으면 지운다
   app._specSig = null;
-  app._timerStates = () => Promise.resolve({ NEO_VIBE_MONITOR: { state: 'RUNNING' } });
-  await app._dropTimer('_specSig', del, 'NEO_VIBE_MONITOR');
+  app._timerStates = () => Promise.resolve({ NEO_BEARING_MONITOR: { state: 'RUNNING' } });
+  await app._dropTimer('_specSig', del, 'NEO_BEARING_MONITOR');
   chk(dels === 1, '있으면 지운다', dels + '회');
 
   /* 상태를 못 읽었으면(연결 실패) 예전처럼 지워 본다 — 확인이 안 된다고 손을 놓으면
      꺼둔 설정의 타이머가 계속 도는 쪽이 된다. */
   app._specSig = null;
   app._timerStates = () => Promise.resolve(null);
-  await app._dropTimer('_specSig', del, 'NEO_VIBE_MONITOR');
+  await app._dropTimer('_specSig', del, 'NEO_BEARING_MONITOR');
   chk(dels === 2, '상태를 모르면 지워 본다', dels + '회');
 }
 

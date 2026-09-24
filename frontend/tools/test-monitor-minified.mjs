@@ -32,7 +32,8 @@ check('notify는 IIFE로 스코프 격리(esc 충돌 방지)', tql.includes('var
    묶음 두 함수(planNotifications·bundleMessage)도 같이 재노출되지 않으면 서버만 ReferenceError가 난다. */
 check('notify 함수 고정 이름 재노출',
   /var eventMessage=__NF\.em, payloadFor=__NF\.pf, shouldNotify=__NF\.sn,/.test(tql)
-  && /planNotifications=__NF\.pn, bundleMessage=__NF\.bm;/.test(tql));
+  && /planNotifications=__NF\.pn, bundleMessage=__NF\.bm,/.test(tql)
+  && /notifyCfgFrom=__NF\.nc, configFromRows=__NF\.cr;/.test(tql));
 
 const res = await fetch(NEO + '/db/tql', { method: 'POST', headers: { 'Content-Type': 'text/plain' }, body: tql });
 const text = (await res.text()).trim();

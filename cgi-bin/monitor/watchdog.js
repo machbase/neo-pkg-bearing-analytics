@@ -1,132 +1,38 @@
-// monitor/watchdog.js — 서버 타이머 감시.
+// monitor/watchdog.js — 타이머 심박.
 //
-// Neo 타이머는 스크립트가 한 번 던지면 STOP으로 두고 재시도하지 않는다. 앱이 열려 있으면
-// 앱이 되살리지만 닫아두면 아무도 모른다 — 그래서 서버 안에 감시자를 둔다.
+// 예전에는 여기에 "감시자"가 있었다. Neo 타이머는 스크립트가 한 번 예외를 던지면 STOP으로 두고
+// 재시도하지 않아서, 죽은 타이머를 되살리는 별도 타이머를 두고 서로 감시하는 고리를 만들었다.
 //
-// 고리 구조 — 모두가 최소 한 명에게 감시받는다:
-//   NEO_VIBE_WD (5분)      → 감시·대역 추출을 본다
-//   NEO_VIBE_MONITOR (10초) → 감시자를 본다
-//   NEO_VIBE_BAND (10분)    → 감시자를 본다
-// 감시자를 따로 둔 이유는 감시의 생존이 대역 추출 같은 다른 기능의 on/off에 걸리면 안 되기
-// 때문이다. 대역 추출은 원인 분석용 선택 기능이고, 감시가 살아있는지는 안전 기능이다.
+// 그 구조를 걷어낸 이유:
+//   · 감시자도 같은 타이머라 같은 이유로 죽는다. Neo 프로세스가 멈추면 함께 멈춘다 —
+//     "되살리기"가 실제로 커버하던 것은 "일시적 예외로 한 타이머만 STOP된 경우" 하나뿐이었다.
+//   · 그 하나는 회차를 try/catch로 감싸 애초에 죽지 않게 하는 쪽이 싸고, 공백도 없다.
+//   · 되살리려면 Neo에 인증 요청을 보내야 하는데(타이머 API는 JSON-RPC + JWT), 서버에서 도는
+//     TQL에는 세션이 없다. 계정 비밀번호를 TQL에 구우면 그 파일을 읽을 수 있는 사람에게 넘어간다.
+//
+// 남은 역할은 심박뿐이다 — "이 타이머가 돌기는 했는가"를 앱이 알아야 건강 배너와 자동 복구가 돈다.
 (function (root, factory) {
   if (typeof module === 'object' && module.exports) module.exports = factory();
   else root.VibeWatchdog = factory();
 })(typeof self !== 'undefined' ? self : this, function () {
   'use strict';
 
-  /* 되살릴지 말지의 판단부만 순수 함수로 떼어낸다 — TQL 안에서는 DB도 HTTP도 없이
-     검증할 수 없기 때문이다. 바깥 이름을 참조하지 않아 그대로 임베드해도 안전하다.
-       hb  : 상대가 마지막으로 남긴 심박 {t}
-       w   : 이쪽이 기억하는 시도 이력 {n,at}
-       cfg : {stale,gap,max,calm}
-     반환 {act, w, why} — why는 사람이 로그에서 읽을 사유다. */
-  function wdDecide(hb, w, now, cfg) {
-    w = (w && typeof w === 'object') ? { n: w.n || 0, at: w.at || 0 } : { n: 0, at: 0 };
-    // 오래 조용했으면 처음부터 센다 — 몇 달에 한 번 나는 순간 장애까지 누적하면
-    // 정작 필요할 때 남은 시도가 없다
-    if (w.at && now - w.at > cfg.calm) { w = { n: 0, at: 0 }; }
-    // 상대가 한 번도 안 뛰었으면 판단하지 않는다 — 갓 등록됐거나 아직 첫 회차 전이다
-    if (!hb || !(hb.t > 0)) return { act: false, w: w, why: 'nohb' };
-    if (now - hb.t <= cfg.stale) return { act: false, w: w, why: 'alive' };
-    /* 되살려도 같은 자리에서 또 죽는 경우(스크립트 파손)가 있다. 무한히 재시도하면
-       상대가 매번 등록만 되고 죽기를 반복해 로그만 쌓이고 진짜 고장이 묻힌다. */
-    if (w.n >= cfg.max) return { act: false, w: w, why: 'gaveup' };
-    // 방금 시도했으면 결과를 기다린다 — 등록 직후엔 아직 첫 회차가 안 돌았을 수 있다
-    if (w.at && now - w.at < cfg.gap) return { act: false, w: w, why: 'waiting' };
-    return { act: true, w: { n: w.n + 1, at: now }, why: 'restart' };
-  }
-
-  // 기본 포트 — 이 값이 여러 곳에 흩어지면 한 곳만 고쳐 놓고 나머지를 잊는다
-  var DEFAULT_PORT = '5654';
-
-  /* TQL에 박을 감시 코드. 호출부는 `wdTick(db)` 한 줄이면 된다.
-       o: { port('5654' — 브라우저가 본 포트, 힌트), authPath, endpointPath,
-            targets: [{ peer(타이머 이름), hb(상대 심박 키), key(이력 키),
-                        stale, gap, max, calm }] } */
-  function wdSrc(o) {
-    var q = function (v) { return JSON.stringify(String(v)); };
-    var targets = (o.targets || []).map(function (t) {
-      return { peer: String(t.peer), hb: String(t.hb), key: String(t.key),
-        cfg: { stale: Math.round(t.stale), gap: Math.round(t.gap), max: Math.round(t.max), calm: Math.round(t.calm) } };
-    });
-    // base에서 포트를 되뽑지 않는다 — 두 표현이 갈라지면 어느 쪽이 진짜인지 알 수 없게 된다
-    var hint = String(o.port || (/:(\d+)$/.exec(String(o.base || '')) || [])[1] || DEFAULT_PORT);
+  /* TQL에 박을 심박 코드. 회차마다 MONSTATE에 {t, n}을 남긴다.
+       key   : 심박 키(__hb · __hbband)
+       nExpr : 그 회차가 처리한 건수를 담은 식(문자열)
+     저장소는 공용 표라 TQL 안의 TBLP(표 위치)와 UPFX(행 키 접두)를 그대로 쓴다.
+     값이 안 쌓인 회차에도 심박은 남긴다 — 보는 쪽이 알고 싶은 것은 "돌았는가"지 "일했는가"가 아니다.
+     전부 try로 감싼다: 심박을 못 남기는 것이 회차를 죽일 이유는 되지 않는다. */
+  function hbOnlySrc(key, nExpr) {
     return [
-      'var WD_HINT=' + q(hint) + ', WD_DEF=' + q(DEFAULT_PORT) + ';',
-      'var WD_AUTH=' + q(o.authPath) + ', WD_EP=' + q(o.endpointPath || '') + ';',
-      'var WD_TARGETS=' + JSON.stringify(targets) + ';',
-      // 고정 별칭 — 압축기가 이름을 바꿔도 부르는 쪽이 안 흔들린다(band.js와 같은 이유)
-      'var __wdDecide=' + wdDecide.toString() + ';',
-      // MONSTATE 값 규약은 감시 쪽과 같다 — URL 인코딩된 JSON 한 칸
-      'function wdGet(db,k){ var v=null; try{ db.query("select VAL from NEO_VIBE_MONSTATE where K=\'"+k+"\'")',
-      '  .forEach(function(r){ try{ v=JSON.parse(decodeURIComponent(String(r[0]))); }catch(e){} }); }catch(e){} return v; }',
-      'function wdPut(db,k,o){ try{ var c=0; db.query("select count(*) from NEO_VIBE_MONSTATE where K=\'"+k+"\'").forEach(function(r){ c=+r[0]; });',
+      'function hbPut(db,k,o){ try{ var c=0;',
+      '  db.query("select count(*) from "+TBLP+"MONSTATE where K=\'"+UPFX+k+"\'").forEach(function(r){ c=+r[0]; });',
       '  var v=encodeURIComponent(JSON.stringify(o)).replace(/\'/g,"%27");',
-      '  if(c>0) db.exec("update NEO_VIBE_MONSTATE set VAL=\'"+v+"\' where K=\'"+k+"\'");',
-      '  else db.exec("insert into NEO_VIBE_MONSTATE values(\'"+k+"\',\'"+v+"\')"); }catch(e){} }',
-      /* 자격 증명은 굽지 않고 런타임에 읽는다 — .tql은 파일 API로 읽히므로 비밀번호를
-         박으면 노출 면이 하나 더 는다. 앱이 쓰는 파일이 없으면 앱과 같은 기본 계정으로 붙는다. */
-      'function wdTok(port){ var u="SYS", p="MANAGER";',
-      '  try{ var fs=require("@jsh/fs"); var a=JSON.parse(String(fs.readFile(WD_AUTH))); if(a&&a.user){ u=a.user; p=a.password||""; } }catch(e){}',
-      '  var tok="";',
-      '  try{ $.request("http://127.0.0.1:"+port+"/web/api/login",{method:"POST",headers:{"Content-Type":"application/json"},',
-      '    body:JSON.stringify({loginName:u,password:p})}).do(function(r){ if(r.status===200) r.text(function(t){',
-      '      try{ tok=JSON.parse(String(t)).accessToken||""; }catch(e){} }); }); }catch(e){}',
-      '  return tok; }',
-      /* 포트 확정 — 힌트로 붙어 보고, 안 되면 기본 포트로 붙어 본다. 브라우저는 프록시 뒤를
-         못 보지만 여기서는 127.0.0.1이 Neo 자신이라 "붙었다"가 곧 증명이다.
-         확정되면 파일로 남긴다: 언인스톨은 앱도 감시자도 없는 시점에 돌아서 이것 말고는 알 길이 없다.
-         힌트가 달라졌으면(포트를 옮겨 재기동) 옛 확정값을 버리고 다시 찾는다.
-         끝내 못 찾으면 아무것도 쓰지 않는다 — 틀린 값을 남기면 다음부터 찾아보지도 않는다. */
-      'var WD_PORT="";',
-      'function wdEpRead(){ try{ var fs=require("@jsh/fs"); return JSON.parse(String(fs.readFile(WD_EP))); }catch(e){ return null; } }',
-      'function wdResolve(){ if(WD_PORT) return WD_PORT;',
-      '  var ep=WD_EP?wdEpRead():null;',
-      '  if(ep&&ep.ok&&ep.port&&String(ep.hint||"")===WD_HINT){ WD_PORT=String(ep.port); return WD_PORT; }',
-      '  var cand=[], seen={}, i;',
-      '  [WD_HINT, WD_DEF].forEach(function(p){ p=String(p||""); if(p&&!seen[p]){ seen[p]=1; cand.push(p); } });',
-      '  for(i=0;i<cand.length;i++){ if(wdTok(cand[i])){ WD_PORT=cand[i];',
-      '    if(WD_EP) try{ require("@jsh/fs").writeFile(WD_EP, JSON.stringify({hint:WD_HINT, port:WD_PORT, ok:true}), "utf8"); }catch(e){}',
-      '    return WD_PORT; } }',
-      '  return WD_HINT||WD_DEF; }',
-      'function wdLogin(){ return wdTok(wdResolve()); }',
-      'function wdStart(name){ var tok=wdLogin(); if(!tok) return false; var ok=false;',
-      '  try{ $.request("http://127.0.0.1:"+wdResolve()+"/web/api/timers/"+name+"/state",{method:"POST",',
-      '    headers:{"Authorization":"Bearer "+tok,"Content-Type":"application/json"},',
-      '    body:JSON.stringify({state:"start"})}).do(function(r){ ok=(r.status===200); }); }catch(e){}',
-      '  return ok; }',
-      /* 감시가 본체를 죽이면 본말전도다 — 여기서 나는 어떤 오류도 삼킨다.
-         now를 인자로 받지 않는 이유는 대역 쪽 now가 생성 시각으로 구워져 있어서다. */
-      'function wdTick(db){ var out=[];',
-      /* 되살릴 일이 없어도 포트는 한 번 확정해 둔다 — 여기서만 확인할 수 있는데, 되살릴 때만
-         하면 아무도 안 죽은 설치에서는 영영 안 남고 언인스톨이 추측으로 돌아간다.
-         확정 뒤에는 파일 한 번 읽고 끝이라 회차 비용이 늘지 않는다. */
-      '  try{ wdResolve(); }catch(e){}',
-      '  for(var i=0;i<WD_TARGETS.length;i++){ var t=WD_TARGETS[i];',
-      '    try{ var d=__wdDecide(wdGet(db,t.hb), wdGet(db,t.key), Date.now(), t.cfg);',
-      '      if(!d.act){ out.push(t.peer+":"+d.why); continue; }',
-      '      var ok=wdStart(t.peer); d.w.ok=!!ok; wdPut(db,t.key,d.w);',
-      '      out.push(t.peer+":"+(ok?"restarted":"failed"));',
-      '    }catch(e){ out.push(t.peer+":err"); } }',
-      '  return out.join(","); }',
-    ];
+      '  if(c>0) db.exec("update "+TBLP+"MONSTATE set VAL=\'"+v+"\' where K=\'"+UPFX+k+"\'");',
+      '  else db.exec("insert into "+TBLP+"MONSTATE values(\'"+UPFX+k+"\',\'"+v+"\')"); }catch(e){} }',
+      'try{ hbPut(db,' + JSON.stringify(String(key)) + ',{t:Date.now(),n:' + (nExpr || '0') + '}); }catch(e){}',
+    ].join('\n');
   }
 
-  /* 심박 한 줄 — "언제 몇 건 했는가". 상대는 이 시각의 나이만 본다.
-     타이머가 RUNNING인데 실제로는 아무것도 안 하는 경우까지 잡으려면 상태가 아니라 이게 필요하다. */
-  function hbSrc(key, nExpr) {
-    return 'try{ wdPut(db,' + JSON.stringify(String(key)) + ',{t:Date.now(),n:' + (nExpr || '0') + '}); }catch(e){}';
-  }
-
-  /* 감시자 전용 TQL — 하는 일이 이것뿐이라 죽을 거리가 거의 없다.
-     자기 심박도 남긴다: 감시자가 멎으면 감시·대역 추출 쪽이 이걸 보고 되살린다. */
-  function buildWatchdogTql(o) {
-    return ['SCRIPT({', 'var db=$.db();']
-      .concat(wdSrc(o))
-      .concat([hbSrc(o.selfHb, '0'), '$.yield("wd", wdTick(db));', '})', 'CSV()'])
-      .join('\n');
-  }
-
-  return { wdDecide: wdDecide, wdSrc: wdSrc, hbSrc: hbSrc, buildWatchdogTql: buildWatchdogTql, DEFAULT_PORT: DEFAULT_PORT };
+  return { hbOnlySrc: hbOnlySrc };
 });

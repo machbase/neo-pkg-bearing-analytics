@@ -7,6 +7,25 @@ weight: 20
 
 [한국어](./first-setup.kr.md) | **English**
 
+## Before you start — storage and grants
+
+The app runs **as the account signed in to the Neo console**. Which tables you see and where your settings
+are stored both follow that account, so an administrator (SYS) has to prepare things once.
+
+| Who | What |
+| :--- | :--- |
+| SYS | Settings → Data Source → **User info** card → `Create` — creates the dedicated database `NEO_BEARING_STORE` |
+| SYS | Same card, **Grant an account** — pick an account and press the button (once per account) |
+| SYS | Grant the data tables to analyze: `GRANT SELECT ON MACHBASEDB.SYS.<table> TO <account>;` |
+
+An account without grants sees only a notice ("cannot reach the database") and a `Check` button.
+Once the grants are in place, that button resumes the app without a reload.
+
+If an account cannot even sign in to the Neo console, it lacks access to the default database (`ERR-2835`).
+That is a Neo prerequisite rather than a package one: `GRANT CONNECT ON DATABASE MACHBASEDB TO <account>;`
+
+## The settings screen
+
 When you first open the app, the **Settings** screen is where you define what to analyze. Settings is split into six sections down the left side.
 
 | Section | Contents | Required |
@@ -18,7 +37,9 @@ When you first open the app, the **Settings** screen is where you define what to
 | LLM | Provider for report and event opinions | Optional |
 | Data management | Storage usage, ranged & per-tag data deletion | Optional |
 
-Changing a setting shows a save prompt at the bottom of the screen; pressing **Save** reloads live data. Navigating away with unsaved changes prompts for confirmation. If setup items are still missing, the ⚙ button in the header shows an amber dot.
+Changing a setting shows a save prompt at the bottom of the screen; pressing **Save** reloads live data. **Changes take effect only once saved** — until then the monitoring screen, in-app judgment, and server monitoring all keep running on the previous settings. Navigating away with unsaved changes prompts for confirmation, and choosing **Discard and leave** throws the edits away and restores the saved settings.
+
+A few buttons save their one value immediately — the alarm on/off indicator in the header, the **flapping ×N** badge on a card (which lengthens the RMS window to the suggested value), **Apply** in the band-extraction interval dialog, and the LLM picker in reports and detail analysis. Other unsaved edits on the Settings tab are not saved along with them. If setup items are still missing, the ⚙ button in the header shows an amber dot.
 
 ## Data Source
 
@@ -182,7 +203,7 @@ Per-channel status shows something like `trained 4/9`. The denominator is the nu
 
 ## Alarms
 
-This section covers monitoring mode (app vs. server), evaluation interval and RMS window, and notifications (entry and recovery hold, the webhook channel, per-severity delivery and re-notify). For webhook setup walkthroughs, see the guides in [Alarms & events](./alarms.en.md).
+This section covers monitoring mode (app vs. server), evaluation interval and RMS window, and notifications (the webhook channel, per-severity delivery and re-notify). Alarm confirmation is not a minute-based setting; it is fixed at **two consecutive cycles**. For webhook setup walkthroughs, see the guides in [Alarms & events](./alarms.en.md).
 
 It has enough depth to warrant its own page → [Alarms & events](./alarms.en.md)
 
@@ -201,5 +222,7 @@ You can configure several providers and choose between them from the dropdown on
 
 ## Navigation
 
+- [Back to contents](./index.en.md)
+- [Previous: Glossary](./glossary.en.md)
 - [Back to contents](./index.en.md)
 - [Next: Usage](./usage.en.md)

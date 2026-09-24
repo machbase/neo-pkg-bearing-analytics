@@ -23,7 +23,7 @@ const BLS = {
 // ── ② DETAIL 컬럼 ──────────────────────────────────────────────────────────
 // 이벤트 표는 TAG 테이블이다 — NAME='<테이블>:<태그>'라 설비 단위로 지울 수 있다(LOG는 불가능했다).
 chk(/DETAIL VARCHAR\(400\)/.test(SQL.monCreateTables().join('')), 'CREATE에 DETAIL 컬럼');
-chk(/CREATE TAG TABLE NEO_VIBE_EVENTS/.test(SQL.monCreateTables().join('')), '이벤트 표가 TAG 테이블');
+chk(/CREATE TAG TABLE EVENTS/.test(SQL.monCreateTables().join('')), '이벤트 표가 TAG 테이블');
 chk(!/SUMMARIZED/.test(SQL.monCreateTables()[0]), '이벤트는 SUMMARIZED 없음(롤업 미생성)');
 chk(/GRADE, LIM, DETAIL/.test(SQL.eventsSelect(10)), 'SELECT가 DETAIL 포함');
 {
@@ -34,9 +34,14 @@ chk(/GRADE, LIM, DETAIL/.test(SQL.eventsSelect(10)), 'SELECT가 DETAIL 포함');
 {
   // 태그별 삭제 — TAG로 바꾼 이유 그 자체
   chk(/where NAME='T:A'$/.test(SQL.eventsDeleteTag('T', 'A')), '태그별 삭제 SQL');
-  // 구간 삭제 — 전체 태그의 시간 범위 지정(8.0.50+ 확장 구문). 라이브에서 동작 확인함
-  chk(/where TIME between to_date\(.*\) and to_date\(/.test(SQL.eventsDeleteRange(1, 2)), '기간 삭제 SQL');
-  chk(/where TIME between to_date\(/.test(SQL.bandDeleteRange(1, 2)), '대역 기간 삭제 SQL');
+  /* 구간 삭제 — 이름마다 한 문장. 표를 계정이 공유하므로 시간만으로 지우면 남의 행까지 날아가고,
+     TAG 표는 LIKE 로 좁힐 수도 없다(ERR-2073: NAME 정확일치 + 시간범위만 받는다). */
+  const evDel = SQL.eventsDeleteRange(['T:A', 'T:B'], 1, 2);
+  chk(evDel.length === 2 && evDel.every((q) => /where NAME='T:[AB]' and TIME between to_date\(.*\) and to_date\(/.test(q)),
+    '기간 삭제 SQL — 이름마다 한 문장', evDel[0]);
+  const bdDel = SQL.bandDeleteRange(['T:A:fault'], 1, 2);
+  chk(bdDel.length === 1 && /where NAME='T:A:fault' and TIME between to_date\(/.test(bdDel[0]),
+    '대역 기간 삭제 SQL', bdDel[0]);
 }
 
 // ── ③ 배수 등급 ────────────────────────────────────────────────────────────
@@ -149,9 +154,10 @@ chk(VC.bandJudge({ fault: 1.0 }, { one: BLS.one }, false) === null, '겹치는 �
   }
   /* 7번째 run은 정지·두절 때 판정을 얼리고, 8번째 cyc는 회차를 세는 기준이다(패턴을 잰 시각).
      cyc가 빠지면 판정 틱마다 회차가 세어져 "2회차 연속"이 20초가 된다 — 서버에서만 그렇게 되면 못 잡는다. */
-  chk(/judgeTick\(prev,rg,breach,now,CFG,bj,run,\(_pv&&_pv\.at\)\|\|null\)/.test(tql), '서버 TQL이 대역·운전여부·회차를 judgeTick에 전달');
+  // 회차는 patternRound가 정한다 — 측정 결과가 있으면 그 시각, 잴 수 있는데 못 쟀으면 직전 회차(보류)
+  chk(/judgeTick\(prev,rg,breach,now,CFG,bj,run,_pr\.cyc\)/.test(tql), '서버 TQL이 대역·운전여부·회차를 judgeTick에 전달');
   chk(/bandJudge\(bandNow\(t\), t\.bb/.test(tql), '서버 TQL이 최신 대역값으로 판정');
-  chk(/NEO_VIBE_BAND/.test(tql), '서버 TQL이 대역 테이블 조회');
+  chk(/BAND/.test(tql), '서버 TQL이 대역 테이블 조회');
   chk(/"대역 이탈"/.test(tql) || /대역 이탈/.test(tql), '알림 문구에 대역 이벤트 한글명');
 
   /* (b) INSERT 인자 수 == EVENTS 컬럼 수.
@@ -160,16 +166,17 @@ chk(VC.bandJudge({ fault: 1.0 }, { one: BLS.one }, false) === null, '겹치는 �
      조용히 전면 중단된다 — 생성된 식을 실제로 평가해 자릿수를 센다. */
   // 이벤트 INSERT는 한 곳이 아니다(일반 이벤트 · 신호 두절) — 전부 평가한다.
   // 새 INSERT를 추가할 때 컬럼 수를 안 맞추면 그 경로만 조용히 스크립트를 죽인다.
-  const inserts = [...tql.matchAll(/db\.exec\((\"insert into NEO_VIBE_EVENTS values\([\s\S]*?)\);/g)].map((x) => x[1]);
+  const inserts = [...tql.matchAll(/db\.exec\((\"insert into \"\+TBLP\+\"EVENTS values\([\s\S]*?)\);/g)].map((x) => x[1]);
   chk(inserts.length >= 2, 'INSERT 식 추출 (일반 + 신호 두절)', inserts.length + '곳');
   // VARCHAR(120) 안의 괄호 때문에 [^)]*로는 첫 괄호에서 끊긴다 — 마지막 ')'까지 잡고 타입 괄호를 지운다
-  const decl = /NEO_VIBE_EVENTS \(([\s\S]*)\)/.exec(SQL.monCreateTables().find((s) => /NEO_VIBE_EVENTS/.test(s)))[1];
+  const decl = /EVENTS \(([\s\S]*)\)/.exec(SQL.monCreateTables().find((s) => /EVENTS/.test(s)))[1];
   const cols = decl.replace(/\([^)]*\)/g, '').split(',').length;
   // 생성 식이 참조하는 이름을 전부 채워 실제로 평가한다(문자열 조립이라 정적 검사로는 자릿수를 못 센다)
   // dtms — TAG 표가 되면서 TIME을 to_date 문자열로 찍는다(monitor.js가 자체 정의)
-  const NAMES = ['esc', 'eid', 't', 'now', 'ev', 'GW', 'v2', 'l2', 'dt', 'key', 'last', 'durAgo', 'dtms'];
+  // TBLP·UPFX — 표 위치(공용 스키마)와 행 키 접두. TQL 안에서 이어 붙는다(여기선 빈 값으로 평가)
+  const NAMES = ['esc', 'eid', 't', 'now', 'ev', 'GW', 'v2', 'l2', 'dt', 'key', 'last', 'durAgo', 'dtms', 'TBLP', 'UPFX'];
   const VALS = [String, 'T:A:1:band', { tbl: 'T', tag: 'A' }, 1, { etype: 'band', gi: 1 },
-    ['양호', '주의'], 1.3, 1, 'fault=1/2', 'T:A', 0, () => '2시간', () => '2026-08-04 10:30:45 123'];
+    ['양호', '주의'], 1.3, 1, 'fault=1/2', 'T:A', 0, () => '2시간', () => '2026-08-04 10:30:45 123', '', ''];
   let detailOk = false;
   inserts.forEach((src, i) => {
     const sqlStr = new Function(...NAMES, 'return ' + src)(...VALS);

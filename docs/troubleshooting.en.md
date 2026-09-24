@@ -7,11 +7,58 @@ weight: 60
 
 [한국어](./troubleshooting.kr.md) | **English**
 
+## Only a "cannot reach the database" notice appears
+
+The signed-in account has not been granted the store (`NEO_BEARING_STORE`). An administrator (SYS) can fix
+this from Settings → Data Source → **Grant an account**: pick the account and press the button. Afterwards,
+press `Check` and the app resumes without a reload.
+
+If you see this notice *as* SYS, the database does not exist yet — press `Create` on the same card.
+
+## Server monitoring is on but no events appear
+
+The timer can be `RUNNING` and still do nothing. The heartbeat tells them apart:
+
+```sql
+SELECT K, VAL FROM NEO_BEARING_STORE.SYS.MONSTATE WHERE K='<account>:__hb';
+```
+
+`n` is how many tags were processed. **`n` of 0** means the cycle runs but skips every tag. The usual cause
+is data-table grants: listings and the UI work from a plain GRANT, but the monitoring TQL uses rollups, so a
+missing `SELECT` on that table ends the cycle silently at zero. `ms` helps too — single-digit milliseconds
+means nothing was queried at all.
+
+## The timer list shows the same name several times
+
+Neo does not prevent duplicate timer names. The app deletes every timer with that name before registering
+and verifies the deletion, but duplicates created while the timer list itself was failing (for example under
+DB load) cannot be caught at that moment. Once the load clears, **toggling server monitoring off and on**
+cleans them up. To do it by hand, delete them in the Neo TIMER view — **stop each one first**; deleting a
+running timer can leave its runner alive.
+
+## A "Could not load settings" screen appears
+
+The app could not read your saved settings at startup. It does not open any tab in this state — showing defaults and letting you save would overwrite the real settings.
+
+- **Could not load settings** — usually a transient connection problem. The settings are still in the DB; press **Retry**.
+- **Cannot read <area> settings** — a save was interrupted and part of that area (for example, Equipment) is damaged. If Retry gives the same result, press **Open <area> with defaults**. Everything else loads as saved and you are taken to that area's settings. Pressing the button saves nothing by itself, so set that area up again and save.
+
 ## No equipment cards at all
 
 - If the app shows "no TAG table found in the DB", it connected to Neo but found no TAG table. Check the Neo connection and that a TAG table exists. The app does not substitute mock data, so the screen stays empty.
 - If tables exist but there are no cards, you haven't selected a table yet in **Settings → Data Source**. Select the tables to analyze and save.
 - "Failed to load data" means a query against a selected table errored; the message includes the cause.
+- "Could not load data" means the selected tables could not be queried. The selection is kept and the app retries automatically — see "Could not reload data" below.
+
+## A "Could not reload data" banner appears
+
+A table query failed while re-reading data after a settings save or when a new tag was detected.
+
+- Monitoring does not stop. It **keeps running on the last loaded data** and retries automatically (starting at 10 s and doubling up to 5 min).
+- Meanwhile, **newly selected tables are not monitored** (the banner names them). Tables you deselected leave monitoring as soon as you save.
+- The selection is already saved, so there is nothing to save again. As soon as one retry succeeds the banner disappears and monitoring is back to normal. To skip the wait, press **Retry now**.
+- If it keeps failing (from the third attempt the banner adds a hint), check whether the named table was dropped or its permission revoked, and deselect it under **Settings → Data Source** and save if needed.
+- While it is failing, the server monitoring timer is not rebuilt. Rebuilding it from an incomplete list would drop the unread equipment from server monitoring too.
 
 ## Only some tags appear
 
@@ -44,10 +91,18 @@ A pattern that **casts doubt on the measurement itself** — such as clipping (s
 - Amplitudes read from a saturated signal come out **lower** than reality — treat the value as a lower bound on the true amplitude.
 - Check the sensor, cable, mounting, and grounding before suspecting the machine.
 
+## A card shows "Fault pattern: awaiting first measurement" or "Fault pattern: measurement failed"
+
+The fault pattern — the axis that switches the grade on — could not be measured this cycle, so **the previous grade is being held**. Reading a missed cycle as "no pattern = good" would confirm a false "recovered" within seconds on equipment that is in alarm, so judgment is held instead.
+
+- **Awaiting first measurement** — nothing has been measured yet, as right after opening the app. It clears once the first measurement finishes (usually a few seconds, longer with many tags).
+- **Measurement failed** — the raw waveform could not be read or there were too few samples. It is measured again next cycle (the pattern/band extraction interval). If it persists, check data collection for that tag.
+- Tags that can never be measured because the shaft speed or bearing is missing show **Cannot judge** instead.
+
 ## Alarms are off after reopening the app
 
-- The alarm state is saved. If it's off when you return, the window may have been closed before the setting was saved.
-- Click the alarm indicator in the header to turn it back on, then **Save** in the settings screen.
+- The header alarm indicator saves as soon as you click it. If alarms are off when you return, they may have been turned on with the **alarm switch on the Settings tab** and never saved (including choosing **Discard and leave**), or the save failed — a failed save shows an error and flips the indicator back.
+- Click the header alarm indicator to turn it back on. No separate save is needed.
 
 ## No events are being recorded
 
@@ -123,7 +178,7 @@ The current sample count and whether it is enough to train are shown next to the
 
 ## I changed alarm settings but server monitoring still uses the old criteria
 
-Server monitoring **runs with the settings as of your last save.** After changing settings, press **Save** for the new criteria to take effect.
+Both server monitoring and in-app judgment **run on the saved settings.** After changing settings, press **Save** for the new criteria to take effect; until then the monitoring screen also shows the previous criteria. Choosing **Discard and leave** when navigating away throws the edits away.
 
 ## Notifications don't arrive
 
@@ -180,5 +235,5 @@ Compare the **ruleset fingerprint** printed in each report.
 
 ## Navigation
 
-- [Previous: How detection works](./detection.en.md)
+- [Previous: What this tool does and does not do](./scope.en.md)
 - [Back to contents](./index.en.md)

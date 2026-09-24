@@ -11,7 +11,8 @@ export function view(v) {
     orphanOpen, orphanRows, orphanTotalText, orphanBusy, onOrphanClose, onOrphanAll,
     purgePickShow, purgePickTitle, purgeRange, purgeHaveText, purgePickReady, onPurgePickCancel, onPurgePickNext,
     purgeShow, purgeTitle, purgeSub, purgeWhen, purgeCounting, purgeN, purgeKeep, purgeNone,
-    purgeAsk, purgeBullets, purgeTable, purgeTyped, purgeTypeOk, onPurgeType, purgeReady, purgeBtnLabel, purgeRunning, onPurgeCancel, onPurgeConfirm, serverMon, setNav, settingsActiveStyle, settingsDirty, sevCards, sevColor, sevGradeKo, sevHold, sevHoldDetail, sevHoldNote, sevHoldWhy, sevLabel, sevMachine, sevReco, sevZones,showAdvanced, specIndics, srcNotice, srcSelAllLabel, srcSelCount, srcTables, srcTotal, statSummary, statRows, stopClick, sumTotal, tagOptions, themeIcon, threshRows, toast, toastIcon, toastMsg, toastStyle, toggleTheme, totalStyle, unitChips, unitOptions
+    userName, userAuthMsg, needsDb, dbExists, dbReady, dbAdmin, dbName, dbGrantSql, grantUsers, grantPick, grantBusy, grantMsg, onGrantOpen, onGrantPick, onGrantRun, dbWhy, dbBusy, onMakeDb, onCheckDb, appDbName, purgeAsk, purgeBullets, purgeTable, purgeTyped, purgeTypeOk, onPurgeType, purgeReady, purgeBtnLabel, purgeRunning, onPurgeCancel, onPurgeConfirm, serverMon, setNav, settingsActiveStyle, settingsDirty, sevCards, sevColor, sevGradeKo, sevHold, sevHoldDetail, sevHoldNote, sevHoldWhy, sevLabel, sevMachine, sevReco, sevZones,showAdvanced, specIndics, srcNotice, srcSelAllLabel, srcSelCount, srcTables, srcTotal, statSummary, statRows, stopClick, sumTotal, tagOptions, themeIcon, threshRows, toast, toastIcon, toastMsg, toastStyle, toggleTheme, totalStyle, unitChips, unitOptions,
+    cfgFailShow, cfgFailTitle, cfgFailText, cfgFailWhy, cfgRepairShow, cfgRepairLabel, onCfgRetry, onCfgRepair, monEmptyFresh, monEmptyFail,
   } = v;
   return html`
 <div class=${rootClass} style="height: 100vh; display: flex; flex-direction: column; background: var(--bg-primary); color: var(--text-primary); font-family: var(--font-sans); font-size: 13px; overflow: hidden;">
@@ -55,6 +56,21 @@ export function view(v) {
           <div style="height: 150px; background: var(--bg-secondary); border: 1px solid var(--border-default); border-radius: 8px; animation: vskl 1.3s ease-in-out infinite .45s;"></div>
         </div>
         <div style="text-align: center; margin-top: 22px; color: var(--text-muted); font-size: 12px;">진동 데이터 로딩 중…</div>
+      </div>
+    ` : null}
+
+    ${(cfgFailShow) ? html`
+      <div style="max-width: 640px; margin: 56px auto; padding: 0 20px;">
+        <div style="display: flex; flex-direction: column; align-items: center; gap: 12px; padding: 40px 24px; background: var(--bg-secondary); border: 1px solid var(--border-default); border-radius: 10px; text-align: center;">
+          <span class="codicon codicon-warning" style="font-size: 32px; color: #e07b39;"></span>
+          <div style="font-size: 15px; font-weight: 600; color: var(--text-secondary);">${cfgFailTitle}</div>
+          <div style="font-size: 12px; color: var(--text-muted); max-width: 480px; line-height: 1.6;">${cfgFailText}</div>
+          <div style="font-size: 11px; color: var(--text-muted); max-width: 480px; word-break: break-all;">${cfgFailWhy}</div>
+          <div style="display: flex; gap: 8px; margin-top: 6px; flex-wrap: wrap; justify-content: center;">
+            <button onClick=${onCfgRetry} style="height: 34px; padding: 0 16px; border-radius: 6px; border: none; background: var(--primary-base); color: #fff; font-size: 13px; font-weight: 600; cursor: pointer;">다시 시도</button>
+            ${(cfgRepairShow) ? html`<button onClick=${onCfgRepair} style="height: 34px; padding: 0 16px; border-radius: 6px; border: 1px solid var(--border-default); background: var(--bg-elevated); color: var(--text-secondary); font-size: 13px; font-weight: 600; cursor: pointer;">${cfgRepairLabel}</button>` : null}
+          </div>
+        </div>
       </div>
     ` : null}
 
@@ -133,9 +149,13 @@ export function view(v) {
         ${(monEmpty) ? html`
           <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; padding: 64px 20px; background: var(--bg-secondary); border: 1px dashed var(--border-default); border-radius: 10px; text-align: center;">
             <span class="codicon codicon-inbox" style="font-size: 36px; color: var(--text-muted);"></span>
-            <div style="font-size: 15px; font-weight: 600; color: var(--text-secondary);">표시할 설비가 없습니다</div>
-            <div style="font-size: 12px; color: var(--text-muted); max-width: 380px; line-height: 1.6;">선택된 데이터 소스가 없습니다. 설정 → 데이터 소스에서 TAG table을 선택하면 해당 태그가 여기에 표시됩니다.</div>
-            <button onClick=${onGoSource} style="margin-top: 4px; height: 34px; padding: 0 16px; border-radius: 6px; border: none; background: var(--primary-base); color: #fff; font-size: 13px; font-weight: 600; cursor: pointer;">데이터 소스 설정</button>
+            <div style="font-size: 15px; font-weight: 600; color: var(--text-secondary);">${monEmptyFail ? '데이터를 불러오지 못했습니다' : monEmptyFresh ? '저장된 설정이 없습니다' : '표시할 설비가 없습니다'}</div>
+            <div style="font-size: 12px; color: var(--text-muted); max-width: 380px; line-height: 1.6;">${monEmptyFail
+              ? '선택한 테이블을 조회하지 못해 표시할 설비가 없습니다. 선택은 그대로 남아 있고, 위 안내대로 자동으로 다시 시도합니다.'
+              : monEmptyFresh
+              ? '아직 이 계정으로 저장한 설정이 없습니다. 데이터 소스에서 감시할 TAG table을 고르는 것부터 시작하세요.'
+              : '선택된 데이터 소스가 없습니다. 설정 → 데이터 소스에서 TAG table을 선택하면 해당 태그가 여기에 표시됩니다.'}</div>
+            <button onClick=${onGoSource} style="margin-top: 4px; height: 34px; padding: 0 16px; border-radius: 6px; border: none; background: var(--primary-base); color: #fff; font-size: 13px; font-weight: 600; cursor: pointer;">${monEmptyFresh ? '설정 시작' : '데이터 소스 설정'}</button>
           </div>
         ` : null}
         ${/* 테이블을 하나도 안 남기면 카드가 없다 — 위의 빈 상태는 "소스가 없다"는 뜻이라 여기 쓸 수 없다 */ ''}
@@ -655,6 +675,77 @@ export function view(v) {
         </div>
 
         <div onChange=${onFormChange}>
+          ${(secSource) ? html`
+            <div style="background: var(--bg-secondary); border: 1px solid var(--border-default); border-radius: 8px; padding: 20px; margin-bottom: 16px;">
+              <div style="font-size: 17px; font-weight: 600; color: var(--text-primary); margin-bottom: 4px;">유저 정보</div>
+              <div style="font-size: 12px; color: var(--text-muted); margin-bottom: 18px;">Neo 콘솔에 로그인한 계정으로 동작합니다. 보이는 테이블과 저장되는 설정이 계정마다 따로입니다</div>
+
+              ${(userName) ? html`
+                <div style="display: flex; align-items: center; gap: 10px; padding: 12px 14px; border-radius: 8px; background: var(--bg-elevated); border: 1px solid var(--border-light);">
+                  <span class="codicon codicon-pass-filled" style="font-size: 15px; color: var(--success, #3fa45b);"></span>
+                  <span style="font-size: 13px; color: var(--text-secondary);">접속 계정</span>
+                  <span style="font-family: var(--font-mono); font-size: 13px; font-weight: 600; color: var(--text-primary);">${userName}</span>
+                  <span style="margin-left: auto; font-size: 11.5px; color: var(--text-muted);">계정을 바꾸려면 Neo 콘솔에서 다시 로그인하세요</span>
+                </div>` : null}
+
+              ${(userAuthMsg) ? html`
+                <div style="display: flex; align-items: flex-start; gap: 10px; padding: 12px 14px; border-radius: 8px; background: rgba(217,154,43,0.10); border: 1px solid rgba(217,154,43,0.35);">
+                  <span class="codicon codicon-warning" style="font-size: 15px; color: #d99a2b; margin-top: 1px;"></span>
+                  <div style="font-size: 12.5px; color: var(--text-secondary); line-height: 1.6;">${userAuthMsg}<div style="color: var(--text-muted); margin-top: 3px;">로그인이 확인되기 전에는 어떤 데이터도 조회하지 않습니다.</div></div>
+                </div>` : null}
+
+              ${(dbReady) ? html`
+                <div style="display: flex; align-items: center; gap: 10px; padding: 12px 14px; border-radius: 8px; background: var(--bg-elevated); border: 1px solid var(--border-light); margin-top: 10px;">
+                  <span class="codicon codicon-pass-filled" style="font-size: 15px; color: var(--success, #3fa45b);"></span>
+                  <span style="font-size: 13px; color: var(--text-secondary);">저장소</span>
+                  <span style="font-family: var(--font-mono); font-size: 13px; font-weight: 600; color: var(--text-primary);">${dbName}</span>
+                  <span style="margin-left: auto; font-size: 11.5px; color: var(--text-muted);">설정·이벤트·학습값이 이 계정 스키마에 저장됩니다</span>
+                </div>` : null}
+
+              ${(needsDb) ? html`
+                <div style="padding: 13px 15px; border-radius: 8px; background: rgba(217,154,43,0.10); border: 1px solid rgba(217,154,43,0.35); margin-top: 10px;">
+                  <div style="display: flex; align-items: center; gap: 9px; font-size: 13px; color: var(--text-secondary); line-height: 1.6;">
+                    <span class="codicon codicon-database" style="font-size: 15px; color: #d99a2b; flex-shrink: 0;"></span>
+                    <span>${(!dbAdmin)
+                      /* 권한이 없는 계정에는 "없다"고 단정하지 않는다 — V$DATABASES 가 계정별로
+                         걸러지므로 본인은 "없음"과 "안 보임"을 구분할 방법이 없다. */
+                      ? html`설정·판정 기준·이벤트 이력을 저장할 데이터베이스 <code style="font-family: var(--font-mono); font-weight: 600; color: var(--text-primary); user-select: all;">${dbName}</code> 에 접근할 수 없습니다.`
+                      : (dbExists)
+                        ? html`데이터베이스 <code style="font-family: var(--font-mono); font-weight: 600; color: var(--text-primary); user-select: all;">${dbName}</code> 는 있지만 이 계정에 권한이 없습니다.`
+                        : html`설정·판정 기준·이벤트 이력을 저장할 데이터베이스 <code style="font-family: var(--font-mono); font-weight: 600; color: var(--text-primary); user-select: all;">${dbName}</code> 가 없습니다.`}</span>
+                  </div>
+                  ${(!dbAdmin) ? html`<div style="font-size: 12px; color: var(--text-muted); margin: 5px 0 0 24px;">관리자에게 ${dbName} 권한을 요청하고, 받으셨다면 확인을 누르세요.</div>` : null}
+                  ${(dbWhy) ? html`<div style="font-size: 11px; color: var(--text-muted); font-family: var(--font-mono); margin: 5px 0 0 24px;">${dbWhy}</div>` : null}
+                  <div style="display: flex; gap: 8px; margin: 11px 0 0 24px;">
+                    ${(dbAdmin && !dbExists) ? html`
+                      <button onClick=${onMakeDb} disabled=${dbBusy}
+                        style="height: 30px; padding: 0 15px; border-radius: 6px; border: none; background: var(--primary-base); color: #fff; font-size: 12.5px; font-weight: 600; cursor: ${dbBusy ? 'wait' : 'pointer'}; opacity: ${dbBusy ? '.6' : '1'};">${dbBusy ? '만드는 중…' : '만들기'}</button>` : null}
+                    <button onClick=${onCheckDb} disabled=${dbBusy}
+                      style="height: 30px; padding: 0 14px; border-radius: 6px; border: 1px solid var(--border-medium); background: transparent; color: var(--text-secondary); font-size: 12.5px; cursor: ${dbBusy ? 'wait' : 'pointer'}; opacity: ${dbBusy ? '.6' : '1'};">상태 확인</button>
+                  </div>
+                </div>` : null}
+
+              ${(dbAdmin) ? html`
+                <div style="margin-top: 10px; padding: 12px 14px; border-radius: 8px; background: var(--bg-elevated); border: 1px solid var(--border-light);">
+                  <div style="font-size: 11.5px; font-weight: 600; color: var(--text-tertiary); margin-bottom: 8px;">패키지 사용 계정에 권한 주기 <span style="font-weight: 400; color: var(--text-muted);">— 계정마다 한 번</span></div>
+                  <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+                    <select onChange=${onGrantPick} onFocus=${onGrantOpen} value=${grantPick} disabled=${grantBusy}
+                      style="height: 30px; min-width: 150px; padding: 0 8px; border-radius: 6px; border: 1px solid var(--border-medium); background: var(--bg-secondary); color: var(--text-primary); font-family: var(--font-mono); font-size: 12.5px;">
+                      ${(grantUsers && grantUsers.length)
+                        ? grantUsers.map((u) => html`<option value=${u}>${u}</option>`)
+                        : html`<option value="">${grantUsers ? '다른 계정이 없습니다' : '불러오는 중…'}</option>`}
+                    </select>
+                    <button onClick=${onGrantRun} disabled=${grantBusy || !grantPick}
+                      style="height: 30px; padding: 0 15px; border-radius: 6px; border: none; background: var(--primary-base); color: #fff; font-size: 12.5px; font-weight: 600; cursor: ${(grantBusy || !grantPick) ? 'not-allowed' : 'pointer'}; opacity: ${(grantBusy || !grantPick) ? '.6' : '1'};">${grantBusy ? '주는 중…' : '권한 주기'}</button>
+                    ${(grantMsg) ? html`<span style="font-size: 11.5px; color: var(--text-muted);">${grantMsg}</span>` : null}
+                  </div>
+                  <details style="margin-top: 10px;">
+                    <summary style="font-size: 11.5px; color: var(--text-muted); cursor: pointer; user-select: none;">SQL 로 직접 하기</summary>
+                    <pre style="margin: 7px 0 0; font-family: var(--font-mono); font-size: 12px; line-height: 1.7; color: var(--text-secondary); white-space: pre-wrap; user-select: all;">${dbGrantSql}</pre>
+                  </details>
+                </div>` : null}
+            </div>` : null}
+
           ${(secSource) ? html`
                         <div style="background: var(--bg-secondary); border: 1px solid var(--border-default); border-radius: 8px; padding: 20px; margin-bottom: 16px;">
               <div style="font-size: 17px; font-weight: 600; color: var(--text-primary); margin-bottom: 4px;">데이터 소스</div>

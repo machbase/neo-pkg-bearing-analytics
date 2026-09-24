@@ -47,13 +47,34 @@ export const insertEvent = DB.insertEvent;
 export const insertBandPoint = DB.insertBandPoint;
 export const loadMonState = DB.loadMonState;
 export const saveMonState = DB.saveMonState;
+// 신원 — 토큰이 어느 계정으로 실행되는지는 서버만 안다(토큰 문자열에는 계정이 없다).
+export const jwtUser = DB.jwtUser;
+export const sessionJwt = DB.sessionJwt;
+export const whoami = DB.whoami;
+export const setUser = DB.setUser;
+export const getUser = DB.getUser;
+export const configDir = DB.configDir;
+export const migrateConfigToDb = DB.migrateConfigToDb;
+export const checkAppDb = DB.checkAppDb;
+export const setupSql = DB.setupSql;
+export const createAppDb = DB.createAppDb;
+export const appDb = DB.appDb;
+export const storePrefix = DB.storePrefix;
+export const listUsers = DB.listUsers;
+export const grantTo = DB.grantTo;
+export const userKeyPrefix = DB.userKeyPrefix;
+export const configTable = DB.configTable;
+export const srcMapOf = DB.srcMapOf;
+export const onAuthFail = DB.onAuthFail;
+
 // 서버 상시감시(P5): 판정 TQL을 파일로 저장하고 Neo 타이머로 주기 실행 (앱 없이도 감시)
 export const pkgBase = DB.pkgBase;
 export const createMonitorTimer = DB.createMonitorTimer;
 export const timerStates = DB.timerStates;
-export const MON_TIMER = DB.MON_TIMER;
-export const BAND_TIMER = DB.BAND_TIMER;
-export const WD_TIMER = DB.WD_TIMER;
+// 타이머 이름은 계정이 정해진 뒤에 결정된다 — 상수로 내보내면 로드 시점 값에 묶인다
+export const monTimer = DB.monTimer;
+export const bandTimer = DB.bandTimer;
+export const wdTimer = DB.wdTimer;
 export const createWdTimer = DB.createWdTimer;
 export const deleteWdTimer = DB.deleteWdTimer;
 export const createBandTimer = DB.createBandTimer;
@@ -76,7 +97,16 @@ export const deleteBandRange = DB.deleteBandRange;
 export const deleteBandOfTag = DB.deleteBandOfTag;
 export const deleteMonState = DB.deleteMonState;
 // 리포트 파일 저장/목록/미리보기 (워크스페이스 루트 기준 경로)
-export const REPORT_DIR = '/vibration-reports';
+/* 리포트 — 워크스페이스 루트에 두는 건 그대로다(패키지 업데이트에 안 지워진다).
+   계정 폴더가 **먼저** 온다: `<계정>/vibration-reports/`. llm-chat 이 같은 규약이라
+   한 계정의 산출물이 패키지별 폴더로 한자리에 모인다(`joy/vibration-reports`, `joy/reports`…).
+   계정명은 소문자다 — llm-chat 이 만들어 둔 폴더와 같은 자리를 써야 둘이 갈라지지 않는다.
+   계정을 모르는 동안에는 옛 평면 경로를 가리킨다. */
+export const REPORT_ROOT = '/vibration-reports';   // 계정 구분 이전 설치 — 목록에서만 읽는다
+export function reportDir() {
+  const u = DB.getUser();
+  return u ? '/' + u.toLowerCase() + '/vibration-reports' : REPORT_ROOT;
+}
 export const ensureDir = DB.ensureDir;
 export const saveFile = DB.saveFile;
 export const listDir = DB.listDir;
@@ -106,11 +136,14 @@ export async function buildLiveData(E, tables, cfg) {
      ② _catalogTick이 잘린 태그를 매번 '새 태그'로 보고 재적재를 무한 반복한다(droppedKeys가 그 판단 근거다).
      상한은 태그 목록을 다 받은 뒤에 적용한다 — 미리 자르면 전체가 몇 개인지 알 수 없다. */
   const cap = { perTable: [], dropped: 0, droppedKeys: {}, eligible: 0, shown: 0, byTotal: false };
+  /* 목록·통계 조회에 실패한 테이블 — 그 테이블의 태그가 이번 결과에서 통째로 빠진다.
+     조용히 빼면 카드가 경고 없이 사라지므로 호출측이 알 수 있게 돌려준다(재적재는 옛 데이터를 지키고 다시 시도한다). */
+  const failed = [];
 
   for (const table of tables) {
     let tags, stats;
-    try { tags = await DB.listTags(table, TAG_SCAN_MAX); } catch (e) { continue; } // META 없으면 스킵
-    try { stats = await DB.tagStats(table); } catch (e) { stats = {}; }
+    try { tags = await DB.listTags(table, TAG_SCAN_MAX); } catch (e) { failed.push(table); continue; }
+    try { stats = await DB.tagStats(table); } catch (e) { failed.push(table); continue; }
     // 데이터가 없는 태그는 상한과 무관하게 원래 빠진다 — 잘린 것으로 세면 헛경고가 된다
     const cands = tags.filter(t => { const st = stats[t]; return st && st.count && st.maxMs; });
     const room = Math.max(0, MAX_EQUIPMENT - equipment.length);
@@ -154,7 +187,7 @@ export async function buildLiveData(E, tables, cfg) {
       });
     }
   }
-  if (!equipment.length) return { now: 0, equipment: [], events: [], reports: [], cap };
+  if (!equipment.length) return { now: 0, equipment: [], events: [], reports: [], cap, failed };
 
   /* 트렌드·스파크는 테이블 단위로 한 번에 받는다.
      태그별 개별 조회 대신 NAME IN 배치로 받는다 — 동시에 수백 쿼리가 나가면 서버가 직렬로
@@ -228,7 +261,10 @@ export async function buildLiveData(E, tables, cfg) {
         const spark = byTag[eq.name] || [];
         eq.sparkVals = spark.map(b => b.rms);
         const st = eq.stat;
-        const fsDt = VC.fsFromTimes(await DB.sampleTimes(eq.table, eq.name, st.maxMs - 1000, st.maxMs, 2000));
+        // 이 조회가 실패해도 아래 폴백으로 간다 — 태그 하나의 실패가 적재 전체를 무너뜨리지 않게
+        let times = null;
+        try { times = await DB.sampleTimes(eq.table, eq.name, st.maxMs - 1000, st.maxMs, 2000); } catch (e) { times = null; }
+        const fsDt = times ? VC.fsFromTimes(times) : 0;
         if (fsDt > 0) { eq.fs = fsDt; return; }
         const cnts = spark.map(b => b.cnt).filter(c => c > 0).sort((a, b) => a - b);
         if (cnts.length >= 5) eq.fs = cnts[Math.floor(cnts.length / 2)];
@@ -247,7 +283,7 @@ export async function buildLiveData(E, tables, cfg) {
     delete eq._unit; delete eq._span; delete eq._capSec; delete eq._from;
   });
 
-  return { now: nowMs, equipment, events: [], reports: [], cap };
+  return { now: nowMs, equipment, events: [], reports: [], cap, failed };
 }
 
 function fmtHz(hz) { return hz >= 1000 ? (hz / 1000).toFixed(1) + 'kHz' : Math.round(hz) + 'Hz'; }

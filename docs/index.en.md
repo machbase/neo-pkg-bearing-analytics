@@ -1,13 +1,19 @@
 ---
-title: Vibration Data Analysis
+title: Bearing Vibration Analysis
 weight: 10
 ---
 
-# Vibration Data Analysis
+# Bearing Vibration Analysis
 
 [한국어](./index.kr.md) | **English**
 
-neo-pkg-vibe-analytics turns vibration sensor data stored in Machbase Neo TAG tables into machine-health insight — without writing any SQL or TQL.
+neo-pkg-bearing-analytics turns vibration sensor data stored in Machbase Neo TAG tables into machine-health insight — without writing any SQL or TQL.
+
+Its core is **bearing fault diagnosis** — envelope demodulation, kurtogram band selection, and defect-frequency matching (BPFO / BPFI / BSF / FTF), verified against public run-to-failure datasets.
+
+**A severity grade rises only when there is evidence of a bearing defect.** High vibration on its own does not raise it — that is reported separately as **ISO 10816 severity**. When the spectrum shows common rotating-machinery patterns such as unbalance (1×), misalignment (2×) or mechanical looseness, the app **notes them as "suspected" but does not grade them**: without a phase (tacho) reference or an axial channel, those cannot be confirmed in principle. [What this tool does and does not do](./scope.en.md) draws the full boundary.
+
+> If the terms above (BPFO, envelope, kurtogram) are unfamiliar, read the [Glossary](./glossary.en.md) first — it is a single page.
 
 Open the app in your browser and every piece of equipment is graded against ISO 10816 severity zones in real time. From there you get per-tag waveform and spectrum analysis, rule-based fault diagnosis with recommended actions, and one-click analysis reports — all in one place.
 
@@ -15,11 +21,11 @@ Every analysis is **deterministic**. Grading, diagnosis, and reporting need no L
 
 ## Installation
 
-In the Machbase Neo left side panel, select `neo-pkg-vibe-analytics` from the package list and press `Install`. Wait for the installation to finish.
+In the Machbase Neo left side panel, select `neo-pkg-bearing-analytics` from the package list and press `Install`. Wait for the installation to finish.
 
 ### Uninstall
 
-Select `neo-pkg-vibe-analytics` in the left panel and press **Uninstall** to remove the package. Accumulated data — events, baselines, reports — is preserved. The timers this package registers (monitoring, band extraction, watchdog) live outside the package, so they are cleaned up during uninstall. That cleanup only tries the default port (5654), so if you run Neo on another port, turn alarms off in the app before uninstalling — the app removes the timers first.
+Select `neo-pkg-bearing-analytics` in the left panel and press **Uninstall** to remove the package. Accumulated data — events, baselines, reports — is preserved. The timers this package registers (monitoring, band extraction, watchdog) live outside the package, so they are cleaned up during uninstall. That cleanup only tries the default port (5654), so if you run Neo on another port, turn alarms off in the app before uninstalling — the app removes the timers first.
 
 ## How it works
 
@@ -83,15 +89,20 @@ Grading, diagnosis, and reporting all work even without a provider connected.
 
 The package creates and writes the following in Neo, automatically, as you save settings and run alarm evaluation.
 
-| Name | Kind | Contents |
-| :--- | :--- | :--- |
-| `NEO_VIBE_EVENTS` | LOG table | Event history (never auto-deleted) |
-| `NEO_VIBE_MONSTATE` | LOOKUP table | Per-tag evaluation state (continuity, re-notify) |
-| `NEO_VIBE_BASELINE` | LOOKUP table | Learned normal state (μ, σ) |
-| `NEO_VIBE_BAND` | TAG table | Band energy trend (when band monitoring is on) |
-| `/vibration-reports` | Files | Generated report HTML |
+Everything lives in a dedicated database, `NEO_BEARING_STORE`. An administrator creates it once and grants each account; after that the app creates its own tables.
 
-Settings are stored not in the DB but as JSON files inside the package (`cgi-bin/config/`) — one file each for data source, equipment, criteria, alarms, and LLM. Uninstalling the package removes those setting files, but the events, baselines, and reports above remain.
+| Name | Kind | Contents | Per-account separation |
+| :--- | :--- | :--- | :--- |
+| `SYS.EVENTS` | TAG table | Event history (never auto-deleted) | Row key `<account>:` |
+| `SYS.BAND` | TAG table | Band energy trend (when band extraction is on) | Row key `<account>:` |
+| `SYS.BASELINE` | LOOKUP table | Learned normal state (μ, σ) | Row key `<account>:` |
+| `SYS.MONSTATE` | LOOKUP table | Per-tag evaluation state (continuity, re-notify) | Row key `<account>:` |
+| `<account>.CONFIG` | LOOKUP table | All settings — data source, equipment, criteria, alarms, LLM keys | **One table per account** |
+| `<account>/vibration-reports/` | Files | Generated report HTML | One folder per account |
+
+The first four tables are shared: one copy, with the account encoded in each row's key. The UI shows names without the prefix. `CONFIG` is the exception — it holds LLM API keys and webhook URLs, and Machbase has no row-level permissions, so only a separate table keeps other accounts from reading it at all.
+
+Settings used to live in JSON files inside the package; they are now in the database. Uninstalling the package leaves settings, events, baselines, and reports in place.
 
 ## Basic workflow
 
@@ -108,6 +119,7 @@ Settings are stored not in the DB but as JSON files inside the package (`cgi-bin
 
 | Document | Contents |
 | :--- | :--- |
+| [Glossary](./glossary.en.md) | **Start here if vibration analysis is new** — BPFO, envelope, kurtogram, kurtosis |
 | [First setup](./first-setup.en.md) | Data source · equipment · criteria · LLM |
 | [Usage](./usage.en.md) | Monitoring · detail analysis · reports |
 | [Alarms & events](./alarms.en.md) | Monitoring modes · alarm settings · notification channels |
@@ -118,4 +130,4 @@ Settings are stored not in the DB but as JSON files inside the package (`cgi-bin
 
 ## Navigation
 
-- [Next: First setup](./first-setup.en.md)
+- [Next: Glossary](./glossary.en.md)
