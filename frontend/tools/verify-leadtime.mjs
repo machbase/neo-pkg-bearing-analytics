@@ -1,12 +1,6 @@
-// 리드타임과 오경보율 — 스냅샷 지표가 답하지 못하는 두 가지.
-//
-//   ① 고장까지 얼마나 남기고 첫 경보를 냈나 (P-F 구간 안이었나)
-//   ② 자산 하나당 얼마나 자주 헛경보인가
-//
-// 전 수명 시퀀스를 쓴다. NASA IMS는 **끝까지 건전했던 베어링**이 같은 시험대에 함께 돌아
-// 오경보의 분모가 제대로 잡힌다 — XJTU에는 그게 없어 "수명 앞 절반은 건전"이라는
-// 흔들리는 가정을 써야 했다. 수명도 시간(XJTU 2~8h)이 아니라 일(IMS 7~45d) 단위라,
-// "내륜이 늦게 잡히는 것"이 도구 탓인지 가속시험대 탓인지 여기서 갈린다.
+// 리드타임·오경보율 측정(전 수명 시퀀스) — ① 고장까지 남은 수명 대비 첫 경보 시점 ② 자산당 헛경보 빈도·발화 궤적
+// · 오경보 분모: 끝까지 건전한 베어링(NASA IMS), 건전 대조군 없는 세트(XJTU)는 수명 앞 50% 건전 가정
+// · 로컬 데이터셋 필요(D:/vibe-datasets/conv, 세트 없으면 건너뜀)
 //   node tools/verify-leadtime.mjs [데이터루트] [세트…]
 import fs from 'node:fs';
 import path from 'node:path';
@@ -31,8 +25,7 @@ const firstAt = (F, esc) => {
   for (let i = 0; i < F.length; i++) { if (F[i]) { hot++; if (hot >= esc) return i - esc + 1; } else hot = 0; }
   return -1;
 };
-/* 실제 알람 상태기 — escHold를 채워야 알리고, 재알림이 꺼져 있으면 등급 유지 중엔 다시 울지 않는다.
-   즉 계속 발화하는 태그는 알람 1건이지 매 판정마다 1건이 아니다. */
+/* 알람 상태기 — esc회 연속 발화 시 1건, rec회 연속 정상 전까지 재알림 없음(지속 발화 = 알람 1건) */
 const notifs = (F, from, to, esc, rec) => {
   let st = 0, hot = 0, cool = 0, n = 0;
   for (let i = from; i < to; i++) {
@@ -62,7 +55,7 @@ for (const ds of SETS) {
       const f = path.join(dir, r.name + '.f64');
       if (!fs.existsSync(f)) { hit.push(''); continue; }
       const v = readF64(f);
-      // 결함주파수는 명판 RPM 기준 — 실측 1×는 같은 오탐에서 검출을 54%→31%로 떨어뜨렸다(live.js 주석)
+      // 결함주파수는 명판 RPM 기준(live.js와 동일)
       const fr = r.rpm / 60, bf = VC.bearingFreqs(r.rpm, r.geo);
       const env = VC.envelopeSpectrum(v, r.fs, VC.envMaxFor(bf, fr, r.fs), VC.demodFixed(r.fs));
       const res = env.resTrue || env.res;

@@ -1,14 +1,8 @@
-/* 서버 감시 ISO 판정의 호출부 검사 — 오프라인(Neo 불필요). npm run smoke에 포함.
-
-   test-isottl.mjs가 isoValue 안쪽(캐시·TTL·건너뛰기)을 본다면, 여기는 그 결과를 받아
-   쓰는 호출부 네 줄을 본다. 판정을 실제로 좌우하는 것이 그 네 줄이기 때문이다:
-    · isoAt 스탬프 — "이번에 실제로 쟀는가"로만 찍어야 한다. 캐시에서 꺼낸 값에도 찍으면
-      판정 주기가 TTL보다 짧은 한 만료가 구조적으로 불가능해져 ISO 값이 첫 측정에 고정된다.
-    · hold 처리 — ISO를 못 쟀을 때 등급을 직전 값으로 유지한다. 전대역으로 갈아타면
-      대역제한으로 없애려던 부풀린 값이 판정에 들어가고, escHold가 0이면 즉시 알람이 나간다.
-
-   호출부도 생성된 TQL 원문에서 떼어내 실행한다 — 옮겨 적으면 생성기가 바뀌었을 때
-   테스트만 통과하고 실물이 깨진다. 발췌가 실패하면 조용히 통과하지 않고 예외로 터진다. */
+/* 서버 감시 ISO 판정의 호출부 — 생성된 TQL 원문에서 isoValue·호출부 줄을 떼어내 실행(옮겨 적지 않음)
+   · isoAt 스탬프는 실제로 잰 틱에만(캐시 틱에도 찍으면 TTL 만료가 불가능해져 첫 측정값에 고정)
+   · 못 쟀으면 등급을 직전 값으로 유지(hold) — 전대역으로 갈아타지 않음
+   · 초 버킷 지름길, 최악 판정 상태의 MONSTATE.VAL 폭 수용
+   오프라인(Neo 불필요) · npm run smoke 포함 */
 globalThis.window = globalThis;
 import fs2 from 'node:fs';
 const VC = (await import('../../cgi-bin/calc/calc.js')).default;
@@ -22,7 +16,7 @@ const chk = (ok, msg, extra) => {
 };
 
 const Z = [1.12, 2.80, 7.10];
-const TTL = 30000, TICK = 10000, FS = 25600;   // 주기가 TTL보다 짧은 것이 동결의 성립 조건
+const TTL = 30000, TICK = 10000, FS = 25600;   // 주기 < TTL — 캐시 틱이 생기는 조건
 const tql = buildMonitorTql({
   judgeSrc: judgeTick.toString(), isoSrc: VC.isoSrc(), isoTtlMs: TTL, isoWinMs: 1000, tickMs: TICK,
   tags: [{ tbl: 'T', tag: 'A', zones: Z, fs: FS, bl: null, bb: null }],
@@ -45,10 +39,8 @@ const line = (needle) => {
   if (!l) throw new Error('호출부 원문을 못 찾았다: ' + needle);
   return l.trim();
 };
-/* _lim0·_near는 계측 게이트 때문에 붙었다 — 베이스라인 쪽으로 알람이 날 상황이면 원본을 받아
-   계측을 같이 확인한다(ISO 계산과 같은 샘플). 호출부를 떼어낼 때 이 줄들도 같이 와야 한다. */
-/* rg는 이제 결함 패턴 게이트를 거친 값이라, 이 테스트가 보는 것은 그 앞의 ISO 등급(_isoG)이다.
-   게이트 자체는 test-sevgrade가 잠근다 — 여기서는 ISO 계산·보류·TTL만 본다. */
+/* 발췌 줄 — _lim0·_near(베이스라인 알람 근접 시 원본으로 계측 게이트 확인)도 포함
+   · 검사 대상은 패턴 게이트 앞의 ISO 등급(_isoG), 게이트 자체는 test-sevgrade 담당 */
 const BODY = [src, line('var _lim0 = baselineLimit('), line('var _near ='),
   line('var _iso = isoValue('), line('var _hold ='), line('var val = _hold ?'),
   line('var _isoG = _hold ?'), line('if(_iso.fresh){ res.next.iso')].join('\n');
@@ -56,7 +48,7 @@ const step = new Function('now', 'prev', 'db', 'esc', 'dtms', 'LAST', 'WVAL', 'i
   'baselineLimit', 'gateFromRaw', 'GRAW', 'impactEvidence', 'IMP',
   'srcOf', 't', 'wide', 'z', 'key', 'res', BODY + '\nreturn {val:val, rg:_isoG, hold:_hold, fresh:_iso.fresh, next:res.next};');
 
-// ── 스텁 — DB만 갈아끼운다 ────────────────────────────────────────────────
+// ── 스텁 — DB만 교체 ───────────────────────────────────────────────────────
 const KEY = 'T:A', TAG = { tbl: 'T', tag: 'A', fs: FS, zones: Z };
 let queries = 0, mode = 'ok', measured = 0;
 const db = { query() {
@@ -74,7 +66,7 @@ const run = (now, prev, buckets, wide, iso) => {
 };
 const loud = [{ rms: 99, cnt: FS }];      // 지름길이 끼어들지 않게
 
-// ── 스탬프: 실제로 잰 틱에만 찍는다 ───────────────────────────────────────
+// ── 스탬프: 실제로 잰 틱에만 ───────────────────────────────────────────────
 {
   const first = run(0, null, loud, 4.0, 1.5);
   chk(first.fresh === true && first.next.isoAt === 0, '첫 틱은 실측 → isoAt 기록', JSON.stringify(first.next));
@@ -92,10 +84,10 @@ const loud = [{ rms: 99, cnt: FS }];      // 지름길이 끼어들지 않게
     '갱신된 값으로 등급이 움직인다(주의 → 위험)', 'iso ' + expired.next.iso + ' 등급 ' + expired.rg);
 }
 
-// ── hold: 못 쟀으면 등급을 직전 값으로 유지한다 ───────────────────────────
+// ── hold: 못 쟀으면 등급을 직전 값으로 유지 ─────────────────────────────────
 {
   const WIDE = 4.77;                                   // 전대역은 부풀어 위험 존 · 직전 ISO는 1.60(주의)
-  const prev = { g: 1, iso: 1.60, isoAt: -TTL * 2 };   // TTL이 지난 상태라 재측정을 시도한다
+  const prev = { g: 1, iso: 1.60, isoAt: -TTL * 2 };   // TTL 지난 상태 — 재측정 시도
   chk(VC.gradeFor(WIDE, Z) === 2, '전제: 전대역 값을 그대로 쓰면 위험으로 읽힌다');
   for (const [m, name] of [['throw', '조회 실패'], ['short', '표본 부족']]) {
     mode = m;
@@ -107,14 +99,14 @@ const loud = [{ rms: 99, cnt: FS }];      // 지름길이 끼어들지 않게
     chk(r.next.iso === prev.iso && r.next.isoAt === prev.isoAt,
       `${name}: 폴백값을 캐시에 남기지 않는다`, JSON.stringify(r.next));
   }
-  // 직전 상태가 없으면 올릴 근거도 없다 — 양호로 두고 다음 틱을 기다린다
+  // 직전 상태가 없으면 양호로 두고 다음 틱 대기
   mode = 'throw';
   const cold = run(0, null, loud, WIDE, 9);
   mode = 'ok';
   chk(cold.rg === 0, '직전 상태가 없으면 등급을 올리지 않는다', '등급 ' + cold.rg);
 }
 
-// ── 지름길: 호출부가 초 버킷을 상한으로 넘긴다 ────────────────────────────
+// ── 지름길: 호출부가 초 버킷을 상한으로 전달 ────────────────────────────────
 {
   queries = 0;
   run(0, null, [{ rms: 0.3, cnt: FS }, { rms: 0.4, cnt: FS }], 0.35, 1.0);
@@ -131,10 +123,8 @@ const loud = [{ rms: 99, cnt: FS }];      // 지름길이 끼어들지 않게
   chk(r.rg === 2, '그 급상승이 등급에 반영된다', '등급 ' + r.rg);
 }
 
-/* 판정 상태는 MONSTATE.VAL에 encodeURIComponent(JSON)로 들어간다. 넘치면 **잘린 채 저장되고**,
-   잘린 값은 dec()가 null로 떨어뜨려 그 태그만 직전 상태를 영영 못 쌓는다 — 에러도 로그도 없다.
-   한글은 인코딩되면 글자당 9자라 사유 문장 하나가 260자다. 폭을 줄이거나 상태에 산문을 더하면
-   여기서 걸린다. 파생 가능한 문장(충격성 text 등)은 상태에 넣지 말 것. */
+/* 판정 상태는 MONSTATE.VAL에 encodeURIComponent(JSON)로 저장 — 넘치면 잘린 채 저장돼 그 태그 상태가 조용히 소실
+   · 파생 가능한 문장(충격성 text 등)은 상태에 넣지 않음 */
 {
   const SQL = (await import('../../cgi-bin/db/sql.js')).default;
   const ddl = SQL.monCreateTables().filter((s) => s.indexOf('MONSTATE') >= 0)[0];
@@ -159,11 +149,11 @@ const loud = [{ rms: 99, cnt: FS }];      // 지름길이 끼어들지 않게
   const encLen = encodeURIComponent(JSON.stringify(worst)).split("'").join('%27').length;
   chk(encLen < CAP, '최악 상태도 VAL 폭 안에 들어간다 — 넘치면 조용히 잘린다', encLen + ' / ' + CAP);
 
-  // 파생 가능한 산문을 상태에 넣지 않는가 — text 하나가 260자다
+  // 파생 가능한 산문은 상태 제외 확인
   chk(tql.indexOf('res.next.im={v:{crest:') >= 0, '충격성 근거는 숫자만 저장한다 (text·kind는 파생물)');
   chk(tql.indexOf('res.next.im={v:IMP[key]') < 0, '객체를 통째로 저장하지 않는다');
 
-  // DDL만 넓혀서는 기존 설치가 안 바뀐다 — CREATE 실패를 삼키므로 폭 검사가 함께 있어야 한다
+  // 기존 설치는 DDL만으로 안 바뀜(CREATE 실패를 삼킴) — 폭 검사·확장 훅 필요
   const dbSrc = fs2.readFileSync(new URL('../../cgi-bin/db/db.js', import.meta.url), 'utf8');
   chk(dbSrc.indexOf('.then(widenMonState)') >= 0, '자동 생성 훅이 폭 검사를 함께 돈다');
   chk(dbSrc.indexOf('MONSTATE_VAL_MIN = ' + CAP) >= 0, '마이그레이션 기준값이 DDL 폭과 같다', 'MONSTATE_VAL_MIN vs ' + CAP);

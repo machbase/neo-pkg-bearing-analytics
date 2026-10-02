@@ -1,12 +1,12 @@
 // chart/chart.js — 캔버스 차트 렌더러 + 숫자/시간 포맷터 + 팔레트
-// 데이터는 받기만 하고 만들지 않는다. DOM(canvas) 의존 — 브라우저 전용.
+// 렌더 전용(데이터 생성 없음) · 그리기 함수만 DOM(canvas) 의존 — 포맷·시간대 함수는 node에서도 동작
 (function (root, factory) {
   if (typeof module === 'object' && module.exports) module.exports = factory();
   else root.VibeChart = factory();
 })(typeof self !== 'undefined' ? self : this, function () {
   'use strict';
 
-  /* ---------------- Status palette (R-2 zone 색상 재사용) ---------------- */
+  /* ---------------- 등급 색(양호·주의·위험·심각) — 화면·리포트 공용 ---------------- */
   var STATUS = [
     { key: 'Good', ko: '양호', color: '#3aa76d', soft: 'rgba(58,167,109,0.14)' },
     { key: 'Warning', ko: '주의', color: '#d99a2b', soft: 'rgba(217,154,43,0.15)' },
@@ -25,10 +25,68 @@
     return v.toFixed(3);
   }
   function z2(n) { return n < 10 ? '0' + n : '' + n; }
-  function fmtClock(ms) { var d = new Date(ms); return z2(d.getHours()) + ':' + z2(d.getMinutes()); }
-  function fmtMD(ms) { var d = new Date(ms); return (d.getMonth() + 1) + '/' + d.getDate(); }
-  function fmtDT(ms) { var d = new Date(ms); return d.getFullYear() + '-' + z2(d.getMonth() + 1) + '-' + z2(d.getDate()) + ' ' + z2(d.getHours()) + ':' + z2(d.getMinutes()); }
-  function fmtFull(ms) { var d = new Date(ms); return fmtDT(ms) + ':' + z2(d.getSeconds()) + '.' + String(d.getMilliseconds()).padStart(3, '0'); }
+
+  /* ---------------- 표시 시간대 ----------------
+     계산·조회는 전부 에포크 ms, 표시·날짜 경계(하루 시작·달력)만 이 시간대로 변환
+     ''이면 브라우저 시간 */
+  var _tz = '', _tzFmt = {};
+  var WD_IDX = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 };
+  function zoneOk(z) { try { new Intl.DateTimeFormat('en-US', { timeZone: z }); return true; } catch (e) { return false; } }
+  function setZone(z) { _tz = (z && zoneOk(z)) ? String(z) : ''; }
+  function getZone() { return _tz; }
+  // 실제 적용 중인 IANA 이름(브라우저 시간이면 브라우저가 알려 주는 이름)
+  function zoneName() {
+    if (_tz) return _tz;
+    try { return Intl.DateTimeFormat().resolvedOptions().timeZone || ''; } catch (e) { return ''; }
+  }
+  // ms → 그 시간대 달력 값 {Y, M(1~12), D, h, m, s, ms, wd(0=일)}
+  function parts(ms) {
+    var d = new Date(ms);
+    if (!_tz) return { Y: d.getFullYear(), M: d.getMonth() + 1, D: d.getDate(), h: d.getHours(), m: d.getMinutes(), s: d.getSeconds(), ms: d.getMilliseconds(), wd: d.getDay() };
+    var f = _tzFmt[_tz] || (_tzFmt[_tz] = new Intl.DateTimeFormat('en-US', { timeZone: _tz, hourCycle: 'h23',
+      year: 'numeric', month: 'numeric', day: 'numeric', hour: 'numeric', minute: 'numeric', second: 'numeric', weekday: 'short' }));
+    var o = {};
+    f.formatToParts(d).forEach(function (p) { o[p.type] = p.value; });
+    return { Y: +o.year, M: +o.month, D: +o.day, h: (+o.hour) % 24, m: +o.minute, s: +o.second, ms: d.getMilliseconds(), wd: WD_IDX[o.weekday] };
+  }
+  // 그 순간의 UTC 오프셋(ms, 동쪽 +)
+  function offsetMs(ms) {
+    if (!_tz) return -new Date(ms).getTimezoneOffset() * 60000;
+    var p = parts(ms), base = Math.floor(ms / 1000) * 1000;
+    return Date.UTC(p.Y, p.M - 1, p.D, p.h, p.m, p.s) - base;
+  }
+  // 그 시간대 달력 값 → ms(월 1~12, 범위 밖 값은 Date처럼 이월). DST 경계는 오프셋 두 번 계산으로 보정
+  function makeTime(Y, M, D, h, m, s, msec) {
+    if (!_tz) return new Date(Y, M - 1, D, h || 0, m || 0, s || 0, msec || 0).getTime();
+    var guess = Date.UTC(Y, M - 1, D, h || 0, m || 0, s || 0, msec || 0);
+    var t = guess - offsetMs(guess);
+    return guess - offsetMs(t);
+  }
+  // 'YYYY-MM-DD[ T]HH:MM[:SS[.mmm]]' → ms(그 시간대 기준), 형식이 아니면 NaN
+  function parseDT(s) {
+    var m = /^(\d{4})-(\d{1,2})-(\d{1,2})(?:[ T](\d{1,2}):(\d{2})(?::(\d{2})(?:\.(\d{1,3}))?)?)?/.exec(String(s || ''));
+    if (!m) return NaN;
+    return makeTime(+m[1], +m[2], +m[3], +(m[4] || 0), +(m[5] || 0), +(m[6] || 0), m[7] ? +(m[7] + '00').slice(0, 3) : 0);
+  }
+  function startOfDay(ms) { var p = parts(ms); return makeTime(p.Y, p.M, p.D, 0, 0, 0, 0); }
+  // 'UTC+09:00' 형식
+  function offsetLabel(ms) {
+    var o = Math.round(offsetMs(ms == null ? Date.now() : ms) / 60000), a = Math.abs(o);
+    return 'UTC' + (o < 0 ? '-' : '+') + z2(Math.floor(a / 60)) + ':' + z2(a % 60);
+  }
+
+  function fmtClock(ms) { var p = parts(ms); return z2(p.h) + ':' + z2(p.m); }
+  function fmtMD(ms) { var p = parts(ms); return p.M + '/' + p.D; }
+  function fmtDT(ms) { var p = parts(ms); return p.Y + '-' + z2(p.M) + '-' + z2(p.D) + ' ' + z2(p.h) + ':' + z2(p.m); }
+  function fmtFull(ms) { var p = parts(ms); return fmtDT(ms) + ':' + z2(p.s) + '.' + String(p.ms).padStart(3, '0'); }
+  // 시간축 눈금 — 구간 길이에 맞춘 단위
+  function fmtTick(ms, span) {
+    var p = parts(ms);
+    if (span < 20 * 60000) return z2(p.h) + ':' + z2(p.m) + ':' + z2(p.s);
+    if (span < 86400000) return z2(p.h) + ':' + z2(p.m);
+    if (span < 3 * 86400000) return p.M + '/' + p.D + ' ' + z2(p.h) + ':' + z2(p.m);
+    return p.M + '/' + p.D;
+  }
   function ago(ms, now) {
     var s = Math.max(0, Math.round((now - ms) / 1000));
     if (s < 3) return '방금'; if (s < 60) return s + '초 전';
@@ -37,10 +95,8 @@
     return Math.round(s / 86400) + '일 전';
   }
 
-  /* 스파크라인은 구간의 최소~최대를 높이에 꽉 채운다. 그래서 변동이 사실상 없는 신호도 잡음이
-     전체 진폭으로 늘어나 살아 있는 것처럼 보인다 — 죽은 센서(상수 출력)가 그렇게 그려지면
-     화면이 정반대를 말하는 셈이다. 변동이 수준 대비 무시할 만하면 평평하게 그린다
-     (기준 0.2%는 계측 게이트의 플랫라인 판정과 같은 값). */
+  /* 스파크라인 — 최소~최대를 높이에 꽉 채움. 변동이 수준 대비 무시할 만하면 평평하게(죽은 센서 잡음 확대 방지)
+     기준 0.2% = 계측 게이트 플랫라인 판정과 같은 값 */
   function sparkPath(vals, w, h, pad) {
     var mn = Math.min.apply(null, vals), mx = Math.max.apply(null, vals);
     var peak = Math.max(Math.abs(mn), Math.abs(mx));
@@ -80,8 +136,7 @@
     var mn = Math.min.apply(null, vals), mx = Math.max.apply(null, vals);
     if (o.refLines) o.refLines.forEach(function (r) { mx = Math.max(mx, r.val); });
     var m = (mx - mn) * 0.12 || 1; mn = o.zeroBase ? 0 : mn - m; mx += m; var range = mx - mn || 1, step = cw / (n - 1);
-    // 시간축(선택): times + xFrom/xTo를 주면 각 점을 실제 시각 위치에 배치 → 데이터 없는 구간이 빈 채로 보인다.
-    // 없으면 기존처럼 등간격(인덱스) 배치.
+    // 시간축(선택): times + xFrom/xTo 있으면 실제 시각 위치(데이터 없는 구간은 빈 채로), 없으면 등간격(인덱스)
     var tAxis = !!(o.times && o.times.length === n && o.xTo > o.xFrom);
     var X = tAxis
       ? function (i) { return pad.l + cw * (o.times[i] - o.xFrom) / (o.xTo - o.xFrom); }
@@ -111,15 +166,9 @@
     // x labels
     ctx.fillStyle = CC.axis; ctx.font = '9px ' + MONO;
     if (tAxis) {
-      // 시간축: 데이터 위치가 아니라 xFrom~xTo를 균등 분할한 눈금에 라벨 → 데이터가 한쪽에 몰려도 안 겹침
+      // 시간축: xFrom~xTo 균등 분할 눈금에 라벨(데이터가 몰려도 안 겹침)
       var span = o.xTo - o.xFrom, TICKS = Math.max(2, Math.min(6, Math.floor(cw / 96)));
-      var tf = function (ms) {
-        var d = new Date(ms);
-        if (span < 20 * 60000) return z2(d.getHours()) + ':' + z2(d.getMinutes()) + ':' + z2(d.getSeconds());
-        if (span < 86400000) return z2(d.getHours()) + ':' + z2(d.getMinutes());
-        if (span < 3 * 86400000) return (d.getMonth() + 1) + '/' + d.getDate() + ' ' + z2(d.getHours()) + ':' + z2(d.getMinutes());
-        return (d.getMonth() + 1) + '/' + d.getDate();
-      };
+      var tf = function (ms) { return fmtTick(ms, span); };
       for (var k = 0; k <= TICKS; k++) {
         var lt = tf(o.xFrom + span * (k / TICKS));
         if (k === 0) { ctx.textAlign = 'left'; ctx.fillText(lt, pad.l, H - pad.b + 16); }
@@ -166,10 +215,9 @@
     var n = o.xLabels.length; ctx.clearRect(0, 0, W, H); if (n < 2) return;
     var mn = Infinity, mx = -Infinity;
     o.series.forEach(function (s) { for (var i2 = 0; i2 < s.vals.length; i2++) { if (s.vals[i2] < mn) mn = s.vals[i2]; if (s.vals[i2] > mx) mx = s.vals[i2]; } });
-    /* 그릴 값이 하나도 없으면 축을 만들 수 없다 — mn/mx가 초기값 그대로라 눈금이 -Infinity가 된다.
-       계열을 전부 끄거나(범례) 걸러낸 경우(배수 축에서 미학습 계열)가 여기로 온다. */
+    /* 그릴 값 없음(범례로 계열 전부 끔·미학습 계열 필터) — 기준선 있으면 0 축, 없으면 중단(눈금 -Infinity 방지) */
     if (!isFinite(mn) || !isFinite(mx)) { if (!o.refLines) return; mn = 0; mx = 0; }
-    // 기준선도 축 범위에 넣는다 — 안 그러면 모든 계열이 기준선 아래일 때 선이 화면 밖으로 나간다
+    // 기준선도 축 범위에 포함(계열이 모두 기준선 아래여도 기준선 표시)
     if (o.refLines) o.refLines.forEach(function (r) { mx = Math.max(mx, r.val); });
     var m = (mx - mn) * 0.12 || 1; mn = 0; mx += m; var range = mx - mn || 1, step = cw / (n - 1);
     // 시간축(선택) — drawLine과 동일 규칙: times+xFrom/xTo가 오면 실제 시각 위치, 없으면 등간격
@@ -193,20 +241,14 @@
       var vv = mDense ? movAvg(s.vals, mW) : s.vals;
       ctx.beginPath();
       for (var b = 0; b < n; b++) { var x = X(b), yy = pad.t + ch - (vv[b] - mn) / range * ch; if (b === 0) ctx.moveTo(x, yy); else ctx.lineTo(x, yy); }
-      ctx.strokeStyle = s.color; ctx.lineWidth = 1.6; ctx.stroke();
+      ctx.strokeStyle = s.color; ctx.lineWidth = 1.6; ctx.setLineDash(s.dash || []); ctx.stroke(); ctx.setLineDash([]);
     });
     ctx.restore();
     ctx.fillStyle = CC.axis; ctx.font = '9px ' + MONO;
     if (tAxis) {
       // 시간축: xFrom~xTo 균등 분할 눈금 (데이터가 몰려도 안 겹침) — drawLine과 동일
       var span = o.xTo - o.xFrom, TICKS = Math.max(2, Math.min(6, Math.floor(cw / 96)));
-      var tf = function (ms) {
-        var d = new Date(ms);
-        if (span < 20 * 60000) return z2(d.getHours()) + ':' + z2(d.getMinutes()) + ':' + z2(d.getSeconds());
-        if (span < 86400000) return z2(d.getHours()) + ':' + z2(d.getMinutes());
-        if (span < 3 * 86400000) return (d.getMonth() + 1) + '/' + d.getDate() + ' ' + z2(d.getHours()) + ':' + z2(d.getMinutes());
-        return (d.getMonth() + 1) + '/' + d.getDate();
-      };
+      var tf = function (ms) { return fmtTick(ms, span); };
       for (var k = 0; k <= TICKS; k++) {
         var lt = tf(o.xFrom + span * (k / TICKS));
         if (k === 0) { ctx.textAlign = 'left'; ctx.fillText(lt, pad.l, H - pad.b + 16); }
@@ -250,9 +292,7 @@
     var r = drawLine(canvas, { values: o.mags, xLabels: o.freqs.map(function (f) { return f >= 1000 ? (f / 1000).toFixed(1) + 'k' : Math.round(f) + ''; }), tipLabels: o.freqs.map(function (f) { return f.toFixed(1) + ' Hz'; }), color: SERIES.fft, height: o.height, unit: '', zeroBase: true, lw: 1.4, padR: 16 }, CC);
     if (!r || !o.markers) return r;
     var ctx = canvas.getContext('2d'), dpr = window.devicePixelRatio || 1; ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    /* 가로축은 넘어온 구간 [freqs[0], freqs[끝]]이다 — 확대하면 0 Hz가 아니라 잘라낸 첫 주파수에서 시작한다.
-       선(drawLine)은 점 i를 등간격으로 놓고 주파수도 등간격이라, 마커를 같은 비율로 놓아야 해당 빈 위에 선다.
-       0 Hz 기준으로 놓으면 확대했을 때 마커가 실제 피크와 어긋나고 구간 밖 마커가 안에 그려진다. */
+    /* 가로축 = 넘어온 구간 [freqs[0], freqs[끝]](확대 시 0 Hz 아님) — 마커도 같은 비율로 배치해야 해당 빈 위에 섬 */
     var G = r.geom, fmaxIdx = o.freqs.length - 1, maxF = o.freqs[fmaxIdx], minF = o.freqs[0], spanF = maxF - minF;
     var mkSorted = o.markers.slice().sort(function (a, b) { return a.freq - b.freq; }), prevX = -999, off = 0;
     ctx.save(); ctx.beginPath(); ctx.rect(G.pad.l, G.pad.t - 1, G.cw, G.ch + 2); ctx.clip();
@@ -328,14 +368,13 @@
   }
 
   /* ---- zoom/pan (휠 확대 · 드래그 이동 · 더블클릭 리셋) ----
-     확대 구간은 캔버스에 남는다 — 같은 데이터(key·길이)를 다시 그릴 때는 그 구간을 이어받는다.
-     화면은 라이브 갱신 때마다 통째로 다시 그려지므로, 이어받지 않으면 확대한 채로 볼 수가 없다. */
+     확대 구간은 캔버스에 보존 — 같은 데이터(key·길이) 재그리기 시 이어받음(라이브 갱신 중 확대 유지) */
   function zoomRange(canvas, fullLen, key) {
     var p = canvas && canvas._zoom;
     if (p && p.fullLen === fullLen && p.key === key && (p.st.s > 0 || p.st.e < fullLen)) return { s: p.st.s, e: p.st.e };
     return { s: 0, e: fullLen };
   }
-  // 그리기 + 확대/이동 부착을 한 번에 — 이어받을 구간이 있으면 전체가 아니라 그 구간으로 그린다
+  // 그리기 + 확대/이동 부착 — 이어받을 구간 있으면 그 구간으로 그림
   function zoomDraw(canvas, fullLen, drawFn, key) {
     if (!canvas) return;
     var r = zoomRange(canvas, fullLen, key);
@@ -345,14 +384,15 @@
   function addZoom(canvas, fullLen, drawFn, key) {
     if (!canvas) return;
     var st = zoomRange(canvas, fullLen, key);
-    if (canvas._zoom) { var z = canvas._zoom; canvas.removeEventListener('wheel', z.w); canvas.removeEventListener('dblclick', z.d); canvas.removeEventListener('mousedown', z.md); window.removeEventListener('mousemove', z.mm); window.removeEventListener('mouseup', z.mu); }
+    if (canvas._zoom) { var z = canvas._zoom; canvas.removeEventListener('wheel', z.w); canvas.removeEventListener('dblclick', z.d); canvas.removeEventListener('mousedown', z.md); z.mu(); }
     function onWheel(ev) { ev.preventDefault(); var r = canvas.getBoundingClientRect(), mx = ev.clientX - r.left, cw = r.width - 74, n = st.e - st.s, ratio = Math.max(0, Math.min(1, (mx - 58) / cw)), zf = ev.deltaY > 0 ? 1.3 : 0.75, nn = Math.round(n * zf); if (nn < 6) nn = 6; if (nn >= fullLen) { st.s = 0; st.e = fullLen; drawFn(0, fullLen); return; } var center = st.s + Math.round(n * ratio), ns = Math.round(center - nn * ratio); if (ns < 0) ns = 0; var ne = ns + nn; if (ne > fullLen) { ne = fullLen; ns = ne - nn; } st.s = Math.max(0, ns); st.e = ne; drawFn(st.s, st.e); }
     function onDbl() { st.s = 0; st.e = fullLen; drawFn(0, fullLen); }
     var drag = { on: false };
-    function onDown(ev) { if (st.e - st.s >= fullLen) return; drag.on = true; drag.x = ev.clientX; drag.s = st.s; drag.e = st.e; canvas.style.cursor = 'grabbing'; }
+    /* 창(window) 리스너는 끄는 동안만 — 상시 부착하면 캔버스가 사라져도(탭 전환) 창이 붙잡아 차트 데이터와 함께 누적 */
+    function onDown(ev) { if (st.e - st.s >= fullLen) return; drag.on = true; drag.x = ev.clientX; drag.s = st.s; drag.e = st.e; canvas.style.cursor = 'grabbing'; window.addEventListener('mousemove', onMove); window.addEventListener('mouseup', onUp); }
     function onMove(ev) { if (!drag.on) return; var r = canvas.getBoundingClientRect(), cw = r.width - 74, n = drag.e - drag.s, shift = Math.round(-(ev.clientX - drag.x) / cw * n), ns = drag.s + shift, ne = drag.e + shift; if (ns < 0) { ns = 0; ne = n; } if (ne > fullLen) { ne = fullLen; ns = fullLen - n; } st.s = ns; st.e = ne; drawFn(ns, ne); }
-    function onUp() { drag.on = false; canvas.style.cursor = 'crosshair'; }
-    canvas.addEventListener('wheel', onWheel, { passive: false }); canvas.addEventListener('dblclick', onDbl); canvas.addEventListener('mousedown', onDown); window.addEventListener('mousemove', onMove); window.addEventListener('mouseup', onUp);
+    function onUp() { drag.on = false; canvas.style.cursor = 'crosshair'; window.removeEventListener('mousemove', onMove); window.removeEventListener('mouseup', onUp); }
+    canvas.addEventListener('wheel', onWheel, { passive: false }); canvas.addEventListener('dblclick', onDbl); canvas.addEventListener('mousedown', onDown);
     canvas._zoom = { fullLen: fullLen, key: key, st: st, w: onWheel, d: onDbl, md: onDown, mm: onMove, mu: onUp };
     canvas.style.cursor = 'crosshair';
   }
@@ -360,6 +400,8 @@
   return {
     STATUS: STATUS, SERIES: SERIES,
     fmt: fmt, fmtClock: fmtClock, fmtMD: fmtMD, fmtDT: fmtDT, fmtFull: fmtFull, ago: ago,
+    setZone: setZone, getZone: getZone, zoneName: zoneName, zoneOk: zoneOk, parts: parts, offsetMs: offsetMs, offsetLabel: offsetLabel,
+    makeTime: makeTime, parseDT: parseDT, startOfDay: startOfDay, fmtTick: fmtTick,
     sparkPath: sparkPath,
     drawLine: drawLine, drawBar: drawBar, drawMultiLine: drawMultiLine, drawHeat: drawHeat,
     drawFFT: drawFFT, drawForecast: drawForecast, addTip: addTip, addZoom: addZoom, zoomDraw: zoomDraw

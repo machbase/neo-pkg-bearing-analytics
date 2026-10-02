@@ -1,14 +1,9 @@
-// 격자 점수 통계량 비교 — 지금은 "자리별 최댓값의 **평균** ÷ 전역 중앙값"이다.
-//
-// 평균이라 **무정보 자리가 점수를 끌어내린다.** 내륜은 변조로 에너지가 BPFI ± k·1×에 퍼져
-// 자리가 많은 쪽인데, 자리가 많을수록 손해 보는 통계량을 쓰고 있다(구조적 역차별).
-// 그리고 분모가 **전역** 중앙값이라 envMaxFor가 바꾸는 상한에 임계 4.0의 의미가 끌려다닌다.
-//
-// 대안 셋을 같은 오탐률에 고정하고 비교한다:
-//   mean  — 현행
-//   local — 자리별로 **국소** 잡음층(주변 ±64빈 중앙값) 대비 비를 내고 평균
-//   fisher— 자리별 p값(국소 잡음층 지수분포 가정)을 Fisher로 결합 → −2Σln p
-//   stouf — 자리별 z를 Stouffer로 결합 → Σz/√n
+// 격자 점수 통계량 비교 — 같은 오탐률(4/124)에서 검출·종류 적중·내륜 검출 측정
+//   mean  — 자리별 최댓값 평균 ÷ 전역 중앙값(무정보 자리가 점수를 끌어내려 자리 많은 내륜에 불리, 분모가 envMaxFor 상한에 좌우)
+//   local — 자리별 국소 잡음층(주변 ±64빈 중앙값) 대비 비의 평균
+//   fisher— 자리별 p값(국소 잡음층 지수분포 가정) Fisher 결합 → −2Σln p
+//   stouf — 자리별 z Stouffer 결합 → Σz/√n
+// · 로컬 데이터셋 필요(D:/vibe-datasets/conv, 없으면 건너뜀)
 import fs from 'node:fs';
 import path from 'node:path';
 const VC = (await import('../../cgi-bin/calc/calc.js')).default;
@@ -22,7 +17,7 @@ const readF64 = (p, n) => {
 const KEYMAP = { BPFO: 'OR', BPFI: 'IR', BSF: 'BALL' };
 const H = 4, S = 1, TOL = 0.01, LOCAL_BINS = 64;
 
-/* 정규분포 상측 꼬리의 근사 역함수 — p→z. Acklam 유사, 꼬리 정확도는 이 용도에 충분하다. */
+/* 정규분포 상측 꼬리 근사 역함수(p→z) — Acklam 유사, 이 용도엔 꼬리 정확도 충분 */
 function pToZ(p) {
   if (p <= 0) return 8; if (p >= 1) return -8;
   const a = [-39.696830, 220.946098, -275.928510, 138.357751, -30.664798, 2.506628];
@@ -39,7 +34,7 @@ function pToZ(p) {
   return -x;   // 상측 꼬리
 }
 
-/** 한 후보(중심 f, 측대역 간격 delta)의 자리별 (피크, 국소 잡음층)을 모은다 */
+/** 한 후보(중심 f, 측대역 간격 delta)의 자리별 (피크, 국소 잡음층) 수집 */
 function sites(sp, f, delta, res) {
   const top = sp.freqs[sp.freqs.length - 1], out = [];
   for (let h = 1; h <= H; h++) {
@@ -53,7 +48,7 @@ function sites(sp, f, delta, res) {
         if (Math.abs(sp.freqs[j] - t) <= tol && sp.mags[j] > peak) { peak = sp.mags[j]; ci = j; }
       }
       if (ci < 0) { out.push({ peak: 0, loc: 0 }); continue; }
-      // 국소 잡음층 — 표적 주변 창의 중앙값. 표적 자신은 빼야 잡음층이 부풀지 않는다.
+      // 국소 잡음층 — 표적 주변 창의 중앙값(표적 자신 제외로 잡음층 부풀림 방지)
       const lo = Math.max(0, ci - LOCAL_BINS), hi = Math.min(sp.mags.length - 1, ci + LOCAL_BINS);
       const w = [];
       for (let j = lo; j <= hi; j++) if (Math.abs(sp.freqs[j] - t) > tol) w.push(sp.mags[j]);
@@ -65,11 +60,11 @@ function sites(sp, f, delta, res) {
 }
 
 const STATS = {
-  // 현행 — 전역 중앙값 대비 자리별 최댓값의 평균
+  // 전역 중앙값 대비 자리별 최댓값의 평균
   mean: (st, gmed) => st.length ? st.reduce((a, s) => a + s.peak, 0) / st.length / Math.max(gmed, 1e-12) : 0,
   local: (st) => { const v = st.filter((s) => s.loc > 0); return v.length ? v.reduce((a, s) => a + s.peak / s.loc, 0) / v.length : 0; },
-  /* 포락선 잡음층의 진폭은 대략 지수분포다 → P(peak > x) ≈ exp(-x/μ), μ는 국소 중앙값/ln2.
-     무정보 자리는 p≈0.5라 −2ln p ≈ 1.4로 **중립**이 된다 — 평균처럼 끌어내리지 않는다. */
+  /* 포락선 잡음층 진폭은 대략 지수분포 → P(peak > x) ≈ exp(-x/μ), μ = 국소 중앙값/ln2
+     무정보 자리는 p≈0.5 → −2ln p ≈ 1.4로 중립(평균처럼 끌어내리지 않음) */
   fisher: (st) => {
     const v = st.filter((s) => s.loc > 0); if (!v.length) return 0;
     let sum = 0;

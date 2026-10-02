@@ -1,11 +1,7 @@
-/* 감시 목록 밖 태그 정리 — 오프라인(Neo 불필요). npm run smoke에 포함.
-
-   기간 삭제로는 못 하는 일이다: 설비 하나를 철거해 그 이력만 지우려 해도 기간으로 지우면
-   멀쩡한 다른 태그까지 같이 사라진다. 그래서 태그별 삭제가 필요한데, 그러려면 먼저
-   "어느 태그가 얼마나 차지하나"를 알아야 한다(총계로는 대상을 고를 수 없다).
-
-   삭제는 데이터 → 태그 이름(메타) 순이다. 메타 정리 SQL이 "데이터가 하나도 안 남은 이름"만
-   지우므로 순서가 바뀌면 아무것도 안 지워지고 철거한 설비가 목록에 영영 남는다. */
+/* 감시 목록 밖 태그 정리 — 오프라인(Neo 불필요) · npm run smoke 포함
+   · 태그별 보유량 집계(BAND 계열 합산·이벤트), 한쪽 조회 실패 시 다른 쪽 유지
+   · 태그별 삭제: 저장 계열 전부, 데이터 → 태그 이름(메타) 순(메타 정리 SQL이 데이터 없는 이름만 지움)
+   · 화면에 고아만 보유량 순 표시, 정리 후 판정 캐시·현황 갱신 */
 globalThis.window = globalThis;
 
 const DB = (await import('../../cgi-bin/db/db.js')).default;
@@ -14,7 +10,7 @@ const VC = (await import('../../cgi-bin/calc/calc.js')).default;
 
 let SQLS = [];                 // 실행된 SQL 순서
 let ROWS = {};                 // 패턴 → 반환 행
-DB.q = null;                   // db.js 내부 q는 못 갈아끼운다 — fetch를 막는다
+DB.q = null;                   // db.js 내부 q는 교체 불가 — fetch를 가로챔
 globalThis.fetch = (url) => {
   const sql = decodeURIComponent(String(url).replace(/^[^?]*\?q=/, '').split('&')[0]);
   SQLS.push(sql);
@@ -34,8 +30,7 @@ const chk = (ok, msg, extra) => {
 };
 
 // ── 태그별 보유량 집계 ─────────────────────────────────────────────────────
-/* BAND의 NAME은 '테이블:태그:계열'이라 태그 하나가 계열 십여 개를 갖는다.
-   묶지 않으면 목록이 계열 수만큼 부풀어 사람이 읽을 수 없다. */
+/* BAND NAME은 '테이블:태그:계열' — 태그 단위로 묶어 목록이 계열 수만큼 부풀지 않게 함 */
 {
   SQLS = [];
   ROWS = {
@@ -49,7 +44,7 @@ const chk = (ok, msg, extra) => {
   chk(Object.keys(u).sort().join(',') === 'T:A,T:B,T:C', '태그 단위로 묶인다', Object.keys(u).sort().join(','));
 }
 
-// 한쪽 조회가 실패해도 다른 쪽은 살린다 — 정리 화면이 통째로 안 열리는 것보다 낫다
+// 한쪽 조회가 실패해도 다른 쪽 유지 — 정리 화면 전체 실패 방지
 {
   const okFetch = globalThis.fetch;
   globalThis.fetch = (url) => (String(url).includes('BAND')
@@ -60,9 +55,8 @@ const chk = (ok, msg, extra) => {
   globalThis.fetch = okFetch;
 }
 
-// ── 지울 계열 목록이 최신인가 ──────────────────────────────────────────────
-/* 여기가 조용히 어긋나기 쉬운 자리다 — 계열을 늘릴 때 삭제 목록만 빠지면 지워지지 않은 계열이
-   남고, 그러면 메타 정리도 안 된다("데이터가 없는 이름"이 아니게 되므로). */
+// ── 지울 계열 목록 최신성 ──────────────────────────────────────────────
+/* 계열 추가 시 삭제 목록 누락 → 남은 계열 때문에 메타 정리도 안 됨("데이터 없는 이름"이 아니게 됨) */
 {
   SQLS = []; ROWS = {};
   await DB.deleteBandOfTag('T', 'A');
@@ -74,7 +68,7 @@ const chk = (ok, msg, extra) => {
   chk(deleted.indexOf('envBPFO') >= 0 && deleted.indexOf('envPkRel') >= 0, '포락선 계열도 지운다');
   chk(deleted.indexOf('fr') >= 0 && deleted.indexOf('envF0') >= 0, '저장 전용 계열도 지운다');
 
-  // 데이터 → 메타 순서. 뒤집히면 메타 정리가 아무것도 못 지운다.
+  // 데이터 → 메타 순서(뒤집히면 메타 정리 불가)
   const iMeta = SQLS.findIndex((s) => /metadata/.test(s));
   const iLast = SQLS.map((s, i) => (/^delete from BAND where NAME=/.test(s) ? i : -1)).filter((i) => i >= 0).pop();
   chk(iMeta > iLast, '데이터를 다 지운 뒤에 태그 이름을 정리한다', `데이터 마지막 ${iLast} → 메타 ${iMeta}`);
@@ -88,12 +82,12 @@ const chk = (ok, msg, extra) => {
   chk(iDel >= 0 && iMeta > iDel, '이벤트도 데이터 → 메타 순서', `${iDel} → ${iMeta}`);
 }
 
-// ── 화면이 고아만 골라 보여주는가 ──────────────────────────────────────────
+// ── 화면에 고아만 표시 ──────────────────────────────────────────
 {
   const a = Object.create(App.prototype);
   a.E = { fmtDT: (m) => new Date(m).toISOString().replace('T', ' ').slice(0, 19) };
   a._num = (n) => String(n);
-  a.data = { equipment: [{ id: 'T:A', table: 'T', name: 'A' }] };   // 지금 감시 중인 태그
+  a.data = { equipment: [{ id: 'T:A', table: 'T', name: 'A' }] };   // 감시 중인 태그
   a.state = {
     srcSel: ['T'],
     usage: { events: { rows: 15, span: null }, band: { rows: 257, span: null }, monstate: { rows: 2 }, baseline: { rows: 6 } },
@@ -105,20 +99,19 @@ const chk = (ok, msg, extra) => {
   const keys = base.orphanRows.map((r) => r.key);
   chk(keys.indexOf('T:A') < 0, '감시 중인 태그는 목록에 없다', keys.join(','));
   chk(keys.length === 2 && keys.indexOf('T:B') >= 0 && keys.indexOf('T:C') >= 0, '감시 목록 밖 태그만 나온다', keys.join(','));
-  // 큰 것부터 — 정리해서 얻는 게 큰 순서로 보여야 고를 수 있다
+  // 보유량 큰 순 — 정리 효과 큰 것부터
   chk(base.orphanRows[0].key === 'T:B', '보유량이 큰 태그가 위로', keys.join(','));
   chk(/7행/.test(base.orphanRows[0].stat) && /3건/.test(base.orphanRows[1].stat), '대역·이벤트를 나눠 적는다',
     base.orphanRows.map((r) => r.stat).join(' | '));
-  // 표에도 총량이 붙어야 목록을 열기 전에 정리할 게 있는지 안다
+  // 표 요약에도 총량 표시 — 목록을 열기 전에 정리 대상 유무 파악
   const bandRow = base.dataRows.find((r) => r.id === 'band');
   chk(/감시 대상 밖 7행/.test(bandRow.stat), '표 요약에 감시 대상 밖 양이 붙는다', bandRow.stat);
   chk(!!bandRow.act2, '고아가 있으면 태그별 정리 버튼이 생긴다');
-  /* 예전에는 이 자리에 "태그 단위 삭제도 가능"이라고 적혀 있었는데 그 화면이 없었다.
-     문구가 기능보다 앞서 있으면 사용자는 자기가 못 찾는 것으로 읽는다. */
+  /* 없는 기능 안내 문구("태그 단위 삭제도 가능") 금지 */
   const evRow = base.dataRows.find((r) => r.id === 'events');
   chk(evRow.act.sub !== '태그 단위 삭제도 가능', '없는 기능을 있다고 적지 않는다', evRow.act.sub);
 
-  // 고아가 없으면 버튼도 없다 — 누를 이유가 없는 버튼을 두지 않는다
+  // 고아가 없으면 정리 버튼 없음
   a.state.tagUsage = { 'T:A': { band: 250, events: 12 } };
   const base2 = {};
   a._dataVals(base2);
@@ -138,8 +131,7 @@ const chk = (ok, msg, extra) => {
   chk(SQLS.some((s) => /delete from BAND where NAME='T:B:sub'/.test(s)), '대역 데이터를 지운다');
   chk(!SQLS.some((s) => /delete from EVENTS/.test(s)), '없는 이벤트는 지우러 가지 않는다');
   chk(SQLS.some((s) => /MONSTATE/.test(s)), '판정 상태도 함께 지운다');
-  /* 화면이 들고 있는 판정 상태 캐시를 안 비우면, 지운 태그가 '감시 대상 밖'으로 계속 세진다 —
-     지웠는데 숫자가 그대로라 사용자는 삭제가 안 된 줄로 읽는다. */
+  /* 판정 상태 캐시도 비움 — 안 비우면 지운 태그가 '감시 대상 밖'으로 계속 세져 삭제 실패로 오독 */
   chk(!a._monState['T:B'] && !!a._monState['T:A'], '지운 태그만 캐시에서 빠진다', Object.keys(a._monState).join(','));
   chk(calls.indexOf('refresh') >= 0, '지운 뒤 현황을 다시 읽는다');
   chk(a.state.orphanBusy === null, '진행 표시가 풀린다');

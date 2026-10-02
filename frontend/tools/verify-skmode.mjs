@@ -1,9 +1,6 @@
-// 커토그램이 복조 대역을 고르는 방식 비교 — 첨도를 무엇에 거는가로 갈린다.
-//
-// 'real'(현행)은 **실수** 대역통과 신호의 첨도다. Antoni의 SK는 해석 신호(복소 포락선)의 것이라
-// 이건 SK가 아니다. 순수 정현파의 실수 첨도는 1.5라, 이산 톤이 있는 대역(=찾으려는 구조 공진)이
-// 목적함수에서 구조적으로 불리하고 톤 없는 잡음 대역이 유리하다.
-// "커토그램은 11%로 진다"가 방법의 성적인지 이 구현의 성적인지 여기서 갈린다.
+// 커토그램 대역 선택 목적함수 비교 — 고정 1~5 kHz vs 커토그램(실수 첨도·|z| 첨도·복소 SK), 같은 오탐률에서 검출·종류 적중·선택 대역 측정
+// · 'real'은 실수 대역통과 신호 첨도로 Antoni SK(해석 신호 기준)가 아님 — 정현파 실수 첨도가 1.5라 톤 있는 공진 대역이 불리
+// · 커토그램 성적이 방법 문제인지 구현 문제인지 구분 · 로컬 데이터셋 필요(D:/vibe-datasets/conv, 없으면 건너뜀)
 import fs from 'node:fs';
 import path from 'node:path';
 const VC = (await import('../../cgi-bin/calc/calc.js')).default;
@@ -25,7 +22,7 @@ const VARIANTS = [
   { key: 'env', label: '커토그램 |z| 첨도' },
   { key: 'ck', label: '커토그램 복소 SK' },
 ];
-// 시퀀스(run-to-failure)는 스냅샷 풀이 아니다 — 한 시험대가 표본을 지배해 비교가 기운다
+// 시퀀스(run-to-failure) 제외 — 한 시험대가 표본을 지배해 비교 편향
 const DATASETS = fs.readdirSync(ROOT).filter((d) => !/_seq$/.test(d) && fs.existsSync(path.join(ROOT, d, 'index.json')));
 
 const rows = [];
@@ -61,7 +58,7 @@ for (const ds of DATASETS) {
 }
 console.log('');
 
-const FP = 4 / 124;   // 현행 오탐률에 고정
+const FP = 4 / 124;   // 기준 오탐률(4/124) 고정
 console.log(`오탐을 ${(FP * 100).toFixed(1)}%(현행)에 고정하고 비교 · 케이스 ${rows.length}건\n`);
 console.log('방식                     임계     오탐        검출          종류적중  선택대역 중앙값');
 for (const va of VARIANTS) {

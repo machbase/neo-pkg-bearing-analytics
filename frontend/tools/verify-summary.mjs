@@ -1,7 +1,7 @@
-// 요약 모드 렌더 검증 — 실제 라이브 데이터 + 실제 설비 설정으로 _genOne과 같은 data를 조립해 리포트를 만든다.
-// 라이브 하네스: Neo(127.0.0.1:5654)가 떠 있고 BEARING 테이블에 데이터가 있어야 한다.
-// data 조립은 app.js _reportMeta()/_reportBuild()가 단일 소스 — 앱에 필드를 추가하면 하네스도 자동으로 받는다.
-// 사용: node tools/verify-summary.mjs [TAG]   (또는 npm run verify:live)
+// 요약 모드 리포트 렌더 검증 — 라이브 데이터 + 실제 설비 설정으로 _genOne과 같은 data를 조립해 문구·구조·블록 순서 검사
+// · data 조립은 app.js _reportMeta()/_reportBuild() 단일 소스(앱 필드 추가 시 자동 반영)
+// · 라이브(Neo 127.0.0.1:5654 + BEARING 테이블 데이터 필요) · npm run verify:live 포함
+//   node tools/verify-summary.mjs [TAG]
 globalThis.window = globalThis;
 const NEO = 'http://127.0.0.1:5654'; const _f = globalThis.fetch;
 globalThis.fetch = (u, o) => _f(typeof u === 'string' && u.startsWith('/') ? NEO + u : u, o);
@@ -16,7 +16,7 @@ const L = await import('../src/data/live.js');
 const { App } = await import('../src/app.js');
 const { readFileSync } = await import('node:fs');
 
-// ⚠설비 설정(베어링 품번·Class·RPM·단위)을 반드시 물린다 — 빈 cfg면 전부 폴백이라 실제와 다른 것을 검증하게 된다
+// ⚠ 설비 설정(베어링 품번·Class·RPM·단위) 필수 — 빈 cfg면 전부 폴백이라 실제와 다른 것을 검증
 const CFG = (() => {
   try { return JSON.parse(readFileSync(new URL('../../cgi-bin/config/equipment.json', import.meta.url), 'utf8')); }
   catch (e) { console.warn('[harness] equipment.json 로드 실패 — 폴백으로 진행:', e.message); return {}; }
@@ -28,18 +28,17 @@ const eq = data0.equipment[0]; app.state.selTag = eq.id;
 const anchor = app._detailAnchorMs(eq), vu = app.state.viewUnit || null;
 const det = await L.liveDetail(app.E, eq, anchor, vu);
 app._detailCache[eq.id] = { state: 'ready', det, anchor, viewUnit: vu, eqSnap: Object.assign({}, eq), snapNow: Date.now() };
-// det를 넘겨야 앵커 재계산으로 캐시가 버려지지 않는다 — 안 넘기면 emptyDet으로 떨어져 결론이 서로 어긋난다
+// det 전달 — 안 넘기면 앵커 재계산으로 캐시가 버려져 emptyDet 기준 결론이 어긋남
 const dx = app._dx(eq, det), _ev = app._evidence(eq, det), _rptSat = app._kurtSat(eq);
 
-// 차트 계열에 쓰는 값만 남긴다 — 요약이 쓰던 파생값(cP95·cExp·nTot·wAvg 등)은 _reportMeta 안으로 갔다
+// 차트 계열용 값만 — 요약 파생값(cP95·cExp·nTot·wAvg 등)은 _reportMeta 담당
 const roll = eq.rollup || [];
 const rms = roll.map(r => r.rms), crestA = roll.map(r => r.crest), p2pV = roll.map(r => r.p2p);
 const pct = (a, q) => { const x = a.slice().sort((m, n) => m - n); return x.length ? x[Math.min(x.length - 1, Math.floor(q * (x.length - 1)))] : 0; };
 const gate = !!(det.quality && det.quality.gate); // 아래 검사 목록의 조건 분기용
 
-// ⚠data 조립은 app.js _reportMeta()가 단일 소스 — 하네스가 손으로 베끼지 않는다.
-//   여기서 만드는 건 차트 계열(롤업 의존)뿐이고, 요약·ISO·재현성 바는 앱과 같은 코드가 만든다.
-const meta = app._reportMeta(eq, det, _ev, _rptSat, dx);   // dx=판정 결과(조치 카드가 화면과 같은 등급으로 갈린다)
+// ⚠ data 조립은 app.js _reportMeta() 단일 소스(손복사 금지) — 여기선 차트 계열(롤업 의존)만, 요약·ISO·재현성 바는 앱 코드
+const meta = app._reportMeta(eq, det, _ev, _rptSat, dx);   // dx=판정 결과(조치 카드가 화면과 같은 등급 기준)
 const data = Object.assign({
   refs: eq.zones.map((z, i) => ({ val: z, color: ['#3aa76d', '#d99a2b', '#e07b39'][i], label: ['A/B ', 'B/C ', 'C/D '][i] + E.fmt(z) })),
   xL: roll.map(r => E.fmtMD(r.ms)), xT: roll.map(r => E.fmtDT(r.ms)), kxl: roll.map(r => E.fmtMD(r.ms)),
@@ -60,8 +59,7 @@ const html = Report.buildReportHTML({
   waveDesc: '', envDesc: det.envelope.hint, cepDesc: det.cepstrum.note,
 });
 
-// 리팩터링 전후 리포트를 바이트 비교할 때 쓴다 — VERIFY_DUMP=before.html node tools/verify-summary.mjs
-// (동작을 바꾸지 않는 정리 작업이 정말 안 바꿨는지 확인하는 가장 확실한 방법)
+// 리팩터링 전후 리포트 바이트 비교용 — VERIFY_DUMP=before.html node tools/verify-summary.mjs
 if (process.env.VERIFY_DUMP) {
   (await import('node:fs')).writeFileSync(process.env.VERIFY_DUMP, html);
   console.log('dumped:', process.env.VERIFY_DUMP, html.length, 'bytes');
@@ -69,7 +67,7 @@ if (process.env.VERIFY_DUMP) {
 const txt = html.replace(/<script[\s\S]*?<\/script>/g, '').replace(/<style[\s\S]*?<\/style>/g, '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ');
 
 console.log('\n=== 요약 모드 검사 (' + eq.name + ' · 베어링 ' + ((eq.bearing && eq.bearing.model) || '미지정') + ' · gate=' + gate + ' · verdict="' + dx.verdict + '") ===');
-// ⚠리포트 문구를 바꾸면 이 목록도 같이 고칠 것 — 검사기가 옛 문구를 보면 실제와 다른 것을 통과시킨다
+// ⚠ 리포트 문구 변경 시 이 목록도 함께 수정 — 옛 문구 기준이면 실제와 다른 것을 통과시킴
 const checks = [
   ['[1] 헤드라인(판정 or 보류)', /계측 검증 필요 — 결함 진단 보류|이상 진동|주의 관찰|정상 범위/],
   ['[1] 조치 카드 1장', /계측 검증 후 재측정 — 기계 상태 미판정|계속 운전|다음 정기 점검 시 확인|계획 정지 시 점검|긴급 점검/],

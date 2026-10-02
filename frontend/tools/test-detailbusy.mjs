@@ -1,8 +1,6 @@
-/* 상세분석 "분석 중" 표시 검사 — 오프라인(Neo 불필요). npm run smoke에 포함.
-
-   파형·스펙트럼·계측 검증은 조회가 끝나야 나온다. 그전까지 화면은 경고 없이 멀쩡해 보이는데,
-   클리핑 같은 계측 이상 경고가 몇 초 뒤에야 뜨는 그 구간이 정확히 "이상 없음"으로 오독되는 구간이다.
-   계산 중이라는 사실과, 판정이 아직 확정 아님을 화면이 말해야 한다. */
+/* 상세분석 "분석 중" 표시 — 조회 중(진행 배너·미확정 문구)·완료·실패 상태별 표시
+   · 조회 완료 전 화면이 "이상 없음"으로 오독되지 않게
+   오프라인(Neo 불필요) · npm run smoke 포함 */
 globalThis.window = globalThis;
 import renderToString from 'preact-render-to-string';
 
@@ -31,7 +29,7 @@ const mk = (state) => {
     ready: true, tab: 'detail', srcSel: app.liveTables.slice(), selTag: eq.id,
     events: [], reports: [],
   });
-  // 캐시를 실제와 같은 모양으로 심는다 — 키가 어긋나면 _detail이 캐시를 버리고 조회를 시작한다
+  // 캐시를 실제와 같은 모양으로 주입 — 키가 어긋나면 _detail이 캐시를 버리고 조회 시작
   app._detailCache[eq.id] = {
     state, det: Mock.buildDetail(eq), key: app._detailKey(), anchor: app._detailAnchorMs(eq),
     viewUnit: app.state.viewUnit || null, gate: null,

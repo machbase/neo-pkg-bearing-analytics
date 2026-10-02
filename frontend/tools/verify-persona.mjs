@@ -1,11 +1,11 @@
-// 페르소나 판정 규칙(R1~R12) 기계 검사 — 진단 로직(calc/live/app)을 수정할 때마다 돌려 회귀 확인.
-// 라이브 하네스: Neo(127.0.0.1:5654)가 떠 있고 BEARING 테이블에 데이터가 있어야 한다.
-// 사용: node tools/verify-persona.mjs [TAG]   (또는 npm run verify:live)
+// 페르소나 판정 규칙(R1~R12) 기계 검사 — 진단 로직(calc/live/app) 수정 시 회귀 확인
+// · 라이브(Neo 127.0.0.1:5654 + BEARING 테이블 데이터 필요) · npm run verify:live 포함
+//   node tools/verify-persona.mjs [TAG]
 globalThis.window = globalThis;
 const NEO = 'http://127.0.0.1:5654'; const _f = globalThis.fetch;
 globalThis.fetch = (u, o) => _f(typeof u === 'string' && u.startsWith('/') ? NEO + u : u, o);
 
-// 프리플라이트 — 서버가 없으면 원인 불명 스택 대신 명확한 메시지로 끝낸다
+// 프리플라이트 — 서버 없으면 원인 불명 스택 대신 명확한 메시지로 종료
 try { await _f(NEO + '/db/query?q=' + encodeURIComponent('SELECT 1 as X'), { signal: AbortSignal.timeout(3000) }); }
 catch (e) { console.error('SKIP — Neo(' + NEO + ') 미기동. 서버를 띄운 뒤 다시 실행하세요.'); process.exit(2); }
 
@@ -16,8 +16,7 @@ const L = await import('../src/data/live.js');
 const { App } = await import('../src/app.js');
 const { readFileSync } = await import('node:fs');
 
-// ⚠설비 설정(베어링 품번·Class·RPM·단위)을 반드시 물린다 — 빈 cfg로 돌리면 전부 폴백이 되어
-//   실제 앱과 다른 것을 검증하게 된다(베어링이 "미지정"으로 보이던 원인).
+// ⚠ 설비 설정(베어링 품번·Class·RPM·단위) 필수 — 빈 cfg면 전부 폴백이 되어 실제 앱과 다른 것을 검증
 const CFG_PATH = new URL('../../cgi-bin/config/equipment.json', import.meta.url);
 const CFG = (() => {
   try { return JSON.parse(readFileSync(CFG_PATH, 'utf8')); }
@@ -31,7 +30,7 @@ app.state.selTag = eq.id;
 const anchor = app._detailAnchorMs(eq), vu = app.state.viewUnit || null;
 const det = await L.liveDetail(app.E, eq, anchor, vu);
 app._detailCache[eq.id] = { state: 'ready', det, anchor, viewUnit: vu, eqSnap: Object.assign({}, eq), snapNow: Date.now() };
-const ev = app._evidence(eq, det);   // det를 넘겨야 앵커 재계산으로 캐시가 버려지지 않는다
+const ev = app._evidence(eq, det);   // det 전달 — 앵커 재계산으로 캐시가 버려지지 않게
 const dx = app._dx(eq, det);
 const pack = app._opinionPack(eq, det, app._kurtSat(eq));
 
@@ -43,7 +42,7 @@ const gate = !!(det.quality && det.quality.gate);
 const hasBearing = !!(eq.bearing && eq.bearing.n > 0);
 console.log(`  (컨텍스트: gate=${gate} · 베어링=${hasBearing ? eq.bearing.model : '미지정'} · 분해능=${det.fft.res ? det.fft.res.toFixed(2) : '?'}Hz · 창=${det.anaSec ? det.anaSec.toFixed(2) : '?'}s)\n`);
 
-// R1: 규격은 정의된 물리량·대역·평균화로만 — ISO 판정은 대역제한 값이어야
+// R1: 규격은 정의된 물리량·대역·평균화로만 — ISO 판정은 대역제한 값
 chk('R1', det.isoRms != null && /ISO 10816 판정/.test(pack) && /10–1000 Hz|10-1000 Hz/.test(pack),
   'ISO 판정에 대역제한(10-1000Hz) 값 사용');
 chk('R1b', /실시간 감시/.test(pack) && /규격 판정 아님|알람 기준/.test(pack),
@@ -62,7 +61,7 @@ chk('R3', !(envCredit && !hasBearing),
 // R4: 음성 소견 인쇄
 chk('R4', /미검출|미상|대조 불가|없음/.test(pack), '음성 소견(미검출/대조불가) 인쇄됨');
 
-// R5/R6: 게이트는 전역 — 걸리면 모든 후보가 캡되어야(특정 후보만 캡 금지)
+// R5/R6: 게이트는 전역 — 걸리면 모든 후보 캡(특정 후보만 캡 금지)
 if (gate) {
   const over = ev.conf.filter(c => !c.na && c.score > 40).map(c => `${c.f}=${c.score}`);
   chk('R6', over.length === 0,
@@ -109,7 +108,7 @@ chk('CREST', !/sev\('Crest[^']*',\s*wCrest,\s*''\s*,\s*3(\.0)?\s*,/.test(appSrc)
 chk('CREST2', !/wCrest\s*<\s*3\s*\?\s*0\s*:\s*wCrest\s*<\s*6\s*\?\s*2/.test(appSrc),
   'Crest 3~6을 "위험"으로 등급화하지 않음');
 
-// 결함 사전 폭 — 오일훨/베인패스/기어/전기/캐비테이션/종동축 표현 가능한가
+// 결함 사전 폭 — 오일훨/베인패스/기어/전기/캐비테이션/종동축 표현 여부
 const dictTerms = ['오일', '베인', '기어', '전기', '캐비테이션', '종동축', '미설명'];
 const covered = dictTerms.filter(t => new RegExp(t).test(ev.confLines + ev.block));
 chk('DICT', covered.length >= 4,

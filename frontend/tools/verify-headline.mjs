@@ -1,11 +1,6 @@
-/* 리포트 헤드라인이 앱 카드와 얼마나 어긋나는가 — 고치면 무엇이 바뀌는지를 건수로 잰다.
- *
- *   지금 리포트 헤드라인 : ISO 존 단독      (report.js hlIdx = isoH.gradeIdx)
- *   앱 카드 · 고친 뒤    : 패턴 게이트      (patternGate(patOn, isoGi))
- *
- * 두 값이 다른 케이스가 "같은 설비를 두 문서가 다르게 부르는" 건수다.
- * 방향도 함께 센다 — 리포트가 더 나쁘게 부르는 쪽(과대)과 더 좋게 부르는 쪽(과소)은
- * 현장에서 뜻이 정반대다(헛출동 vs 놓침).
+/* 헤드라인 등급 불일치 건수 측정 — ISO 존 단독 등급 vs 패턴 게이트 등급(patternGate(patOn, isoGi), 앱 카드)
+ * · Class I~III별 일치·과대(ISO가 더 나쁨 = 헛출동)·과소(더 좋음 = 놓침), 주요 전이 분포
+ * · 로컬 데이터셋 필요(D:/vibe-datasets/conv, 없으면 건너뜀)
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -57,8 +52,8 @@ for (const [CLS, Z] of Object.entries(CLASSES)) {
   const cell = {}; // 'ISO등급→게이트등급' 분포
   let hOver = 0, hN = 0, fUnder = 0, fN = 0;
   for (const r of rows) {
-    const isoG = VC.gradeFor(r.iso, Z);          // 지금 리포트 헤드라인
-    const gate = VC.patternGate(r.patOn, isoG);  // 앱 카드 · 고친 뒤 리포트
+    const isoG = VC.gradeFor(r.iso, Z);          // ISO 존 단독 등급
+    const gate = VC.patternGate(r.patOn, isoG);  // 패턴 게이트 등급(앱 카드)
     n++;
     const healthy = r.label === 'none';
     if (healthy) hN++; else fN++;

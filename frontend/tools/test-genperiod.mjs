@@ -1,8 +1,6 @@
-/* 데이터 없는 기간의 리포트 생성 차단 — 오프라인(Neo 불필요). npm run smoke에 포함.
-
-   리포트는 화면과 달리 남는 기록물이다. 빈 문서에도 문서번호·판정등급이 찍혀 보관함에 쌓이면
-   "그날 분석했고 이상 없었다"는 잘못된 기록이 된다 — 만든 뒤에 설명하지 말고 만들기 전에 막는다.
-   판정은 직접 입력 기간에만 필요하다: 프리셋은 태그별 최신 데이터에 앵커되므로(_rollForAsync) 비지 않는다. */
+/* 데이터 없는 기간의 리포트 생성 차단 — 빈 문서가 "그날 이상 없었다"는 잘못된 기록으로 남지 않게 생성 전에 막음
+   · 판정은 직접 입력 기간만(프리셋은 태그별 최신 데이터에 앵커되어 비지 않음), 일부 태그만 없으면 그 태그만 제외
+   오프라인(Neo 불필요) · npm run smoke 포함 */
 globalThis.window = globalThis;
 import renderToString from 'preact-render-to-string';
 
@@ -20,9 +18,9 @@ const chk = (ok, msg, extra) => {
 const D0 = Date.UTC(2026, 7, 10, 0, 0), D1 = Date.UTC(2026, 7, 10, 23, 59);
 const mkEq = (id, name, stat) => ({
   id, table: 'T', name, alias: name, unit: 'mm/s', cls: 'II', rpm: 1800, fs: 25600,
-  // bearing은 라이브에서 항상 객체(미지정이면 n=0) — 실제 모양을 그대로 쓴다
+  // bearing은 라이브에서 항상 객체(미지정이면 n=0) — 실제 모양 그대로
   grade: 0, rms: 1, zones: [1.12, 2.8, 7.1], bearing: { model: '', n: 0, Bd: 0, Pd: 0, phi: 0 }, meta: {}, rollup: [],
-  spark: { line: '', area: '' }, // 모니터링 카드가 요구하는 최소 형태(이 테스트의 관심사는 아니다)
+  spark: { line: '', area: '' }, // 모니터링 카드가 요구하는 최소 형태(검사 대상 아님)
   stat: stat, lastSeen: stat ? stat.maxMs : 0,
 });
 const mk = (period, from, to, eqs) => {
@@ -62,7 +60,7 @@ const B = () => mkEq('T:B', 'B', { minMs: D0, maxMs: D1 });
   chk(/opacity: \.5/.test(v.genBtnStyle) && /not-allowed/.test(v.genBtnStyle), '생성 버튼이 비활성으로 보인다');
   const html = renderToString(view(v));
   chk(html.indexOf(v.genNoDataText) >= 0, '경고가 실제로 렌더된다');
-  // 버튼을 눌러도 만들어지지 않는다
+  // 버튼을 눌러도 생성 안 됨
   v.onGenReport();
   chk(a.state.genRunning !== true, '눌러도 생성이 시작되지 않는다');
   chk(a.toasts.some((t) => /데이터가 없습니다/.test(t.m)), '왜 안 되는지 알린다', JSON.stringify(a.toasts));
@@ -76,7 +74,7 @@ const B = () => mkEq('T:B', 'B', { minMs: D0, maxMs: D1 });
   chk(/제외/.test(v.genNoDataText), '무엇이 빠지는지 미리 말한다', v.genNoDataText);
   chk(a._genGapIds.length === 1 && a._genGapIds[0] === 'T:C', '빠질 태그를 정확히 집는다', JSON.stringify(a._genGapIds));
 }
-// ── 프리셋은 태그 최신 데이터에 앵커되므로 판정 대상이 아니다 ─────────────
+// ── 프리셋은 태그 최신 데이터에 앵커 — 판정 대상 아님 ─────────────────────
 {
   for (const p of ['1h', '24h', 'all']) {
     const a = mk(p, OUT[0], OUT[1], [A()]);
@@ -84,13 +82,13 @@ const B = () => mkEq('T:B', 'B', { minMs: D0, maxMs: D1 });
     chk(!v.genNoDataShow, p + ' 프리셋은 막지 않는다 — 각 태그의 최신 데이터 기준으로 창을 다시 잡는다');
   }
 }
-// ── 통계를 모르는 태그는 막지 않는다 ──────────────────────────────────────
+// ── 통계를 모르는 태그는 막지 않음 ──────────────────────────────────────────
 {
   const a = mk('custom', OUT[0], OUT[1], [mkEq('T:D', 'D', null)]);
   chk(!a.renderVals().genNoDataShow, '통계를 모르면 막지 않는다 — 모른다를 없다로 바꾸지 않는다');
 }
 
-// ── 데이터 구간 한가운데 공백은 겹침 검사로 못 잡는다 → 생성 시점에 건너뛴다 ──
+// ── 데이터 구간 내부 공백은 겹침 검사로 못 잡음 → 생성 시점에 건너뜀 ──
 {
   const { readFile } = await import('node:fs/promises');
   const src = await readFile(new URL('../src/app.js', import.meta.url), 'utf8');

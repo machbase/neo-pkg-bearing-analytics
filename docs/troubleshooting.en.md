@@ -7,34 +7,31 @@ weight: 60
 
 [한국어](./troubleshooting.kr.md) | **English**
 
+The app's screens are in Korean; messages are quoted here in English with the Korean label where it helps.
+
 ## Only a "cannot reach the database" notice appears
 
 The signed-in account has not been granted the store (`NEO_BEARING_STORE`). An administrator (SYS) can fix
-this from Settings → Data Source → **Grant an account**: pick the account and press the button. Afterwards,
-press `Check` and the app resumes without a reload.
+this from Settings → Data Source → **Grant an account** (패키지 사용 계정에 권한 주기): pick the account and press the button. Afterwards,
+press `Check status` (상태 확인) and the app resumes without a reload.
 
-If you see this notice *as* SYS, the database does not exist yet — press `Create` on the same card.
+If you see this notice *as* SYS, the database does not exist yet — press `Create` (만들기) on the same card.
 
 ## Server monitoring is on but no events appear
 
-The timer can be `RUNNING` and still do nothing. The heartbeat tells them apart:
+First check the monitoring-status warnings at the top of the Monitoring screen.
 
-```sql
-SELECT K, VAL FROM NEO_BEARING_STORE.SYS.MONSTATE WHERE K='<account>:__hb';
-```
-
-`n` is how many tags were processed. **`n` of 0** means the cycle runs but skips every tag. The usual cause
-is data-table grants: listings and the UI work from a plain GRANT, but the monitoring TQL uses rollups, so a
-missing `SELECT` on that table ends the cycle silently at zero. `ms` helps too — single-digit milliseconds
-means nothing was queried at all.
+- **"Zero evaluation targets"** — the timer runs but skips every tag. The usual cause is **data-table grants**: even if the list and screens work, server monitoring queries the table directly, so if the registering account lacks `SELECT` on it, each cycle silently ends with nothing. Ask an administrator for `GRANT SELECT ON MACHBASEDB.SYS.<table> TO <account>;`. A table without ROLLUP, or no new data arriving, shows the same warning.
+- **"Scanned N machines but measured the fault pattern on none"** — evaluation runs, but the grade-forming axis is empty: RPM or bearing model is missing, or the window has too few samples. Use **Open Equipment** and fill them in.
+- If there is no warning, see [No events are being recorded](#no-events-are-being-recorded) below. Grade events come once per extraction interval (10 minutes by default) and need two consecutive cycles to confirm, so they do not appear the moment you switch on.
 
 ## The timer list shows the same name several times
 
 Neo does not prevent duplicate timer names. The app deletes every timer with that name before registering
 and verifies the deletion, but duplicates created while the timer list itself was failing (for example under
 DB load) cannot be caught at that moment. Once the load clears, **toggling server monitoring off and on**
-cleans them up. To do it by hand, delete them in the Neo TIMER view — **stop each one first**; deleting a
-running timer can leave its runner alive.
+cleans them up. To do it by hand, delete them in the Neo timer screen — **stop each one first**; a timer
+deleted without stopping can keep running.
 
 ## A "Could not load settings" screen appears
 
@@ -47,6 +44,7 @@ The app could not read your saved settings at startup. It does not open any tab 
 
 - If the app shows "no TAG table found in the DB", it connected to Neo but found no TAG table. Check the Neo connection and that a TAG table exists. The app does not substitute mock data, so the screen stays empty.
 - If tables exist but there are no cards, you haven't selected a table yet in **Settings → Data Source**. Select the tables to analyze and save.
+- "No table selected for display" means everything was hidden with the Monitoring screen's **table filter**. Press **Show all** (monitoring keeps running regardless).
 - "Failed to load data" means a query against a selected table errored; the message includes the cause.
 - "Could not load data" means the selected tables could not be queried. The selection is kept and the app retries automatically — see "Could not reload data" below.
 
@@ -62,9 +60,13 @@ A table query failed while re-reading data after a settings save or when a new t
 
 ## Only some tags appear
 
-Load limits — the app loads at most **60 tags per table** and **100 pieces of equipment overall**, to avoid query storms.
+Load limits — the app loads at most **60 tags per table** and **100 pieces of equipment overall**, to avoid query storms. Tags left out carry an **Excluded from monitoring** (감시 제외) badge in the data source's alias table.
 
 Narrow the scope by selecting only the tables you need, or work through your tags in batches.
+
+## A table cannot be selected in Data Source
+
+A table that is greyed out and cannot be checked uses columns other than `NAME · TIME · VALUE` (the reason is shown). The app queries only the standard column names, so such tables are not supported yet.
 
 ## A tag I just added doesn't appear in Data Source
 
@@ -85,24 +87,64 @@ That's expected. Detail analysis is a **snapshot** frozen at the moment you ente
 
 ## A "Signal anomaly — check the sensor" warning appears
 
-A pattern that **casts doubt on the measurement itself** — such as clipping (saturation) — was detected. Diagnosis enters a **diagnosis withheld** state and the evidence scores of all fault candidates are lowered together.
+A pattern that **casts doubt on the measurement itself** — clipping (saturation), a flatline, DC drift, an isolated spike — was detected. Diagnosis enters a **diagnosis withheld** state and the evidence scores of all fault candidates are lowered together.
 
 - Confidence drops for **every** candidate, not just one. A shaky measurement affects the whole spectrum, so lowering only part of it would promote an unverified candidate to first place instead.
 - Amplitudes read from a saturated signal come out **lower** than reality — treat the value as a lower bound on the true amplitude.
 - Check the sensor, cable, mounting, and grounding before suspecting the machine.
+- A grey "DC 성분" (DC component) line without the warning box is not a fault: the sensor has a large but steady mean (MEMS accelerometer gravity axis, proximity displacement probe) and judgment continues. Only a wandering mean — **DC drift** — blocks judgment.
 
-## A card shows "Fault pattern: awaiting first measurement" or "Fault pattern: measurement failed"
+## A card shows an "On hold" badge
 
-The fault pattern — the axis that switches the grade on — could not be measured this cycle, so **the previous grade is being held**. Reading a missed cycle as "no pattern = good" would confirm a false "recovered" within seconds on equipment that is in alarm, so judgment is held instead.
+The machine is not being graded right now. Hover the badge for the reason and the last confirmed grade.
 
-- **Awaiting first measurement** — nothing has been measured yet, as right after opening the app. It clears once the first measurement finishes (usually a few seconds, longer with many tags).
-- **Measurement failed** — the raw waveform could not be read or there were too few samples. It is measured again next cycle (the pattern/band extraction interval). If it persists, check data collection for that tag.
-- Tags that can never be measured because the shaft speed or bearing is missing show **Cannot judge** instead.
+| Reason | Meaning | What to do |
+| :--- | :--- | :--- |
+| Cannot judge (판정 못 함) | No RPM or bearing geometry, so the fault pattern cannot be built. Sleeve (journal) bearings belong here too | Enter RPM and bearing model under Equipment (sleeve bearings are not graded) |
+| Fault pattern awaiting first measurement | Nothing measured yet, as right after opening the app | Clears once the first measurement finishes (usually seconds, longer with many tags) |
+| Fault pattern measurement failed | The raw waveform could not be read or there were too few samples. The previous grade is held | Measured again next cycle. If it persists, check data collection for that tag |
+| Waiting (판정 대기) | Waiting for the first evaluation cycle | Wait a moment |
+| Stopped (정지) | The machine is standing still, so judgment is frozen | Nothing — judgment resumes when it runs again |
+| Signal lost (신호 두절) | No data arriving | Check the collection path |
+| Instrumentation fault (계측 이상) | The waveform cannot be trusted | Check sensor, cable, mounting |
+
+Reading a missed cycle as "no pattern = good" would confirm a false "recovered" on equipment that is in alarm, so the app holds judgment and keeps the previous state instead.
 
 ## Alarms are off after reopening the app
 
 - The header alarm indicator saves as soon as you click it. If alarms are off when you return, they may have been turned on with the **alarm switch on the Settings tab** and never saved (including choosing **Discard and leave**), or the save failed — a failed save shows an error and flips the indicator back.
 - Click the header alarm indicator to turn it back on. No separate save is needed.
+
+## The header badge reads "앱 · 보기 전용" (view only)
+
+Another tab or PC has the app open with the same account, and that page is doing the evaluation and notifications. This is normal — only one place evaluates so notifications are not duplicated.
+
+- Saving settings, learning and reports still work from this tab. After a save, the lead tab applies it within 10 seconds.
+- When the lead tab is closed, this tab takes over within a minute and the badge changes to **앱**.
+
+## A "다른 계정으로 로그인되었습니다" (logged in as another account) notice appears
+
+The Neo console login in this browser switched to a different account. This page belongs to the old account, so it has stopped all saving, evaluation and queries.
+
+- To use the new account, click **새로고침** (Reload).
+- To keep using the old account, log back in as that account — the notice disappears and the page carries on.
+
+## Detail analysis warns that the entered speed differs from the measured one
+
+The entered RPM and the running-speed peak in the spectrum differ by more than 2%. The usual cause is entering the synchronous speed (1800, 3600).
+
+- The fault pattern matches against the entered value with a 1% tolerance, so leaving it risks missing a fault.
+- Check the nameplate rated speed and correct it, or press the **Save measured N rpm** button (it saves immediately). The measured value reflects the load at the time of measurement.
+- With a **driven-side belt sensor**, the warning reads "driven-shaft speed … (pulley conversion or entered value) differs …". Check belt slip and the pulley diameters (**pitch diameter**, not outer diameter). In that case the save button writes to the **driven-shaft speed** field, not the motor RPM.
+- When the running-speed peak overlaps the line frequency (60 or 50 Hz), as on a 2-pole motor, no measurement is taken and this warning never appears — enter the nameplate value exactly.
+
+## Times look off by a few hours
+
+Screen times follow **Settings → Data Source → Display time zone**. The default is this browser's time, so opening the app from another region shows that region's time.
+
+- If everyone must see the same clock, fix the display time zone (for example, to the plant's local time) and save.
+- Data is queried independently of time zone, so only the display shifts — nothing is missing.
+- Server notification text uses the offset captured when server monitoring was registered. After a daylight-saving change, opening the app once re-registers it with the new offset.
 
 ## No events are being recorded
 
@@ -114,21 +156,22 @@ If there is no warning, check the following.
 - **In app monitoring mode the app must be open.** If monitoring must continue with the app closed, switch to **server monitoring**.
 - **Nothing is recorded while Good simply continues.** Only Warning-and-worse, plus the return from a bad state, are recorded.
 - **Intermediate steps while still bad** (Critical → Danger, for instance) are not recorded separately; one "improved" event represents them.
-- A long entry hold deliberately ignores variation shorter than that hold.
-- **With RPM or bearing model empty, no events fire at all.** The axis that switches the grade on is the fault-frequency grid, and without shaft speed or geometry that grid cannot be built. The card's coverage indicator reads "cannot judge".
+- **A grade needs two consecutive cycles to confirm.** A single-cycle hit is recorded only as `observation`.
+- **With RPM or bearing model empty, no grade events fire at all.** The axis that switches the grade on is the fault-frequency grid, and without shaft speed or geometry that grid cannot be built. The card reads **On hold** (cannot judge).
 - **High vibration on its own produces no event.** Bearing-fault evidence must stand for the grade to rise. Imbalance, misalignment and looseness are only reported as "amplitude high but no bearing-fault evidence".
 - **Baseline and band produce no events.** A breach appears only in the evidence table.
-- **Grades are judged once every 10 minutes.** A machine that just deteriorated has to wait for the next cycle.
+- **Grades are judged once per extraction interval (10 minutes by default).** A machine that just deteriorated has to wait for the next cycle.
 
-## "Zero tags evaluated" warning
+## "Zero evaluation targets" warning
 
-The timer is running normally, but **no new data is arriving** on the monitored tags. Timer state alone would look healthy, so this is reported separately.
+The timer is running normally, but it could not evaluate any monitored tag. Timer state alone would look healthy, so this is reported separately.
 
-Check the data collection side — sensors, collectors, and the ingest pipeline.
+- Check whether **new data is arriving** on the monitored tags — the data collection side (sensors, collectors, the ingest pipeline).
+- In server monitoring, also check the **`SELECT` grant** on the table and whether it has a **ROLLUP** — see [Server monitoring is on but no events appear](#server-monitoring-is-on-but-no-events-appear) above.
 
 ## The machine stopped but no "recovered" notification arrived
 
-That is correct behavior. When the evaluated value falls below 20% of normal, the app treats it as **equipment stopped** and freezes evaluation.
+That is correct behavior. When the evaluated value falls below 20% of normal, the app treats it as **equipment stopped** and freezes evaluation (card: Stopped badge).
 
 Vibration faults do not heal themselves, so an unexplained drop usually means the machine stopped or the sensor was lost. Announcing "recovered" there would leave people thinking the machine was fixed.
 
@@ -136,11 +179,11 @@ While frozen the previous state is held, so when the machine restarts the fact t
 
 ## A tag keeps improving and worsening at short intervals
 
-When one tag repeatedly worsens and improves, a **flapping notice** appears.
+When a tag crosses the threshold three or more times in the last two hours, the card shows a **Repeated N×** badge.
 
-That points less to an equipment problem than to an **RMS window shorter than the machine's load-variation cycle** — the load rising and falling is itself being read as a grade change.
-
-Extend the RMS window to at least the value shown in the notice. Increasing the entry hold also helps.
+- The fault evidence is hovering around the adoption line. Load variation can switch the fault signal on and off, and so can an early-stage fault.
+- The grade is set by the fault pattern, so lengthening the RMS window does not reduce this repetition.
+- Clicking the badge opens detail analysis at the most recent worsening. Use the fault evidence and envelope spectrum to judge whether the fault is real.
 
 ## Server monitoring is on but certain tags produce no events
 
@@ -152,19 +195,20 @@ Create a rollup for that table, or check those tags with app monitoring.
 
 A tag that had been deleted has reappeared under the same name, and a baseline learned for that name is still stored.
 
-If you temporarily removed and restored the same machine, choose **Same equipment — keep**. If you connected different equipment under the same name, choose **Different equipment — reset**.
+If you temporarily removed and restored the same machine, choose **Same equipment — keep**. If you connected different equipment under the same name, choose **Different equipment — reset**. With several, **All same equipment — keep** at the top answers them all at once.
 
-Until you confirm, baseline and band evaluation are suspended for that tag. Applying the old reference would mean missing anomalies when the new machine is quieter, and constant alarms when it is louder — while the screen just says "trained". ISO zone evaluation keeps working throughout.
+Until you confirm, baseline and band evidence is paused for that tag. Applying the old reference would mean missing anomalies when the new machine is quieter, and constant breaches when it is louder — while the screen just says "trained". Grading (fault pattern and ISO zone) keeps working throughout.
 
 ## Band learning doesn't fill the denominator (e.g. 4/9)
 
-That is normal. The denominator is the number of series **measurable on that tag**, and it differs per tag.
+That is normal. In each tag row's `4/9 계열 학습됨` (4/9 series trained), the denominator is the number of series **measurable on that tag**, and it differs per tag. (The heading's `학습됨 X/Y` counts trained tags out of all tags.)
 
 - The upper bands cover 1 kHz and above — with a low sample rate those bands are **not measurable in the first place**.
-- The envelope fault-frequency series (BPFO·BPFI·BSF) accumulate **only when a bearing part number is set** — add one under equipment info and they start from then on.
+- Envelope series drop out when the sample rate or the mounting limit is low.
+- The envelope fault-frequency series (BPFO·BPFI·BSF) accumulate **only when a bearing part number is set** — add one under Equipment and they start from then on.
 - The tooltip next to the training status explains, per series, why it is missing.
 
-Untrained series are excluded from evaluation, and the remaining series work normally.
+Untrained series are left out of the evidence display, and the remaining series work normally.
 
 ## Not enough band samples to train
 
@@ -172,7 +216,7 @@ The extraction timer accumulates one band value per interval, so reaching a trai
 
 - **Backfill past data** computes retroactively from raw data already in the DB, giving you samples immediately.
 - **Shortening the extraction interval** accumulates future samples faster.
-- Extending the band learning window brings more slots into scope.
+- Extending the band learning window brings more samples into scope.
 
 The current sample count and whether it is enough to train are shown next to the band learning window.
 
@@ -183,17 +227,20 @@ Both server monitoring and in-app judgment **run on the saved settings.** After 
 ## Notifications don't arrive
 
 1. In **Settings → Alarms → Notifications**, confirm the channel is on and a target (webhook URL) is entered.
-2. Press **Test** to verify the send path in isolation. A failure here is a URL or network problem.
-3. In **per-severity delivery**, confirm that severity is set to **Immediate**. The default sends Danger and Critical immediately, with Warning set to No notification.
+2. Press **Send test** (테스트 발송) to verify the send path in isolation. A failure here is a URL or network problem. For a Teams workflow URL, also check that the workflow accepts plain text messages.
+3. In **per-severity delivery**, confirm that severity is set to **Immediate**. The default is **Immediate on all four rows** (Warning · Danger · Critical · Monitoring fault) — check whether someone changed one to No notification.
 4. If delivery is **No notification**, the event is recorded but nothing is sent.
 5. Webhook is the only delivery channel. For email or SMS, relay through an automation tool such as n8n — see [Alarms and events](./alarms.en.md).
-6. If it still does not arrive, check whether **an event was recorded at all**. No event means this is a judgment problem, not a delivery one — go to "No events are being recorded" above.
+6. If it still does not arrive, check whether **an event was recorded at all**. No event means this is a judgment problem, not a delivery one — go to [No events are being recorded](#no-events-are-being-recorded) above. `observation` events never send an alert.
 7. **If only signal-loss and instrumentation faults are missing**, check the **Monitoring fault** row in the severity table — it is a separate switch from the three grade rows.
-8. If many points went dark but only **one** alert arrived, that is correct — more than five events of the same type in one cycle are bundled. Every individual event is still in the event list.
+8. If many points went dark but only **one** alert arrived, that is correct — five or more events of the same type and grade in one cycle are bundled. Every individual event is still in the event list.
+9. If the screen shows "Server monitoring could not read the notification settings and did not send N events", use **Open notification settings** and save them again.
 
 ## Older events are missing from the event list
 
-The list renders only the most recent **200** events. For full history, use **Save** (export) with a period and read the CSV or JSON.
+- The list shows only the most recent **200** events that match the filters. Narrowing by type or tag reaches further back.
+- Events of tables deselected in the data source drop out of the list (they are not deleted).
+- For full history, use **Save** (export) with a period and read the CSV or JSON — it includes events of deselected tables.
 
 ## "Unsafe file" warning when downloading an event file
 
@@ -201,9 +248,10 @@ This is the browser's generic warning for CSV/JSON downloads. Nothing is wrong w
 
 ## The diagnosis feels inaccurate
 
-- Confirm you registered unit, RPM, and bearing model under **Equipment**. Without a unit there is no defined threshold row to inherit, and without RPM or a bearing, fault-frequency matching is limited.
-- Check whether **mounting** is specified. On a magnet mount left unspecified, the mount's resonance (typically 2–5 kHz) can be selected as the fault band, so a ringing mount reads as a bearing fault.
-- Check in **Criteria** that the thresholds suit your equipment. Acceleration (`g`) and displacement (`μm`) defaults are general reference values, not standard values, and are meant to be adjusted.
+- Confirm you registered RPM and bearing model under **Equipment**. Without them there is no grade at all.
+- Confirm the **unit** matches the sensor. Left empty it is treated as velocity (mm/s), so acceleration and displacement values are converted wrongly and the grade height goes off.
+- Check whether **mounting** is specified. A magnet mount typically resonates at 2–5 kHz, overlapping the 1–5 kHz band the fault pattern is measured in. Specifying the mounting flags bands above its limit in per-band impulsiveness and band-energy evidence, but the fault pattern itself is computed in the fixed band — so **if a fault pattern appears on a magnet-mounted machine, check the sensor attachment first**.
+- Check in **Criteria** that the zone boundaries suit your equipment. The grade height comes from the class rows in velocity (mm/s). The acceleration (`g`) and displacement (`μm`) rows are reference values for displaying sensors in those units.
 - Learning the normal state adds a "versus normal" note to the evidence table (it does not change the grade).
 - Diagnosis is computed from a single-channel, single-direction measurement with no phase information. Fault mechanisms are hypotheses; confirming them requires multi-axis and phase measurement.
 
@@ -213,8 +261,8 @@ If a fault candidate in the report is marked "not observable with this measureme
 
 The cause depends on the message.
 
-- **"steady-state samples N (minimum 30 required)"** — too few samples remain after stopped and ramping intervals are excluded. Extend the learning window or retry once more data has accumulated.
-- **"the learning window splits into stopped and running levels"** — most of the window is downtime. Learning it would make the stopped state the normal reference, so merely running the machine would fire breach alarms; learning is refused. Pick a period that is mostly continuous operation and retrain.
+- **"steady-state samples N (minimum 30 required)"** — too few samples remain after stopped and ramping intervals are excluded. Samples are counted in RMS-window units, so lengthen the learning window, shorten the RMS window in alarm settings, or retry once more data has accumulated.
+- **"the learning window splits into stopped and running levels"** — most of the window is downtime. Learning it would make the stopped state the normal reference, so merely running the machine would show as a breach; learning is refused. Pick a period that is mostly continuous operation and retrain.
 
 Even a successful run may report exclusions such as `excluded 12 (idle 8 · transient 4)`. That is normal — it means the baseline was built from what remained after filtering.
 

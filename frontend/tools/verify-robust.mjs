@@ -1,11 +1,7 @@
-// 상수 민감도 + 하이브리드 재실험 — "지금 숫자가 이 데이터에 맞춰진 것인가"를 두 방향으로 본다.
-//
-// ① 민감도: 상수를 흔들었을 때 성적이 칼날처럼 무너지면 그 값은 이 풀에 맞춰진 것이고,
-//    평평하면 물리에서 온 것이다. 폴드마다 상수를 다시 최적화하는 전면 LODO보다 싸면서
-//    "과적합인가"라는 질문에는 같은 답을 준다.
-// ② 하이브리드: 커토그램 대역과 저역을 둘 다 보면 검정을 두 번 하는 셈이라 오탐도 두 배가 된다.
-//    앞서 3%→6%로 기각했는데 그건 1−(1−0.03)²=5.91%의 재현일 뿐 물리가 아니었다.
-//    각 대역 임계를 조여 **합쳐서 같은 오탐**이 되게 맞춘 뒤 비교해야 공정하다(Šidák).
+// 상수가 이 풀에 맞춰진 값인지 측정(오탐 2.4% 고정) — 로컬 데이터셋 필요(D:/vibe-datasets/conv, 없으면 건너뜀)
+// ① 민감도: 표적 격자 상수(H·측대역 S·허용오차)를 흔들어 성적 변화 확인(급락 = 풀 과적합, 평평 = 물리 근거)
+// ② 하이브리드: 저역·커토그램 두 대역을 Šidák 보정으로 합쳐 같은 오탐에서 비교(보정 없이 합치면 검정 2회로 오탐 약 2배)
+// ③ H 선택 leave-one-dataset-out
 import fs from 'node:fs';
 import path from 'node:path';
 
@@ -26,7 +22,7 @@ const KEYMAP = { BPFO: 'OR', BPFI: 'IR', BSF: 'BALL' };
 const datasets = fs.readdirSync(ROOT)
   .filter((d) => d !== 'xjtu_seq' && fs.existsSync(path.join(ROOT, d, 'index.json')));
 
-// 케이스를 한 번만 읽고 두 대역의 포락선을 미리 만들어 둔다 (상수를 흔들 때마다 다시 읽으면 느리다)
+// 케이스를 한 번만 읽어 두 대역 포락선 미리 생성(상수 변경마다 재읽기 방지)
 const prep = [];
 for (const ds of datasets) {
   const dir = path.join(ROOT, ds);
@@ -52,7 +48,7 @@ for (const ds of datasets) {
 }
 console.log('');
 
-/** 주어진 포락선에서 표적 격자 최대 점수 — TGT의 상수를 밖에서 바꿔 넣을 수 있게 재구현 */
+/** 포락선의 표적 격자 최대 점수 — 상수(H·S·tol)를 외부 주입하도록 재구현 */
 function tgtScore(env, bf, fr, H, S, tolRel) {
   if (!env || !env.freqs.length) return { key: '', r: 0 };
   const res = env.resTrue || env.res;
@@ -138,8 +134,7 @@ console.log(`저역만 (임계 ${Tlow.toFixed(2)})`.padEnd(34) + (() => {
   const q = evalAt(prep, 'aR', Tlow);
   return `${`${q.det}/${q.fN}`.padEnd(9)}${String(Math.round(q.det / q.fN * 100)).padStart(3)}%   ${`${q.fp}/${q.hN}`.padEnd(8)}  ${q.ok}/${q.tN}`;
 })());
-/* Šidák — 대역 K개를 각각 오탐 p로 보면 합쳐서 1−(1−p)^K.
-   합쳐서 FP가 되게 하려면 대역당 p = 1−(1−FP)^(1/K) 로 조여야 한다. */
+/* Šidák — 대역 K개 각각 오탐 p면 합계 1−(1−p)^K → 합계 FP가 되도록 대역당 p = 1−(1−FP)^(1/K) */
 const K = 2, pEach = 1 - Math.pow(1 - FP, 1 / K);
 for (const r of prep) r.uR = Math.max(r.aR || 0, r.bR || 0);
 const Ta = fitT(prep, 'aR', pEach), Tb = fitT(prep, 'bR', pEach);
@@ -161,8 +156,8 @@ console.log(`대역별 임계 — 저역 ${Ta.toFixed(2)} · 커토그램 ${Tb.t
 
 
 // ── ③ 하모닉 차수 선택의 홀드아웃 ────────────────────────────────────────────
-/* 13개 설정 중 최고를 고르는 것 자체가 다중비교다. 데이터셋 하나를 빼고 **거기서 H를 고른 뒤**
-   뺀 셋으로 평가한다. 매번 같은 H가 뽑히고 성적이 유지되면 그 선택은 풀에 붙은 것이 아니다. */
+/* 여러 설정 중 최고 선택 자체가 다중비교 — 데이터셋 하나를 빼고 나머지에서 H 선택 후 뺀 셋으로 평가
+   (매번 같은 H·성적 유지면 풀 과적합 아님) */
 console.log('');
 console.log('=== ③ H 선택의 홀드아웃 (S=1, tol 1% 고정) ===');
 const HS = [2, 3, 4, 5, 6];

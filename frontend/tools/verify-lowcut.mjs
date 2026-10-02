@@ -1,6 +1,6 @@
-// 복조 저역 경계 스윕 — **같은 오탐률에 고정**하고 비교한다.
-// 임계를 그대로 두고 대역만 넓히면 검출과 오탐이 같이 오르므로 비교가 성립하지 않는다.
-// 그래서 대역마다 정상 124건에서 임계를 다시 맞춘 뒤 검출을 잰다.
+// 복조 저역 경계 스윕(50~1000 Hz, 상한 5 kHz) — 같은 오탐률(4·8/124)에 임계를 맞춘 뒤 검출·종류 적중 비교
+// · 경계마다 정상 케이스로 임계 재산정(임계 고정이면 검출·오탐 동반 상승), leave-one-dataset-out 포함
+// · 로컬 데이터셋 필요(D:/vibe-datasets/conv, 없으면 건너뜀)
 import fs from 'node:fs';
 import path from 'node:path';
 const VC = (await import('../../cgi-bin/calc/calc.js')).default;
@@ -27,7 +27,7 @@ for (const ds of DATASETS) {
     const need = Math.round(c.fs * REV / (c.rpm / 60));
     const v = readF64(fp, Math.min(HARD_CAP, fs.statSync(fp).size / 8, Math.max(16384, need)));
     if (v.length < 4096) continue;
-    if (5000 > c.fs / 2 * 0.95) continue;      // 고정 상한이 성립하는 태그만 (현행과 같은 조건)
+    if (5000 > c.fs / 2 * 0.95) continue;      // 고정 상한이 성립하는 태그만(제품과 같은 조건)
     const fr = c.rpm / 60, bf = VC.bearingFreqs(c.rpm, c.geo), eMax = VC.envMaxFor(bf, fr, c.fs);
     const r = { ds, label: c.label };
     for (const lo of LOS) {
@@ -67,7 +67,7 @@ for (const FP of [4 / 124, 8 / 124]) {
   console.log('');
 }
 
-/* 데이터셋 하나를 빼고 나머지에서 경계를 고른 뒤 뺀 셋으로 평가 — 이 이득이 풀에 붙은 것인지 본다 */
+/* 데이터셋 하나를 빼고 나머지에서 경계 선택 후 뺀 셋으로 평가 — 이득의 풀 과적합 여부 확인 */
 console.log('── leave-one-dataset-out (오탐 4/124 고정) ──');
 console.log('빼낸 셋           고른 경계   그 셋 검출(1000 Hz 대비)');
 for (const out of dsList) {

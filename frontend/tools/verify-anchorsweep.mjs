@@ -1,7 +1,7 @@
-// 앵커 스윕 실측 — "창의 끝 한 점" 대비 "기간을 훑어 최악을 고름"이 실제로 무엇을 바꾸는지.
-// NASA IMS는 끝이 정지 구간이라 옛 동작이 무엇을 놓치는지 그대로 드러난다.
+// 앵커 스윕 비교 — "창의 끝 한 점" vs "기간을 훑어 최악 선택"의 ISO 등급·결함점수 차이 측정
+// · 대상: NASA IMS 2케이스(외륜 파손·건전, 끝이 정지 구간), 최근 6일 · 라이브(Neo 필요, NASA_BEARING 테이블)
 globalThis.window = globalThis;
-// api.js는 브라우저 same-origin 상대경로(/db/...)를 쓰므로 node에서는 호스트를 프리픽스
+// 앱 모듈은 same-origin 상대경로(/db/...) 사용 → node에서는 호스트 프리픽스
 const _fetch = globalThis.fetch;
 globalThis.fetch = (url, opts) => _fetch(typeof url === 'string' && url.startsWith('/') ? 'http://127.0.0.1:5654' + url : url, opts);
 const { sweepAnchors } = await import('../src/data/live.js');

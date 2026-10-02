@@ -1,0 +1,22 @@
+{
+  "_note": "덮어쓰기 업데이트가 남긴 고아 파일 목록 — 레포에서 파일·폴더를 지우면 그 경로(패키지 루트 기준)를 remove 에 더한다. 목록은 누적한다(지우기는 멱등이라 오래된 항목은 해가 없고, 버전을 건너뛴 업데이트도 정리된다). 끝에 / 를 붙이거나 폴더 이름만 쓰면 폴더째 지운다. scripts/install.js 가 scripts/cleanup.js 로 실행하고, 레포에 아직 있는 경로가 적혀 있으면 frontend/tools/test-obsolete.mjs 가 막는다.",
+  "remove": [
+    "cgi-bin/band.tql",
+    "cgi-bin/monitor.tql",
+    "cgi-bin/watchdog.tql",
+    "frontend/tools/_bf.tql",
+    "frontend/tools/convert-dc.mjs",
+    "scripts/start.js",
+    "scripts/stop.js",
+    "frontend/tools/_q.txt",
+    "frontend/tools/_recovery.mjs",
+    "frontend/tools/probe-auth.mjs",
+    "frontend/tools/probe-isolation.mjs",
+    "frontend/tools/probe-jwt.mjs",
+    "frontend/tools/probe-multidb.mjs",
+    "frontend/tools/probe-store.mjs",
+    "frontend/tools/snap-vm.mjs",
+    "frontend/tools/test-timer-live.mjs",
+    "frontend/tools/verify-anomaly.mjs"
+  ]
+}

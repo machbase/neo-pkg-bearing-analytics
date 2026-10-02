@@ -1,7 +1,6 @@
-// report/report.js — 진동 분석 리포트 HTML 조립 (프로토타입 report.html 양식 · 캔버스 실시간 렌더판)
-// PNG 박제 대신 차트 엔진(chart.js 소스)과 데이터(JSON)를 파일에 내장 → 저장된 문서에서도
-// 휠 줌·드래그·툴팁·테마 연동 리드로우가 동작한다. 파일은 여전히 자립형(외부 참조 없음).
-// 보안: 사용자 입력 esc(), 데이터 JSON은 <를 <로 치환, CSP(default none, img data:, style/script inline).
+// report/report.js — 진동 분석 리포트 HTML 조립
+// 차트 엔진(chart.js 소스)·데이터(JSON)를 파일에 내장 → 저장 문서에서도 줌·툴팁·테마 리드로우 동작(외부 참조 없음)
+// 보안: 사용자 입력 esc(), 데이터 JSON의 <는 \u003c로 치환, CSP(default none, img data:, style/script inline)
 (function (root, factory) {
   if (typeof module === 'object' && module.exports) module.exports = factory();
   else root.VibeReport = factory();
@@ -15,10 +14,10 @@
   }
 
   var STATUS_COLOR = { '양호': '#3aa76d', '주의': '#d99a2b', '위험': '#e07b39', '심각': '#e5484d' };
-  // 등급어는 아니지만 "보라"는 표시 — 회색으로 내리면 뜻이 정반대로 읽힌다
+  // 등급어는 아니지만 주목 표시(앰버) — 회색이면 뜻이 반대로 읽힘
   var NOTE_BADGE = { '충격성 강함': 1 };
 
-  /* 라이트 팔레트는 테마 토글과 인쇄가 함께 쓴다 — 한 곳에서 고쳐야 화면과 종이가 갈리지 않는다 */
+  // 라이트 팔레트 — 테마 토글·인쇄 공용
   var LIGHT_VARS = "--bg-primary:#e9ebef;--bg-panel:#fff;--bg-elevated:#f5f6f8;--bg-dropdown:#fff;--bg-hover:rgba(0,0,0,.045);"
     + "--bg-input:rgba(0,0,0,.05);--text-primary:#262831;--text-secondary:#40434e;--text-tertiary:#5f636f;--text-muted:#8a8d99;"
     + "--border-default:rgba(0,0,0,.12);--border-medium:#b9bcc5;--border-faint:rgba(0,0,0,.08)";
@@ -56,7 +55,7 @@
     ".summary-box{background:var(--bg-panel);border:1px solid var(--border-default);border-radius:var(--radius-md);padding:20px 24px 18px;margin-bottom:24px}",
     "body.view-sum #detail{display:none}",
     "body.view-full .summary-box{display:none}",
-    /* 인쇄는 전체 보기로 나간다 — 요약 상자를 같이 실으면 같은 판정이 종이에서 두 번 나온다 */
+    // 인쇄는 전체 보기 — 요약 상자 제외(중복)
     "@media print{.summary-box{display:none !important}}",
     ".view-sw{display:inline-flex;border:1px solid var(--border-default);border-radius:var(--radius-sm);overflow:hidden}",
     ".view-btn{padding:0 12px;height:34px;font-size:12px;font-weight:600;color:var(--text-tertiary);background:var(--bg-input);border:none;cursor:pointer}",
@@ -107,8 +106,7 @@
     ".act.plan{border-color:rgba(224,123,57,.45);background:rgba(224,123,57,.07)}.act.plan .act-h{color:#e07b39}",
     ".act.urgent{border-color:rgba(229,72,77,.45);background:rgba(229,72,77,.07)}.act.urgent .act-h{color:#e5484d}",
     ".sum-tbl .k-sub{font-size:10.5px;font-weight:400;color:var(--text-muted);margin-top:1px}",
-    /* 판정과 ISO가 갈릴 때 그 사실을 적는 자리 — 등급 팔레트를 쓰지 않는다.
-       색으로 심각도를 말하면 "5번째 등급"으로 오독된다. 테두리만 두고 본문 색을 쓴다. */
+    // 판정·ISO 불일치 안내 — 등급 팔레트 미사용(별도 등급으로 오독 방지)
     ".judge-gap{margin:12px 0 2px;padding:10px 13px;border-radius:6px;border:1px solid var(--border-default);background:var(--bg-input);font-size:12.5px;color:var(--text-secondary);line-height:1.6}",
     ".judge-gap b{color:var(--text-primary)}.judge-gap .mut{color:var(--text-muted);font-size:11.5px}",
     ".judge-note{margin:2px 0 8px;padding:7px 11px;border-radius:6px;background:var(--bg-input);font-size:12px;color:var(--text-secondary);line-height:1.55}",
@@ -144,42 +142,36 @@
     ".gate-box .gb-i{margin:0 0 7px 4px}.gate-box .gb-il{font-weight:600;color:var(--text-primary);font-size:12.5px}",
     ".gate-box .gb-id{margin-left:12px;color:var(--text-muted)}",
     ".gate-box .gb-d{margin-top:8px;color:var(--text-secondary)}",
+    ".q-note{margin:0 2px 12px;font-size:11.5px;line-height:1.5;color:var(--text-muted)}",
     ".neg-box{margin-top:14px;padding:14px 16px;border-radius:8px;background:var(--bg-elevated);border:1px solid var(--border-faint);font-size:12px;line-height:1.65}",
     ".neg-box .nb-t{font-weight:700;color:var(--text-secondary);margin:10px 0 3px}.neg-box .nb-t:first-child{margin-top:0}",
     ".neg-box .nb-s{font-weight:400;color:var(--text-muted)}",
     ".neg-box .nb-r{margin-left:12px;color:var(--text-muted)}",
     ".unit-fx{display:inline-block;width:46px;text-align:left;color:var(--text-muted)}",
     "@media print{.navbar{display:none}}",
-    /* 종이는 화면 테마와 무관하게 항상 라이트다 — 다크로 보다 눌러도 흰 바탕으로 나가야 하고,
-       .theme-light가 켜진 상태까지 선택자에 넣어야 두 경우 모두 같은 값이 된다.
-       배경색을 인쇄에 살리려면 print-color-adjust가 필요하다(존 막대·배지가 흰색으로 날아간다). */
+    /* 인쇄는 테마와 무관하게 라이트(.theme-light 상태 포함).
+       print-color-adjust 없으면 배경색(존 막대·배지)이 빠짐 */
     "@media print{:root,.theme-light{" + LIGHT_VARS + ";--bg-primary:#fff;-webkit-print-color-adjust:exact;print-color-adjust:exact}",
     ".noprint{display:none!important}}",
-    /* 종이 여백은 브라우저 인쇄 여백에 맡긴다 — 여기서 또 주면 두 여백이 겹쳐 본문 폭이 좁아진다 */
+    // 종이 여백은 브라우저 인쇄 여백에 맡김(이중 여백 방지)
     "@media print{.page{padding:0 0 10px;max-width:none}}",
-    /* 페이지 나눔 — 섹션 통째로 '쪼개지 마라'를 걸면 한 장에 안 들어가는 섹션이 다음 장으로 통째로 밀려
-       페이지마다 3분의 1 이상이 빈다. 쪼개지면 안 되는 것은 한 장에 들어가는 작은 단위(차트 한 장, 카드,
-       표의 한 행, 재현성 스트립)뿐이고, 긴 섹션은 흘러가게 둔다.
-       제목·그룹 머리글은 뒤 내용과 붙여야 한다 — 혼자 페이지 끝에 남으면 무엇의 제목인지 알 수 없다. */
+    /* 페이지 나눔 — 긴 섹션은 흐르게 두고 작은 단위(차트·카드·표 행·스트립)만 분할 금지.
+       제목·그룹 머리글은 뒤 내용과 붙임 */
     "@media print{.section{break-inside:auto}",
     ".chart-wrap,.sev-card,.stat-grid,.spec-panel,.build-strip,.gate-box,.summary-box,tr,.ind-row{break-inside:avoid}",
     ".group-hd,.section-title{break-after:avoid}.group-hd{break-inside:avoid}",
     "thead{display:table-header-group}tfoot{display:table-footer-group}",
-    /* 스펙 패널은 인쇄 폭이 좁아 22px 값이 칸을 넘어 옆 칸 글자와 겹친다 — 종이에서만 한 단계 줄인다 */
+    // 스펙 패널 — 인쇄 폭에서 값이 넘쳐 겹치므로 글자 축소
     ".spec-v{font-size:15px}.spec-col{padding:12px 14px;min-width:110px}",
-    /* 종이는 화면보다 촘촘하게 — 카드 여백이 화면 기준이면 페이지 수만 늘어난다 */
+    // 종이는 화면보다 촘촘하게
     ".section{padding:16px 18px;margin-bottom:14px}.spec-panel{margin-bottom:14px}",
-    /* 종이는 전부 한 줄에 하나 — 두 장씩 앉히면 칸 폭이 340px로 줄어 눈금·범례가 뭉친다 */
-    /* 인쇄는 어차피 1열이라 격자를 쓸 이유가 없다 — 격자 안의 페이지 나눔은 브라우저마다 처리가
-       달라 항목이 갈릴 여지가 남는다. 블록 흐름으로 바꾸면 break-inside:avoid가 확실히 지켜진다. */
+    // 인쇄는 1열 블록 흐름 — 격자 안 페이지 나눔은 브라우저마다 달라 break-inside:avoid가 안 지켜질 수 있음
     ".grid2{display:block}.grid2>.section{margin-bottom:14px}.sev-cards{grid-template-columns:repeat(2,1fr)}",
-    /* 캔버스는 그릴 때 잰 폭을 인라인 px로 박는다(chart.js) — 인쇄 여백 설정에 따라 종이 폭이
-       그 값과 달라지면 오른쪽에 빈 띠가 남거나 넘친다. 종이에서는 칸을 꽉 채우게 덮어쓴다. */
+    // 캔버스는 인라인 px 폭(chart.js) — 종이에선 칸 폭에 맞게 덮어씀
     "canvas{width:100%!important;height:auto!important}",
-    /* 요약 줄만 앞 장에 남고 격자가 다음 장으로 가면 무엇의 요약인지 끊긴다 */
+    // 요약 줄과 격자·차트를 한 장에
     ".stat-sum,.sec-desc{break-after:avoid}.sec-chart{break-inside:avoid}",
-    /* 재현성 스트립은 칸마다 170px을 요구해 종이 폭에서 3+2로 접히고 두 줄이 된다 —
-       내용 폭만큼만 잡게 풀면 다섯 칸이 한 줄에 들어간다(문서 끝의 부속 정보라 작게 둔다) */
+    // 재현성 스트립 — 인쇄 시 내용 폭만큼만 잡아 한 줄 유지
     ".build-strip{margin-top:14px}.build-strip .bs-i,.build-strip .bs-i.narrow{flex:1 1 auto;padding:8px 11px}",
     ".build-strip .bs-k{font-size:9px}.build-strip .bs-v{font-size:11.5px;margin-top:3px}.build-strip .bs-s{font-size:10px}}",
     "details.adv{margin-bottom:24px}",
@@ -211,9 +203,7 @@
     ".build-strip .bs-k{font-size:9.5px;font-weight:600;letter-spacing:.6px;text-transform:uppercase;color:var(--text-muted)}",
     ".build-strip .bs-v{margin-top:4px;font-size:13px;font-weight:600;color:var(--text-primary);font-family:'D2Coding',monospace;white-space:nowrap}",
     ".build-strip .bs-s{margin-top:2px;font-size:11px;color:var(--text-muted);font-family:'D2Coding',monospace;white-space:nowrap}",
-    /* 인쇄 직전 재렌더용 — 캔버스는 그릴 때의 CSS 폭으로 비트맵을 굳히므로, 화면 폭(1300px)으로 그린 뒤
-       종이(700px)에서 축소되면 눈금 글자가 절반 크기로 찌그러진다. 그리는 순간에도 종이와 같은
-       폭·열수가 되도록 맞춘 다음 다시 그린다. */
+    // 인쇄 직전 재렌더용 — 캔버스 비트맵은 그릴 때 폭으로 고정되므로 종이와 같은 폭·열수로 맞춰 다시 그림
     "body.printing .page{max-width:186mm}body.printing .grid2{grid-template-columns:1fr;gap:12px}",
     "body.printing .sev-cards{grid-template-columns:repeat(2,1fr)}",
     ".group-hd{display:flex;align-items:center;gap:10px;margin:4px 0 14px;color:var(--text-primary)}.group-hd .hr{flex:1 1 0;height:1px;background:var(--border-faint)}",
@@ -224,14 +214,13 @@
     ".sev-card .badge2{display:inline-block;padding:1px 6px;border-radius:3px;font-size:9px;font-weight:700;letter-spacing:.3px;margin-left:4px;vertical-align:middle}",
     ".sev-card .val{font-size:26px;font-weight:700;letter-spacing:-.5px;margin-bottom:8px;font-variant-numeric:tabular-nums;color:var(--text-primary)}.sev-card .val .u{font-size:12px;font-weight:500;color:var(--text-muted);margin-left:2px}",
     ".sev-card .foot{display:flex;justify-content:space-between;font-size:11px;color:var(--text-muted)}",
-    /* 화면과 같은 규칙 — 한 칸 한 줄, 가로 스크롤 없음. 칸은 제 내용 폭으로 시작해 남는 폭을 나눠 갖고,
-       폭이 모자라면 넓은 칸부터 줄며 말줄임(전문은 title). 문장은 칸이 아니라 제목 아래 요약 줄이 싣는다. */
+    // 통계 격자 — 화면과 같은 규칙(한 칸 한 줄, 가로 스크롤 없음, 넘치면 말줄임·전문은 title)
     ".stat-sum{font-size:12px;color:var(--text-muted);margin:-2px 0 10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}",
     ".stat-grid{display:flex;gap:1px;background:var(--border-faint);border:1px solid var(--border-faint);border-radius:6px;overflow:hidden}",
     ".stat-grid .cell{flex:1 1 auto;min-width:0;background:var(--bg-panel);padding:13px 16px}",
     ".stat-grid .cell .k,.stat-grid .cell .v{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}",
     ".stat-grid .cell .k{font-size:11px;color:var(--text-muted)}.stat-grid .cell .v{margin-top:5px;font-size:15px;font-weight:600;color:var(--text-primary);font-family:'D2Coding',monospace}",
-    // 인쇄에는 hover가 없다 — 잘린 꼬리를 볼 방법이 없으므로 종이에서만 접어서 전부 남긴다
+    // 인쇄엔 hover가 없어 말줄임 대신 줄바꿈
     "@media print{.stat-sum{white-space:normal}.stat-grid{flex-wrap:wrap}.stat-grid .cell .k,.stat-grid .cell .v{white-space:normal;overflow:visible}}",
   ].join('\n');
 
@@ -239,6 +228,8 @@
   var BOOT = [
     "(function(){",
     "var CH=window.VibeChart, R=window.RPT||{};",
+    // 차트 눈금·툴팁 시각 = 리포트를 만든 시간대(여는 사람의 브라우저 시간과 무관)
+    "if(CH&&CH.setZone&&R.tz) CH.setZone(R.tz);",
     "function cc(){return document.documentElement.classList.contains('theme-light')",
     " ?{grid:'rgba(35,38,46,0.09)',axis:'#5f636f',axisLine:'#c2c6cd',hint:'#8a8d99',text:'#23262e'}",
     " :{grid:'rgba(255,255,255,0.07)',axis:'#9ba0aa',axisLine:'#4a4a4a',hint:'#6c7079',text:'#f0f1f4'};}",
@@ -254,11 +245,9 @@
     " if(R.p2p)line('cP2p','tP2p',{values:R.p2p,xLabels:R.xL,tipLabels:R.xT,color:CH.SERIES.p2p,height:220,smooth:true,zeroBase:true});",
     " if(R.crest)line('cCrest','tCrest',{values:R.crest,xLabels:R.xL,tipLabels:R.xT,color:CH.SERIES.crest,height:220,smooth:true,refLines:[{val:3,color:'#8a8d99',label:'CF=3'},{val:6,color:'#e07b39',label:'CF=6'}]});",
     " if(R.kurt)line('cKurt','tKurt',{values:R.kurt,xLabels:R.kxl,color:'#fdb532',height:220,smooth:true,refLines:[{val:3,color:'#8a8d99',label:'정상=3'},{val:4.5,color:'#e07b39',label:'충격성 경계'}]});",
-    /* 범례 클릭 → 그 계열을 빼고 다시 그린다. 축 범위가 남은 계열 기준으로 다시 잡히는 것이
-       핵심이다 — 계열만 감추고 축을 그대로 두면 작은 대역은 여전히 바닥에 붙어 보이지 않는다.
-       마지막으로 그린 구간(s,e)을 기억해 두어 확대해 둔 상태가 풀리지 않게 한다. */
+    // 범례 클릭 → 그 계열을 빼고 다시 그림(축 범위도 재계산). 마지막 구간(s,e)을 기억해 확대 상태 유지
     " if(R.bands){var cb=el('cBand');if(cb){var hid={},rng=[0,R.kxl.length];",
-    "  var db=function(s,e){rng=[s,e];CH.drawMultiLine(cb,{series:R.bands.filter(function(sr){return !hid[sr.label];}).map(function(sr){return {label:sr.label,color:sr.color,vals:sr.vals.slice(s,e)};}),xLabels:R.kxl.slice(s,e),height:220},cc());};",
+    "  var db=function(s,e){rng=[s,e];CH.drawMultiLine(cb,{series:R.bands.filter(function(sr){return !hid[sr.label];}).map(function(sr){return {label:sr.label,color:sr.color,dash:sr.dash,vals:sr.vals.slice(s,e)};}),xLabels:R.kxl.slice(s,e),height:220},cc());};",
     "  db(0,R.kxl.length);CH.addZoom(cb,R.kxl.length,db);",
     "  var lg=document.querySelector('[data-toggle=\"cBand\"]');",
     "  if(lg)lg.addEventListener('click',function(ev){var t=ev.target;while(t&&t!==lg&&!t.getAttribute('data-series'))t=t.parentNode;",
@@ -275,7 +264,7 @@
     "window.toggleTheme=function(){var r=document.documentElement;r.classList.toggle('theme-light');try{localStorage.setItem('neoVibeReportTheme',r.classList.contains('theme-light')?'light':'dark');}catch(e){}drawAll();};",
     "function applyView(v){var b=document.body;b.classList.toggle('view-sum',v==='sum');b.classList.toggle('view-full',v!=='sum');",
     " var bs=document.querySelectorAll('.view-btn');for(var i=0;i<bs.length;i++)bs[i].classList.toggle('on',bs[i].getAttribute('data-v')===v);",
-    " if(v!=='sum')setTimeout(drawAll,0);}",   // 숨김 해제 직후엔 캔버스 폭이 잡힌 뒤 그려야 한다
+    " if(v!=='sum')setTimeout(drawAll,0);}",   // 숨김 해제 후 캔버스 폭이 잡힌 뒤 그림
     "window.setView=function(v){try{localStorage.setItem('neoVibeReportView',v);}catch(e){}applyView(v);};",
     "var _v0='sum';try{_v0=localStorage.getItem('neoVibeReportView')||'sum';}catch(e){}applyView(_v0);",
     "var rt;window.addEventListener('resize',function(){clearTimeout(rt);rt=setTimeout(drawAll,80);});",
@@ -283,8 +272,7 @@
     "function syncNav(){var y=window.scrollY+120,cur=null;navA.forEach(function(a){var el=document.querySelector(a.getAttribute('href'));if(el&&el.getBoundingClientRect().top+window.scrollY<=y)cur=a;});navA.forEach(function(a){a.classList.toggle('on',a===cur);});}",
     "var st;window.addEventListener('scroll',function(){clearTimeout(st);st=setTimeout(syncNav,60);});syncNav();",
     "window.printReport=function(){window.print();};",
-    /* 캔버스는 그릴 때의 테마 색을 픽셀로 굳힌다 — CSS만 라이트로 덮으면 흰 종이에 다크 차트가 찍힌다.
-       인쇄 직전에 라이트로 바꿔 다시 그리고, 끝나면 보던 테마로 되돌린다. */
+    // 캔버스는 테마 색이 픽셀로 고정 — 인쇄 직전 라이트로 다시 그리고, 끝나면 원래 테마로 복귀
     "var _pDark=false;",
     "window.addEventListener('beforeprint',function(){var b=document.body,r=document.documentElement;",
     " b.classList.remove('view-sum');b.classList.add('view-full');b.classList.add('printing');",
@@ -307,9 +295,8 @@
   var ZOOM_HINT = '<b>휠</b> 확대·축소 · <b>드래그</b> 이동 · <b>더블클릭</b> 리셋';
 
   function chartSection(h, opts) {
-    // opts: {title, sub, hintText(esc필요없는 고정), desc, canvasId, h, tipId, xlineId, legend:[{label,color}]}
-    /* 차트 한 장짜리 섹션은 한 페이지에 들어간다 — 통째로 묶어야 제목·설명만 앞 장에 남고
-       그림이 다음 장으로 넘어가는 일이 없다(sec-chart는 인쇄 규칙에서만 쓴다). */
+    // opts: {title, sub, hint(고정 HTML — esc 없음), desc, canvasId, h, tipId, xlineId, legend:[{label,color}], toggle}
+    // 차트 한 장 섹션은 인쇄 시 통째로 한 페이지(sec-chart)
     sectionOpen(h, opts.title, opts.sub, opts.hint, null, 'sec-chart');
     if (opts.desc) h.push('<div class="section-desc">' + esc(opts.desc) + '</div>');
     h.push('<div class="chart-wrap"><canvas id="' + opts.canvasId + '" height="' + opts.h + '"></canvas>'
@@ -317,11 +304,11 @@
       + (opts.tipId ? '<div class="tooltip" id="' + opts.tipId + '"></div>' : '')
       + '</div>');
     if (opts.legend && opts.legend.length) {
-      /* toggle을 준 차트는 범례를 눌러 계열을 끌 수 있다 — 계열이 여럿이면 큰 값이 작은 값을
-         눌러 버려서, 끄고 봐야 비로소 작은 대역의 변화가 보인다. */
+      // toggle 차트는 범례 클릭으로 계열 on/off
       h.push('<div class="legend"' + (opts.toggle ? ' data-toggle="' + esc(opts.canvasId) + '"' : '') + '>' + opts.legend.map(function (l) {
         var t = opts.toggle ? ' data-series="' + esc(l.label) + '" style="cursor:pointer;user-select:none" title="클릭하면 숨기거나 다시 표시합니다"' : '';
-        return '<span' + t + '><span class="sw" style="background:' + esc(l.color) + ';"></span>' + esc(l.label) + '</span>';
+        var sw = l.dash ? 'height:0;border-top:2px dashed ' + esc(l.color) + ';background:none;' : 'background:' + esc(l.color) + ';';
+        return '<span' + t + '><span class="sw" style="' + sw + '"></span>' + esc(l.label) + '</span>';
       }).join('') + '</div>');
     }
     h.push('</div>');
@@ -333,11 +320,10 @@
   //      fftHint, waveDesc, envDesc, cepDesc }
   function buildReportHTML(p) {
     var d = p.data || {};
-    // 후보명 "본체(부제)" 분리 — 괄호 안 보조 설명은 작은 글씨로 내려 한 줄을 짧게 유지
+    // 후보명 "본체(부제)" 분리 — 부제는 작은 글씨로
     var nameMain = function (f) { var i = f.indexOf('('); return i > 0 ? f.slice(0, i).trim() : f; };
     var nameSub = function (f) { var m = f.match(/\(([^)]*)\)\s*$/); return m ? m[1].replace(/^[^—-]*[—-]\s*/, '') : ''; };
-    // 조치 카드 — "그래서 뭘 해야 하나"에 1초 안에 답하는 한 장. 해당하는 것만 크게.
-    // 게이트 카드는 A~D 팔레트를 쓰지 않는다(중립색) — 계측 상태를 기계 등급으로 오독하면 안 된다.
+    // 조치 카드 — 게이트 카드는 중립색(계측 상태를 기계 등급으로 오독 방지)
     var actionCard = function (a) {
       return '<div class="act ' + esc(a.cls || '') + '">'
         + '<div class="act-h"><span class="act-ic">' + (a.icon || '') + '</span>' + esc(a.title || '') + '</div>'
@@ -346,7 +332,7 @@
         + (a.aside ? '<div class="act-a">' + esc(a.aside) + '</div>' : '')
         + '</div>';
     };
-    // ★ 대신 사각 pip — 별은 "평점"으로 읽혀 근거 강도가 등급처럼 오독된다
+    // 근거 강도 pip(★는 평점으로 오독)
     var pips = function (n) {
       var o = '<span class="pips">';
       for (var i = 0; i < 5; i++) o += '<i class="' + (i < n ? (n >= 4 ? 'hi' : 'on') : '') + '"></i>';
@@ -383,7 +369,7 @@
     // ── 조회 스펙 패널 ──
     h.push('<div class="spec-panel">');
     (p.specs || []).forEach(function (s) {
-      // 날짜·시각은 한 덩어리로 — "2025-" / "11-24 10:19"처럼 중간에서 끊기면 읽을 수 없다
+      // 날짜·시각은 줄바꿈 없이 한 덩어리로
       var sv = esc(s.v).split(' ~ ').map(function (x) { return '<span class="nw">' + x + '</span>'; }).join(' ~ ');
       h.push('<div class="spec-col"><div class="spec-k">' + esc(s.k) + '</div><div class="spec-v">' + sv
         + (s.unit ? '<span style="font-size:13px;font-weight:600;color:var(--text-tertiary);margin-left:3px;">' + esc(s.unit) + '</span>' : '') + '</div></div>');
@@ -391,21 +377,19 @@
     h.push('</div>');
 
     // ── 요약 모드 (30초 판독) ────────────────────────────────────────────────
-    // 8블록 최소 집합. 순서는 "상태 → 후보"이지 "후보 → 상태"가 아니다 — 평균이 양호한 기계에
-    // 결함명이 첫 줄로 오면 거짓 경보가 되고, 다음 진짜 경보가 무시된다.
-    // [5]측정 불가·[6]음성 소견·[7]미설명은 게이트와 무관하게 항상 인쇄한다
-    // (게이트가 만든 게 아니라 계측 구성·메타데이터가 만든 것이라 센서를 다시 붙여도 남는다).
-    // ⚠요약과 심각도 섹션이 함께 쓰므로 요약보다 앞에서 선언한다
-    //   (아래에서 var로 선언하면 호이스팅 탓에 요약에서는 undefined가 되어 ISO 행이 통째로 사라진다)
-    var isoH = d.iso; // {rms, gradeIdx, gradeKo, color, anaSec, blocks, spread, spreadWarn}
+    // 순서는 "상태 → 후보"(결함명이 첫 줄이면 거짓 경보). 측정 불가·음성 소견·미설명은 게이트와 무관하게 항상 표시
+    // ⚠ isoH는 요약·심각도 섹션 공용 — 요약보다 앞에서 선언
+    var isoH = d.iso; // {rms, disp, conv, gradeIdx, gradeKo, color, anaSec, blocks, spread, spreadWarn}
+    /* ISO 값 표기 — 원본 단위(disp: 같은 10–1000 Hz 대역 RMS), 가속도·변위 설비(conv)의 존 판정은 속도 환산
+       disp 없는 옛 페이로드는 속도 값 그대로 */
+    var isoV = function () { return isoH ? (isoH.disp ? esc(isoH.disp) : esc(isoH.rms) + ' ' + esc(p.zonesUnit || 'mm/s')) : ''; };
+    var isoPh = function () { return isoH ? (isoH.conv ? '10–1000 Hz 대역제한 RMS ' + isoV() + ', 존은 속도 환산' : '10–1000 Hz 대역제한 속도 RMS ' + isoV()) : ''; };
     var sm = d.summary;
     if (sm) {
       h.push('<div class="summary-box">');
       h.push('<div class="sum-hd"><span class="sum-eyebrow">요약</span><span class="sum-sub">30초 판독용 · 근거와 그래프는 아래 상세 분석에 있습니다</span></div>');
 
-      // [1] 최상위 상태 — 게이트·가속도 보류·조치를 한 박스에 묶는다.
-      //    셋은 별개 사건이 아니라 "계측을 못 믿는다"는 한 사건의 세 측면이다.
-      //    박스를 쪼개면 경고 개수만 늘어 정작 중요한 것이 묻힌다.
+      // [1] 최상위 상태 — 게이트·가속도 보류·조치를 한 박스로(같은 사건의 측면)
       var alerts = [];
       if (sm.gate) {
         alerts.push({ t: '계측 검증 필요 — 결함 진단 보류', head: true, lines: [
@@ -426,34 +410,30 @@
           h.push('<div class="' + (a.head ? 't' : 't2') + '">' + (a.head ? '<span class="dot"></span>' : '') + esc(a.t) + '</div>');
           a.lines.forEach(function (ln) { h.push('<div class="d">' + ln + '</div>'); });
         });
-        // 조치 카드 — 박스 안 마지막. 게이트가 조치의 전제이므로 게이트 줄 아래에 온다.
+        // 조치 카드 — 박스 안 마지막(게이트 줄 아래)
         if (sm.action) h.push(actionCard(sm.action));
         h.push('</div>');
       } else {
         if (sm.action) h.push('<div class="sum-alert plain">' + actionCard(sm.action) + '</div>');
       }
 
-      // [2] 상태 — 규격 판정과 감시 등급은 다른 값이며 한 문장에 섞지 않는다
+      // [2] 상태 — 규격 판정과 감시 등급은 별개 값(한 문장에 섞지 않음)
       h.push('<div class="sum-sec"><div class="sum-t">' + (sm.gate ? '관측값 <span class="mut">— 게이트 적용 중 · 전부 잠정</span>' : '상태') + '</div>');
-      // 한 문서에 RMS가 여러 종류라 "주의"와 "위험"이 동시에 보인다 — 판정에 쓰는 값을 못박고 나머지를 참고로 내린다
-      /* 등급은 ISO 하나가 만들지 않는다 — 결함 패턴이 게이트이고 ISO는 그 높이를 정한다.
-         "ISO가 판정값"이라고 쓰면 진동만 높고 베어링은 멀쩡한 경우를 문서가 설명 못 한다. */
+      // 판정 기준 명시 — 등급은 결함 패턴이 켜고 ISO가 높이를 정함, 나머지 RMS는 참고
       if (isoH) h.push('<div class="judge-note">등급은 <b>결함 패턴이 켜질 때만</b> 오르고, 그 높이를 '
-        + '<b>ISO 대역제한 속도 RMS ' + esc(isoH.rms) + ' ' + esc(p.zonesUnit || 'mm/s') + '</b>가 정합니다'
+        + '<b>ISO 존</b>(' + isoPh() + ')이 정합니다'
         + (sm.gate ? ' <span class="mut">— 단, 계측 게이트로 판정 보류</span>' : '')
         + '. ISO 값만 높고 결함 근거가 없으면 등급을 올리지 않습니다 — 원인이 베어링 밖일 수 있습니다. 아래 나머지 값은 참고입니다.</div>');
       h.push('<table class="sum-tbl"><tbody>');
       if (isoH) {
-        // 게이트 중에는 "판정"이 아니라 관측값이다 — 라벨·색을 내리고 편향 방향(상한/하한)을 밝힌다.
-        // 값을 숨기지는 않는다: 8블록 평균한 대역제한 값이 이 리포트에서 아티팩트에 가장 강건한 숫자다.
-        /* 라벨에서 "판정"을 뗀다 — 판정은 위 헤드라인이 하고, 이 행은 규격 값이다.
-           행 자체는 남긴다: 규격 준수를 문서로 요구받는 현장에서 인용되는 숫자다. */
-        h.push('<tr><td class="k">' + (sm.gate ? 'ISO 대역제한 속도 RMS<div class="k-sub">판정 보류</div>'
+        // ISO 행 = 규격 참조값(판정은 헤드라인). 게이트 중엔 관측값으로 표시(라벨·색 낮추고 편향 방향 명시), 값은 유지
+        h.push('<tr><td class="k">' + (sm.gate ? (isoH.conv ? 'ISO 대역제한 RMS' : 'ISO 대역제한 속도 RMS') + '<div class="k-sub">판정 보류</div>'
           : 'ISO 10816 존<div class="k-sub">규격 참조값</div>') + '</td>'
           + '<td class="v">' + (sm.gate
-            ? '<span class="mut">' + esc(isoH.gradeKo) + ' 수준</span> · ' + esc(isoH.rms) + ' ' + esc(p.zonesUnit || 'mm/s') + ' <span class="tag">잠정</span>'
-            : '<b style="color:' + esc(isoH.color) + ';">' + esc(isoH.gradeKo) + '</b> · ' + esc(isoH.rms) + ' ' + esc(p.zonesUnit || 'mm/s')) + '</td>'
+            ? '<span class="mut">' + esc(isoH.gradeKo) + ' 수준</span> · ' + isoV() + ' <span class="tag">잠정</span>'
+            : '<b style="color:' + esc(isoH.color) + ';">' + esc(isoH.gradeKo) + '</b> · ' + isoV()) + '</td>'
           + '<td class="n">10–1000 Hz 대역제한 · ' + (isoH.blocks || 1) + '블록 평균 · 총 ' + esc(isoH.anaSec) + '초'
+          + (isoH.conv ? '<br>원본 단위 값 · 존 판정은 속도 환산' : '')
           + (sm.winNote ? '<br>' + esc(sm.winNote) : '')
           + (sm.gate && sm.bias ? '<br><span class="amber">' + esc(sm.bias) + '</span>' : '')
           + (isoH.spreadWarn ? '<br><span class="amber">블록간 변동 ×' + esc(isoH.spread) + ' — 정상상태 전제 미충족, 존 판정 잠정</span>' : '') + '</td></tr>');
@@ -467,18 +447,19 @@
       h.push('<tr><td class="k">관측 창</td><td class="v">' + esc(sm.obsTxt) + '</td><td class="n">이 창을 넘는 시간 스케일 주장 불가</td></tr>');
       h.push('</tbody></table></div>');
 
+      // [3] 지금 할 일
       if (p.actions && p.actions.length) {
         h.push('<div class="sum-sec"><div class="sum-t">지금 할 일</div><ol class="sum-ol">');
         p.actions.slice(0, 3).forEach(function (a) { h.push('<li>' + esc(a.txt) + '</li>'); });
         h.push('</ol></div>');
       }
 
-      // [4] 후보 — 게이트 중이면 제목에 상한을 밝힌다(★ 표시가 상한을 우회하지 않도록)
+      // [4] 후보 — 게이트 중이면 제목에 전역 상한 표시
       if (sm.cands && sm.cands.length) {
         h.push('<div class="sum-sec"><div class="sum-t">' + (sm.gate ? '잠정 후보 <span class="amber">— 진단 보류 중 · 전역 상한 ' + sm.gateCap + '/100</span>' : '결함 후보') + '</div><table class="sum-tbl"><tbody>');
         sm.cands.forEach(function (c, ci) {
           var st = Math.max(0, Math.min(5, Math.round(c.s || 0)));
-          // 절대 점수만 보면 "40점이면 약한가?"로 읽힌다 — 상대 등급을 함께 준다
+          // 점수와 함께 상대 등급(강함·중간·약함·근거 부족)
           var lv = c.score == null ? '' : (c.score >= 70 ? '강함' : c.score >= 40 ? '중간' : c.score >= 20 ? '약함' : '근거 부족');
           h.push('<tr class="' + (ci === 0 ? 'top' : '') + '"><td class="k">' + (ci === 0 ? '<span class="rk">1순위</span> ' : '') + esc(nameMain(c.f))
             + (nameSub(c.f) ? '<div class="cand-sub">' + esc(nameSub(c.f)) + '</div>' : '') + '</td>'
@@ -488,8 +469,7 @@
         h.push('</tbody></table></div>');
       }
 
-      // 한계·반대 증거 — 2열(라벨|내용)은 무엇이 제목이고 어디까지가 그 내용인지 구분이 안 된다.
-      // 상세의 음성 소견 블록과 같은 구조로 통일: 제목 한 줄 + 그 아래 들여쓴 줄.
+      // 한계·반대 증거 — 제목 한 줄 + 들여쓴 줄(상세 음성 소견 블록과 같은 구조)
       var _um = sm.unmeasurable || [], _ng = d.negatives || [], _ux = d.unexplained || [];
       var limBlk = function (label, n, unit, sub, rows) {
         h.push('<div class="nb-t">' + label + '<span class="lc">' + n + unit + '</span>'
@@ -510,25 +490,21 @@
       h.push('</div>');
     }
     h.push('<div id="detail">');   // 요약 보기에서 숨겨지는 상세 영역(인쇄 시엔 항상 노출)
-    // 바로가기는 상세 상단에 — 요약은 짧게 유지하고, 긴 문서를 여는 쪽에 이동 수단을 둔다
+    // 바로가기 — 상세 상단
     h.push('<div class="navbar"><span class="nl">바로가기</span>'
       + '<a href="#s-sev">심각도</a><a href="#s-trend">추세</a><a href="#s-spec">스펙트럼</a><a href="#s-evid">결함 근거</a>'
       + (p.opinion ? '<a href="#s-llm">LLM 소견</a>' : '') + '<a href="#s-verdict">권고</a></div>');
 
     // ── 심각도 평가 ──
-    /* 헤드라인은 **판정 등급**이다 — 화면 카드와 같은 값(결함 패턴이 켜고 ISO가 높이를 정한다).
-       여기에 ISO 존을 쓰면 안 된다 — 383 케이스에서 두 값이 46% 어긋나고 방향이 둘 다 나쁘다:
-         · 결함 283건 중 115건이 리포트 표지에 "양호"로 나간다(진폭이 아직 낮은 초기 결함)
-         · 정상 100건 중 42건이 주의 이상으로 나간다(그중 4건은 "심각")
-       ISO 값은 버리지 않는다 — 규격 참조값으로 아래에 그대로 남고, 판정과 다르면 그 사실을 크게 적는다. */
+    // 헤드라인 = 판정 등급(화면 카드와 같은 값). ISO 존은 규격 참조값으로 아래 게이지에, 판정과 다르면 안내 문단
     var hlKo = p.gradeKo, hlColor = p.gradeColor, hlIdx = p.gradeIdx;
     var J = p.judge || {};
-    // 판정을 못 한 경우는 등급이 아니라 측정 상태다 — 양호로 인쇄하면 갖지 않은 근거를 주장하게 된다
+    // 판정 불가는 등급이 아닌 측정 상태로 표시(양호로 인쇄 금지)
     if (J.patNa) { hlKo = '판정 못 함'; hlColor = 'var(--text-muted)'; hlIdx = -1; }
     sectionOpen(h, '진동 심각도 평가', null, '<span class="mono">' + esc(p.sevMachine) + '</span>', 's-sev');
     h.push('<div class="sev-box">');
     h.push('<div style="font-size:11px;color:var(--text-muted);margin-bottom:3px;">' + (isoH
-      ? '판정 <span style="color:var(--text-tertiary);">· 결함 패턴이 등급을 켜고 ISO 존이 높이를 정합니다 · 근거 10–1000 Hz 대역제한 속도 RMS ' + esc(isoH.rms) + ' ' + esc(p.zonesUnit || 'mm/s')
+      ? '판정 <span style="color:var(--text-tertiary);">· 결함 패턴이 등급을 켜고 ISO 존이 높이를 정합니다 · 근거 ' + isoPh()
         + (isoH.blocks ? ' · ' + isoH.blocks + '블록 에너지 평균' : '') + (isoH.anaSec ? ' · 총 ' + esc(isoH.anaSec) + '초' : '')
         + (isoH.spread ? ' · 블록간 변동 ×' + esc(isoH.spread) : '') + ' — 규격 정의 물리량 기준</span>'
         + (isoH.spreadWarn ? '<span style="margin-left:6px;color:#c77d0a;font-weight:600;">⚠정상상태 전제 미충족 — 존 판정 잠정</span>' : '')
@@ -540,30 +516,29 @@
       { ko: '양호', range: '< ' + Z[0] }, { ko: '주의', range: Z[0] + '–' + Z[1] },
       { ko: '위험', range: Z[1] + '–' + Z[2] }, { ko: '심각', range: '> ' + Z[2] },
     ];
-    /* 등급 옆 배지는 **등급을 켠 축**을 말한다 — ISO Zone은 아래 게이지가 따로 가리키므로 여기 겹쳐 쓰지 않는다. */
+    // 등급 옆 배지 = 등급을 켠 축(결함 패턴 상태)
     h.push('<span class="zone-lab">' + (J.patNa ? '결함 패턴 미측정'
       : J.patOn ? ('결함 패턴 검출' + (J.site ? ' · ' + esc(J.site) : ''))
         : '결함 패턴 없음') + '</span>');
-    /* 판정과 ISO가 갈릴 때 — 이 문단이 없으면 "심각이 양호가 됐다"로 읽힌다.
-       두 방향 모두 숨기지 않고 무엇을 확인해야 하는지까지 적는다. */
+    // 판정·ISO 불일치 안내(양방향) — 확인할 항목까지
     if (J.patNa) {
       h.push('<div class="judge-gap"><b>회전수·베어링 정보가 없어 판정하지 못했습니다.</b><br>'
         + '결함주파수 격자를 세울 수 없습니다. 설정 → 설비 정보에 명판 회전수와 베어링 품번을 넣고 다시 생성하십시오.'
-        + (isoH ? '<br><span class="mut">참고 — ISO 대역제한 속도 RMS ' + esc(isoH.rms) + ' ' + esc(p.zonesUnit || 'mm/s')
+        + (isoH ? '<br><span class="mut">참고 — ' + isoPh()
           + ' (존 ' + ['A', 'B', 'C', 'D'][isoH.gradeIdx] + '). 이 값만으로는 베어링 상태를 말할 수 없습니다.</span>' : '')
         + '</div>');
     } else if (J.isoOnly > 0 && isoH) {
       h.push('<div class="judge-gap">⚠ <b>진폭은 ISO 존 ' + ['A', 'B', 'C', 'D'][isoH.gradeIdx]
-        + '(' + esc(isoH.gradeKo) + ') — ' + esc(isoH.rms) + ' ' + esc(p.zonesUnit || 'mm/s') + '</b><br>'
+        + '(' + esc(isoH.gradeKo) + ') — ' + isoV() + '</b><br>'
         + '베어링 결함주파수 자리에 근거가 서지 않아 등급을 올리지 않았습니다. 진동이 높은 것은 사실이며, 원인이 베어링 밖일 가능성이 큽니다.'
         + '<br><span class="mut">확인할 것 — 불평형 · 정렬불량 · 체결 풀림 · 유체력(캐비테이션·서징)'
         + '<br>이 도구로는 판별 불가 — 위상(타코)·축방향 채널이 필요합니다.</span></div>');
     } else if (J.patOn && isoH && isoH.gradeIdx === 0) {
-      h.push('<div class="judge-gap">⚠ <b>진폭은 아직 낮습니다 — ISO 존 A (' + esc(isoH.rms) + ' ' + esc(p.zonesUnit || 'mm/s') + ')</b><br>'
+      h.push('<div class="judge-gap">⚠ <b>진폭은 아직 낮습니다 — ISO 존 A (' + isoV() + ')</b><br>'
         + '결함은 진폭보다 먼저 주파수에 나타납니다. 초기 단계로 보이며, 지금 조치하면 계획 정지에 맞출 수 있습니다.</div>');
     }
     h.push('<div class="gauge">');
-    var gaugeIdx = isoH ? isoH.gradeIdx : hlIdx;   // 게이지는 ISO 존 눈금이므로 ISO 위치를 가리킨다
+    var gaugeIdx = isoH ? isoH.gradeIdx : hlIdx;   // 게이지 = ISO 존 눈금
     zoneDefs.forEach(function (zz, i) {
       var act = i === gaugeIdx;
       h.push('<div class="cell" style="' + (act ? 'background:' + STATUS_COLOR[zz.ko] + ';color:#fff;' : 'background:var(--bg-elevated);color:var(--text-muted);') + 'border-right:1px solid var(--border-faint);">' + zz.ko + '</div>');
@@ -571,7 +546,7 @@
     h.push('</div><div class="gauge-lab">');
     zoneDefs.forEach(function (zz) { h.push('<div>' + esc(zz.range + (p.zonesUnit ? ' ' + p.zonesUnit : '')) + '</div>'); });
     h.push('</div>');
-    // 게이지가 가리키는 것이 등급이 아니라 ISO 존임을 못 박는다 — 둘이 다를 때 눈금만 보면 오독된다
+    // 게이지가 ISO 존(등급 아님)임을 명시
     if (isoH) h.push('<div style="margin-top:4px;font-size:11px;color:var(--text-muted);">'
       + '↑ ISO 10816 존 위치 (규격 참조값) — 위 등급과 다른 축입니다</div>');
     if (isoH && d.mon) h.push('<div style="margin-top:8px;font-size:12px;color:var(--text-secondary);">실시간 감시 등급(' + esc(d.mon.rms) + ' ' + esc(d.mon.unit || '') + '): <b style="color:' + esc(d.mon.color) + ';">' + esc(d.mon.gradeKo) + '</b> <span style="color:var(--text-muted);">— ' + esc(d.mon.basis || '') + '</span>'
@@ -586,8 +561,7 @@
     h.push('<div style="font-size:11px;color:var(--text-muted);margin-bottom:7px;">기간 통계 — 선택한 기간 전체의 롤업 버킷에서 냅니다. 등급이 아닙니다(등급은 위 종합 판정)</div>');
     h.push('<div class="sev-cards">');
     (p.sevCards || []).forEach(function (c) {
-      /* 화면과 같은 규칙 — 등급어 배지만 색으로 채우고, 등급이 아닌 배지(참고·잠정)는 테두리만 둔다.
-         회색으로 채우면 그 카드가 꺼진 것처럼 읽힌다. 관측 사실(충격성 강함)은 앰버로 채워 눈에 남긴다. */
+      // 화면과 같은 규칙 — 등급어 배지만 색 채움, 비등급 배지(참고·잠정)는 테두리만, 충격성 강함은 앰버
       var _kg = STATUS_COLOR[c.badgeKo] || (NOTE_BADGE[c.badgeKo] ? '#d99a2b' : '');
       var bc = _kg || 'var(--text-muted)';
       var bstyle = _kg ? 'color:' + bc + ';background:' + bc + '26;' : 'color:' + bc + ';border:1px solid var(--border-medium);';
@@ -600,7 +574,7 @@
     });
     h.push('</div></div>');
 
-    // ── 종합 진동 레벨 (물리량별 RMS) — 에너지가 어느 도메인에 있나. 단위가 달라 값 크기 직접 비교는 불가(막대 없음) ──
+    // ── 종합 진동 레벨 (물리량별 RMS) — 단위가 달라 값끼리 비교 불가(막대 없음) ──
     if (d.levels) {
       var _lu = [{ u: 'g', l: '가속도', d: '고주파(베어링·기어) · 광대역 변환값 — 미분이 고주파 잡음을 증폭해 과대 가능(방향 참고용)' }, { u: 'mm/s', l: '속도', d: '광대역 — ISO 판정은 10–1000 Hz 대역제한 값(심각도 평가 참조)' }, { u: 'μm', l: '변위', d: '저주파 — 사실상 1× 성분 지배(불균형·정렬 계열 지표)' }];
       var fmtL = function (v) { return (v >= 100 ? v.toFixed(0) : v >= 1 ? v.toFixed(2) : v.toFixed(3)); };
@@ -610,7 +584,7 @@
       _lu.forEach(function (x) {
         if (d.levels[x.u] == null) return;
         var iso = (x.u === (d.natUnit || d.isoUnit));
-        // 가속도 에너지 중심이 Nyquist에 근접하면 물리 신호로 볼 수 없다 → 값 대신 보류 사유를 인쇄
+        // 가속도 에너지 중심이 Nyquist 근접이면 값 대신 보류 사유
         var hold = (x.u === 'g' && d.levelsOk === false);
         var valCell = hold
           ? '<span style="color:#e5484d;font-weight:600;">게재 보류</span>'
@@ -625,14 +599,15 @@
       h.push('</tbody></table></div>');
     }
 
-    // ── 계측 경고 — 게이트와 신호 품질은 같은 관측이므로 한 배너로 합친다.
-    //    경고 피로는 개수가 아니라 "같은 사실의 반복"에서 온다(빨강은 게이트·가속도 보류 둘만).
-    var _qi = (d.quality && d.quality.issues) ? d.quality.issues : [];
+    // ── 계측 경고 — 게이트·신호 품질을 한 배너로(게이트면 빨강, 아니면 앰버)
+    // 참고 사유(일정한 DC 등)는 배너 밖 회색 한 줄 — 앱 상세분석과 같은 구분
+    var _qa = (d.quality && d.quality.issues) ? d.quality.issues : [];
+    var _qi = _qa.filter(function (x) { return !x.info; }), _qn = _qa.filter(function (x) { return x.info; });
     if (d.gate || _qi.length) {
       var redG = !!d.gate;
       h.push('<div class="gate-box' + (redG ? '' : ' amber') + '">');
       h.push('<div class="gb-t">' + (redG ? '계측 검증 필요 — 결함 진단 보류' : '신호 품질 주의') + '</div>');
-      // 발화한 검사를 각각 제목+설명으로 — 한 줄로 이어붙이면 무엇이 걸렸는지 안 읽힌다
+      // 걸린 검사마다 제목+설명
       _qi.forEach(function (x) {
         var dt = String(x.detail || ''), cut = dt.indexOf('—');
         h.push('<div class="gb-i"><div class="gb-il">' + esc(x.label) + ' — ' + esc(cut > 0 ? dt.slice(0, cut).trim() : dt) + '</div>'
@@ -642,6 +617,7 @@
         ? '극단적 Crest/첨도는 베어링 결함(통상 Crest &lt;10)보다 단발 스파이크(ESD·케이블 흔들림·커넥터 접촉·마운트 덜컹임) 시그니처에 가깝습니다. 센서 마운팅·케이블·커넥터 점검 후 재측정을 권장하며, 아래 결함 후보·근거 점수는 계측 검증 전까지 <b>잠정 참고용</b>입니다.'
         : '측정 신뢰도 저하 — 아래 판정은 센서 점검 전 잠정입니다.') + '</div></div>');
     }
+    if (_qn.length) h.push('<div class="q-note">ⓘ ' + esc(_qn.map(function (x) { return x.label + ': ' + x.detail; }).join(' · ')) + '</div>');
 
     // ── 통계 요약 ──
     sectionOpen(h, '통계 요약');
@@ -660,7 +636,7 @@
     if (d.p2p) g2.push({ title: 'Peak-to-Peak 추이', canvasId: 'cP2p', h: 220, tipId: 'tP2p' });
     if (d.crest) g2.push({ title: 'Crest Factor 추이', sub: '충격성 지표', canvasId: 'cCrest', h: 220, tipId: 'tCrest' });
     if (d.kurt) g2.push({ title: '첨도 추이', sub: 'Kurtosis · 3 = 정상', canvasId: 'cKurt', h: 220, tipId: 'tKurt' });
-    if (d.bands) g2.push({ title: '결함 대역 에너지 추이', sub: 'Band Energy', canvasId: 'cBand', h: 220, toggle: true, legend: d.bands.map(function (b) { return { label: b.label, color: b.color }; }) });
+    if (d.bands) g2.push({ title: '결함 대역 에너지 추이', sub: 'Band Energy', canvasId: 'cBand', h: 220, toggle: true, legend: d.bands.map(function (b) { return { label: b.label, color: b.color, dash: !!b.dash }; }) });
     if (g2.length) {
       h.push('<div class="grid2">');
       g2.forEach(function (c) { chartSection(h, c); });
@@ -670,8 +646,7 @@
     // ── 스펙트럼 분석 ──
     var _duTag = (d.dispUnit && d.natUnit && d.dispUnit !== d.natUnit) ? '<span style="font-size:11px;font-weight:700;color:var(--primary-light);background:rgba(0,108,210,.14);padding:1px 7px;border-radius:4px;">표시 물리량: ' + esc(d.dispUnit) + ' (' + esc(d.natUnit) + '에서 변환)</span>' : (d.dispUnit ? '<span style="font-size:11px;color:var(--text-muted);">표시 물리량: ' + esc(d.dispUnit) + '</span>' : '');
     h.push('<div class="group-hd" id="s-spec"><span style="font-size:13px;font-weight:700;letter-spacing:.6px;">스펙트럼 분석</span><span style="font-size:11px;color:var(--text-muted);">주파수 성분 분해 · 결함 가설 탐색</span><span class="hr"></span>' + _duTag + '</div>');
-    // 기본 노출은 2개. 게이트가 걸리면 그 근거가 시간영역에 있으므로 파형이 FFT보다 위다
-    // — 단발 임펄스는 주파수영역에서 평탄하게 퍼져 FFT에는 원인이 보이지 않는다.
+    // 게이트면 파형을 FFT보다 위에(단발 임펄스는 주파수영역에서 평탄하게 퍼짐)
     var _wave = function () { if (d.wave) chartSection(h, { title: '원시 파형', sub: 'Raw Waveform', hint: ZOOM_HINT, desc: p.waveDesc, canvasId: 'cWave', h: 240, tipId: 'tWave', xlineId: 'xWave' }); };
     var _fft = function () {
       if (!d.fft) return;
@@ -682,12 +657,9 @@
       });
     };
     if (d.gate) { _wave(); _fft(); } else { _fft(); _wave(); }
-    // 나머지는 접되 요약줄에 숫자를 남긴다 — 접힌 줄만 읽어도 무엇이 있는지 알아야 "안 본 것"이 되지 않는다.
-    // 전체 보기에서는 접지 않는다 — 요약/전체 토글이 이미 "짧게 보기"를 담당한다.
+    // 나머지 스펙트럼 차트 — 접지 않음(요약/전체 토글이 짧게 보기 담당)
     if (d.spec) chartSection(h, { title: '스펙트로그램', sub: '시간×주파수', desc: '충격이 특정 시각에 몰렸는지(계측 사고) 구간에 고르게 퍼졌는지(기계 현상) 판별 · 밝을수록 강한 성분', canvasId: 'cSpec', h: 200 });
-    /* 커토그램은 **참고**다 — 복조는 고정 1~5 kHz에서 한다(첨도 최대화가 안티에일리어싱 잡음·
-       인버터 스위칭 대역에 붙잡혀 검출이 54%→11%로 떨어졌다). 화면은 이미 "(고정)"이라 적는데
-       리포트만 옛 문구가 남아 "판정이 SK 최댓값 대역에서 나왔다"고 읽히고 있었다. */
+    // 커토그램은 참고용 — 복조는 고정 1~5 kHz(첨도 최대 대역은 안티에일리어싱 잡음·인버터 스위칭에 붙잡힘)
     if (d.kurtogram) chartSection(h, { title: '대역별 충격성', sub: 'Kurtogram · Spectral Kurtosis', desc: (d.kurtogram.best ? '충격성 최대 대역 ' + (d.kurtogram.best.loHz / 1000).toFixed(1) + '–' + (d.kurtogram.best.hiHz / 1000).toFixed(1) + ' kHz (SK ' + d.kurtogram.best.sk.toFixed(1) + ') · 참고용 — 복조는 고정 1–5 kHz에서 합니다 · 마운팅이 자석이면 2 kHz 초과 분석은 무효' : '충격성이 가장 강한 대역 자동 탐색'), canvasId: 'cKurtogram', h: 180 });
     if (d.env) chartSection(h, { title: '포락선 스펙트럼', sub: 'Envelope · 고정 1–5 kHz 대역으로 복조(커토그램은 참고)', desc: p.envDesc, canvasId: 'cEnv', h: 210 });
     if (d.cep) chartSection(h, { title: '켑스트럼', sub: 'Cepstrum', desc: p.cepDesc, canvasId: 'cCep', h: 200 });
@@ -696,22 +668,21 @@
     sectionOpen(h, '지표 요약');
     h.push('<table><thead><tr><th>지표</th><th class="num" style="width:200px;white-space:nowrap;">측정값</th><th>비고</th></tr></thead><tbody>');
     (p.indics || []).forEach(function (it) {
-      // 값과 단위를 분리해 고정폭으로 — 숫자 열이 흔들리지 않게. 단위 없는 지표는 "무차원"
+      // 값·단위 분리(고정폭 단위, 단위 없으면 "무차원")
       var uKnown = /^(mm\/s|g|μm)$/.test(it.hint || '') ? it.hint : '';
-      var band = (!uKnown && it.hint) ? it.hint : '';   // 밴드 해석(계측 아티팩트 의심 등)은 값과 줄을 나눈다
+      var band = (!uKnown && it.hint) ? it.hint : '';   // 밴드 해석(계측 아티팩트 의심 등)은 별도 줄
       h.push('<tr><td>' + esc(it.k) + '</td><td class="num"><span class="nw">' + esc(it.v) + ' <span class="unit-fx">' + esc(uKnown || '무차원') + '</span></span>'
         + (band ? '<div class="ind-band">' + esc(band) + '</div>' : '') + '</td>'
         + '<td style="font-size:12px;color:var(--text-muted);">' + esc(it.desc || '') + '</td></tr>');
     });
     h.push('</tbody></table></div>');
 
-    // ── 결함 근거 강도 (Evidence) — 규칙 기반 자동 산출. LLM 소견 위에 배치해 "근거→해석" 순서 ──
+    // ── 결함 근거 강도 (Evidence) — 규칙 기반 산출, LLM 소견보다 앞(근거→해석) ──
     if (d.evidence && d.evidence.length) {
       var starOf = function (s) { s = Math.max(0, Math.min(5, Math.round(s))); return '★★★★★'.slice(0, s) + '☆☆☆☆☆'.slice(0, 5 - s); };
       sectionOpen(h, '결함 근거 강도', '근거 점수(Evidence Score, 0~100) · 높은 순 = 우선순위', null, 's-evid');
       h.push('<div style="font-size:11px;color:var(--text-muted);margin:-4px 0 10px;">동기/비동기 피크·충격성·대역 에너지 등 실제 지표에서 규칙으로 산출한 <b>근거 점수(Evidence Score)</b>입니다 — <b>확률(%)이 아닙니다</b>. "근거" 열에 점수를 만든 가점 내역을 그대로 공개합니다.</div>');
-      /* 1순위 점수가 채택 임계에 못 미치면 그 사실을 표 위에 적는다 — 표는 점수 순으로 정렬되므로
-         약한 후보도 맨 위에 놓이고, 그러면 판정문이 원인을 안 짚었는데도 표만 원인을 지목한 것처럼 읽힌다. */
+      // 1순위가 채택 기준 미달이면 표 위에 "유력 후보 없음"(상대 순위일 뿐)
       if (d.evidWeak) {
         h.push('<div style="font-size:11px;color:#c77d0a;margin:-6px 0 10px;padding:7px 10px;border:1px solid rgba(199,125,10,.35);border-radius:6px;">'
           + '<b>유력 후보 없음</b> — 1순위 점수가 원인 채택 기준에 못 미칩니다. 아래는 <b>상대 순위일 뿐 원인 지목이 아닙니다</b>.</div>');
@@ -721,22 +692,19 @@
         var sc = c.score != null ? c.score : c.s * 20;
         var detail = c.na ? '<span style="color:#c77d0a;">' + esc(c.caveat || '판별 조건 미충족') + '</span> — 점수 산정 대상 아님(볼 수 없는 것이지 가능성이 낮은 것이 아님)'
           : (c.breakdown ? esc(c.breakdown) : esc(c.why)) + (c.caveat ? ' <span style="color:#c77d0a;">· ' + esc(c.caveat) + '</span>' : '');
-        // na = 근거 부족이 아니라 "이 측정 구성으론 볼 수 없음"(위상·축방향 필요) — 낮은 점수와 구분해 표기
+        // na = 이 측정 구성으론 판별 불가(위상·축방향 필요) — 낮은 점수와 구분
         var starCell = c.na ? '<span style="font-size:11px;color:var(--text-muted);">측정 불가</span>' : '<span style="letter-spacing:1px;">' + starOf(c.s) + '</span>';
         h.push('<tr><td>' + (i === 0 ? '<b>' + esc(c.f) + '</b>' : esc(c.f)) + '</td>'
           + '<td class="mono" style="color:' + (c.s >= 4 ? '#e07b39' : c.s >= 3 ? '#d99a2b' : 'var(--text-muted)') + ';">' + starCell + '</td>'
           + '<td class="num mono" style="color:' + (sc >= 70 ? '#e07b39' : sc >= 40 ? '#d99a2b' : 'var(--text-muted)') + ';">' + (c.na ? '—' : sc + '<span style="color:var(--text-muted);font-size:10px;">/100</span>') + '</td>'
           + '<td style="font-size:12px;color:var(--text-muted);">' + detail + '</td></tr>');
       });
-      h.push('</tbody></table></div>'); // ⚠table을 닫지 않으면 섹션 div가 조기 종료돼 뒤 블록이 카드 밖으로 밀려난다
+      h.push('</tbody></table></div>'); // ⚠ table을 닫지 않으면 섹션 div가 조기 종료
     }
 
-    // 음성 소견·미설명 성분·미입력 메타데이터 — LLM이 빠뜨려도 리포트에는 남도록 결정론적으로 인쇄
-    // 제목 + 들여쓴 줄 — 항목마다 한 줄씩 세워야 "몇 건인지"가 눈에 들어온다
+    // 음성 소견·미설명 성분·미입력 메타데이터 등 — LLM과 무관하게 결정론적으로 인쇄(제목 + 들여쓴 줄)
     var negBlk = [];
-    /* 대역 베이스라인 이탈 — 감시가 본 것을 문서에도 남긴다. 위 대역 분배는 ISO 방법(10–1000 Hz)이라
-       마운팅 상한 위 대역이 표에 없고, 그 대역은 결함 대역 탐색에서도 빠진다. 여기에 안 적으면
-       "상승은 있었는데 아무 데도 안 적힌" 구간이 생겨, 센서 부착 불량도 베어링 초기 결함도 놓친다. */
+    // 대역 베이스라인 이탈 — 감시 결과를 문서에도 기록(마운팅 상한 위 대역은 다른 표·결함 대역 탐색에 없음)
     if (d.bandDev && d.bandDev.rows && d.bandDev.rows.length) {
       var _bdOver = d.bandDev.rows.filter(function (r) { return r.over; });
       var _bdRows = _bdOver.length
@@ -773,11 +741,9 @@
       var inlineMd = function (s) {
         return esc(s).replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>').replace(/`([^`]+)`/g, '<code>$1</code>');
       };
-      // 색 위계: 소제목(밝음) > 불릿 본문(보통) > 근거 수치(볼드) · 결론(→)은 강조색으로 따로 세운다.
-      // 전부 같은 밝기면 위계가 사라져 "다 중요해 보이는데 아무것도 안 읽히는" 상태가 된다.
+      // 색 위계: 소제목(밝음) > 불릿 본문(보통) > 근거 수치(볼드), 결론(→)은 별도 줄
       var pushBullet = function (txt) {
-        // LLM이 "관측 — 판단. → 결론"을 한 줄에 붙여 쓰므로, 화살표에서 잘라 결론을 아래 줄로 내린다
-        // "0.538→1.88"처럼 숫자 사이 화살표는 범위 표기다 — 공백으로 둘러싸인 " → "만 결론 마커로 본다
+        // " → "(양옆 공백)에서 잘라 결론을 아래 줄로 — 숫자 사이 "→"는 범위 표기라 제외
         var m = /\s→\s/.exec(txt);
         var head = m ? txt.slice(0, m.index).trim() : txt;
         var tail = m ? txt.slice(m.index + m[0].length).trim() : '';
@@ -804,14 +770,13 @@
     (p.actions || []).forEach(function (a, i) {
       h.push('<div class="rec-item"><span class="no">' + (i + 1) + '.</span>' + esc(a.txt) + '</div>');
     });
-    h.push('<div style="margin-top:14px;padding:11px 14px;border-radius:8px;background:rgba(217,154,43,0.10);border:1px solid rgba(217,154,43,0.30);font-size:12px;line-height:1.6;color:var(--text-secondary)">측정 한계: 본 리포트는 단일 채널·단일 방향 진동 데이터 기반이며 위상(phase) 정보가 없고 회전속도는 스펙트럼 실측이 가능하면 실측값을, 불가하면 명판값을 기준으로 합니다(본문 [회전수] 표기 참조). 결함 메커니즘 중 불평형·정렬불량·굽음·소프트풋은 위상·축방향 없이는 원리상 <b>측정 불가</b>이고, 베어링·벨트·베인 등은 품번·제원·날개수 같은 <b>설비 정보가 없어 대조 자체가 불가</b>합니다(둘 다 가능성이 낮은 것이 아니라 볼 수 없는 것입니다). 그 외 후보는 <b>가설</b>이며, 이상 신호에 대한 <b>조사 필요 플래그</b>로 활용하십시오. 확정 진단에는 다축·위상 측정과 정비 담당자 확인이 필요합니다.</div>');
+    h.push('<div style="margin-top:14px;padding:11px 14px;border-radius:8px;background:rgba(217,154,43,0.10);border:1px solid rgba(217,154,43,0.30);font-size:12px;line-height:1.6;color:var(--text-secondary)">측정 한계: 본 리포트는 단일 채널·단일 방향 진동 데이터 기반이며 위상(phase) 정보가 없고 회전속도는 스펙트럼 실측이 가능하면 실측값을, 불가하면 입력값(명판 또는 종동축 환산)을 기준으로 합니다(본문 [회전수] 표기 참조). 결함 메커니즘 중 불평형·정렬불량·굽음·소프트풋은 위상·축방향 없이는 원리상 <b>측정 불가</b>이고, 베어링·벨트·베인 등은 품번·제원·날개수 같은 <b>설비 정보가 없어 대조 자체가 불가</b>합니다(둘 다 가능성이 낮은 것이 아니라 볼 수 없는 것입니다). 그 외 후보는 <b>가설</b>이며, 이상 신호에 대한 <b>조사 필요 플래그</b>로 활용하십시오. 확정 진단에는 다축·위상 측정과 정비 담당자 확인이 필요합니다.</div>');
     h.push('</div>');
 
     h.push('</div>'); // #detail 닫기
-    // 재현성 스트립 — 같은 설비의 두 리포트가 다를 때, 데이터가 달라진 건지 엔진이 달라진 건지 가른다.
-    // 지문(fp)은 실제 판정 임계에서 계산되므로 버전을 올리는 걸 잊어도 동작이 바뀌면 달라진다.
+    // 재현성 스트립 — 두 리포트 차이가 데이터 때문인지 엔진 때문인지 구분(지문 fp는 판정 임계에서 계산)
     if (p.build) {
-      // 라벨(작고 흐림) < 값(크고 밝음) < 보조(작고 흐림) — 세 단계로 시선을 태운다
+      // 라벨(작고 흐림) · 값(크고 밝음) · 보조(작고 흐림)
       h.push('<div class="build-strip">');
       (p.build.cells || []).filter(function (c) { return c.v; }).forEach(function (c) {
         h.push('<div class="bs-i' + (c.narrow ? ' narrow' : '') + '"><div class="bs-k">' + esc(c.k) + '</div>'

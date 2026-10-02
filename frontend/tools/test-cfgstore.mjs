@@ -1,5 +1,6 @@
-// 설정이 DB 를 왕복하는지 — 도메인 JSON 을 조각내 담고 다시 합쳐 읽는 경로를 fetch 목으로 재현한다.
-// 조각이 하나라도 어긋나면 그 도메인이 에러 없이 기본값으로 떨어지므로 눈으로는 못 잡는다.
+// 설정 DB 왕복 — 도메인 JSON을 조각내 저장하고 다시 합쳐 읽는 경로를 fetch 목으로 재현
+// · 조각이 어긋나면 그 도메인이 에러 없이 기본값으로 떨어져 눈으로는 못 잡음
+// 오프라인(Neo 불필요) · npm run smoke 포함
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
@@ -9,7 +10,7 @@ const DB = createRequire(import.meta.url)(path.join(HERE, '../../cgi-bin/db/db.j
 let pass = 0, fail = 0;
 const chk = (ok, label, got) => { if (ok) { pass++; console.log(`  ok   ${label}`); } else { fail++; console.log(`  FAIL ${label}${got ? ' — ' + got : ''}`); } };
 
-// LOOKUP 테이블을 메모리 맵으로 흉내낸다. SQL 문자열에서 키·값을 되읽어 실제 문장을 검증한다.
+// LOOKUP 테이블을 메모리 맵으로 흉내 — SQL 문자열에서 키·값을 되읽어 실제 문장 검증
 const store = new Map();
 globalThis.fetch = async (url) => {
   const sql = decodeURIComponent(String(url).replace(/^[^?]*\?q=/, '').replace(/&.*$/, ''));
@@ -25,7 +26,7 @@ globalThis.fetch = async (url) => {
 
 DB.setUser('JOY');
 
-// 설비 정보를 실제 규모로 — 한글 별칭이 섞여야 인코딩 팽창까지 재현된다
+// 설비 정보 실제 규모 — 한글 별칭으로 인코딩 팽창까지 재현
 const equip = {}, alias = {};
 for (let i = 0; i < 300; i++) {
   equip['VIBE_TEST:SENSOR_' + i] = { cls: 'II', rpm: 1780 + i, geo: { n: 8, d: 7.94, p: 39.0 } };
@@ -50,7 +51,7 @@ chk(back && back.aliases['VIBE_TEST:SENSOR_7'] === '펌프 7번 구동축', '한
 chk(back && back.llmKeys.claude === "sk-ant-'quoted'", '따옴표 든 시크릿이 보존된다', back && back.llmKeys && back.llmKeys.claude);
 chk(back && back.monitorOn === true && back.machineClass === 'III', '작은 도메인도 함께 돌아온다');
 
-// 줄어든 도메인 — 옛 조각이 남으면 다음 읽기에 덧붙어 파싱이 깨진다
+// 줄어든 도메인 — 옛 조각이 남으면 다음 읽기에 덧붙어 파싱 깨짐
 const before = [...store.keys()].filter((k) => /^cfg:equipment#/.test(k)).length;
 await DB.saveConfigPartial({ equipGeo: { 'VIBE_TEST:SENSOR_0': { cls: 'I' } }, aliases: {} }, ['equipGeo', 'aliases']);
 const after = [...store.keys()].filter((k) => /^cfg:equipment#/.test(k)).length;

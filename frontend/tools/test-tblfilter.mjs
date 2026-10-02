@@ -1,14 +1,7 @@
-/* 모니터링 테이블 필터 검사 — 오프라인. npm run smoke에 포함.
-
-   두 필터의 성격이 다르다는 것이 이 화면의 규칙이다.
-     · 등급 필터 — KPI가 세어 둔 것 중 하나를 집는다 → KPI 숫자는 그대로여야 한다
-     · 테이블 필터 — 모집단 자체를 줄인다 → KPI도 같이 줄어야 한다
-   섞이면 "심각 2"라고 떠 있는데 목록이 비는 화면이 되고, 그 뒤로 KPI를 못 믿게 된다.
-   반대로 빈 상태 화면(monEmpty)까지 따라가면 필터로 0이 된 것을 "감시할 설비가 없다"로
-   말하게 되어, 소스를 다시 고르라는 엉뚱한 안내가 나간다.
-
-   저장하는 것은 고른 목록이 아니라 숨긴 목록이다 — 기본이 전체 선택이라, 고른 목록을 들고
-   있으면 나중에 생긴 테이블이 그 목록에 없어서 말없이 화면에서 빠진다. */
+/* 모니터링 테이블 필터 — 오프라인(Neo 불필요) · npm run smoke 포함
+   · 등급 필터는 KPI 불변, 테이블 필터는 모집단 축소(KPI도 축소), 빈 상태 화면(monEmpty)과 구분
+   · 판정 대상·설정 태그 수는 필터와 무관, 즉시 반영·칩(3개 + N)·검색·전체 선택/해제
+   · 숨긴 목록 저장 — 나중에 생긴 테이블은 자동 표시 */
 globalThis.window = globalThis;
 
 const CH = (await import('../../cgi-bin/chart/chart.js')).default;
@@ -38,7 +31,7 @@ function mkApp(patch) {
 }
 const countIn = (app, tbl) => app._activeEqs().filter((e) => e.table === tbl).length;
 
-// ── 1. 소스가 하나면 아예 안 나온다 ───────────────────────────────────────
+// ── 1. 소스가 하나면 필터 없음 ───────────────────────────────────────
 {
   const one = mkApp({ srcSel: ['VIBRATION_RAW'] });
   const v = one.renderVals();
@@ -64,7 +57,7 @@ const countIn = (app, tbl) => app._activeEqs().filter((e) => e.table === tbl).le
   chk(c0.alias === (eq0.alias || eq0.name), '큰 글씨는 별칭 그대로', c0.alias);
 }
 
-// ── 3. 하나 끄면 모집단이 줄고 KPI도 따라간다 ─────────────────────────────
+// ── 3. 하나 끄면 모집단·KPI 동반 축소 ─────────────────────────────
 {
   const app = mkApp();
   const before = app.renderVals();
@@ -81,7 +74,7 @@ const countIn = (app, tbl) => app._activeEqs().filter((e) => e.table === tbl).le
   chk(after.tblChips.length === TABLES.length - 1, '남아 있는 테이블이 칩으로 나온다', after.tblChips.map((c) => c.name).join(','));
 }
 
-// ── 4. 따라가면 안 되는 것들 ──────────────────────────────────────────────
+// ── 4. 필터와 무관해야 하는 것 ──────────────────────────────────────────────
 {
   const app = mkApp();
   const all = app._activeEqs().length;
@@ -94,10 +87,9 @@ const countIn = (app, tbl) => app._activeEqs().filter((e) => e.table === tbl).le
   chk(after.detailShow === before.detailShow && after.reportShow === before.reportShow, '다른 탭의 표시 조건도 안 건드린다');
 }
 
-// ── 5. 고르는 즉시 반영된다 ───────────────────────────────────────────────
+// ── 5. 선택 즉시 반영 ───────────────────────────────────────────────
 {
-  /* 확인 버튼을 두지 않는다 — 이 필터는 보기만 바꾸고 판정에는 영향이 없어서 되돌리는 값이 싸다.
-     대신 걸린 것이 칩으로 항상 보이고, 그 자리에서 해제된다. */
+  /* 확인 버튼 없음 — 보기만 바꾸고 판정 무관이라 되돌리기 쉬움, 걸린 것은 칩으로 항상 표시·즉시 해제 */
   const app = mkApp();
   let v = app.renderVals();
   const all = v.cards.length;
@@ -116,8 +108,7 @@ const countIn = (app, tbl) => app._activeEqs().filter((e) => e.table === tbl).le
 
 // ── 6. 칩은 셋까지, 나머지는 +N ───────────────────────────────────────────
 {
-  /* 테이블이 늘어나면 제목줄이 통째로 칩에 먹힌다. 접는 대신 수를 남기고, 그 버튼이
-     목록을 다시 여는 자리가 된다 — 접힌 것이 무엇인지는 거기서 본다. */
+  /* 테이블이 많으면 제목줄이 칩에 먹힘 → 넷째부터 +N으로 접고, +N은 목록을 다시 여는 버튼 */
   const app = mkApp({ srcSel: TABLES.concat('BEARING_TEMP') });
   app.setState({ tblHide: ['BEARING_TEMP'] });        // 남은 4개
   let v = app.renderVals();
@@ -130,10 +121,9 @@ const countIn = (app, tbl) => app._activeEqs().filter((e) => e.table === tbl).le
   chk(app.renderVals().tblOpen === true, '+N을 누르면 목록이 다시 열린다');
 }
 
-// ── 7. 전부 끄면 그렇게 말한다 ────────────────────────────────────────────
+// ── 7. 전부 끄면 전용 안내 ────────────────────────────────────────────
 {
-  /* 카드 자리를 그냥 비워 두면 필터 탓인지 설비가 없는 탓인지 구분이 안 된다.
-     빈 상태 화면(monEmpty)은 "소스가 없다"는 뜻이라 여기 쓸 수 없다. */
+  /* 빈 카드 자리로는 필터 탓·설비 부재 구분 불가, monEmpty는 "소스 없음" 전용이라 별도 안내 */
   const app = mkApp();
   let v = app.renderVals();
   const all = v.cards.length;
@@ -148,12 +138,12 @@ const countIn = (app, tbl) => app._activeEqs().filter((e) => e.table === tbl).le
   chk(v.tblAllOn === true && v.cards.length === all && v.tblNoneShow === false, '전체 선택이면 원래대로 돌아온다', String(v.cards.length));
 }
 
-// ── 8. 칩의 ×는 그 테이블만 끈다 ──────────────────────────────────────────
+// ── 8. 칩의 ×는 그 테이블만 끔 ──────────────────────────────────────────
 {
   const app = mkApp();
   const all = app.renderVals().cards.length;
   const first = app.renderVals().tblOptions[0].name;
-  app.renderVals().tblOptions.find((o) => o.name === first).onToggle();   // 하나 꺼서 칩을 띄운다
+  app.renderVals().tblOptions.find((o) => o.name === first).onToggle();   // 하나 꺼서 칩 표시
   const chip = app.renderVals().tblChips[0];
   chip.onRemove();
   const v = app.renderVals();
@@ -171,8 +161,7 @@ const countIn = (app, tbl) => app._activeEqs().filter((e) => e.table === tbl).le
   v = app.renderVals();
   chk(v.tblOptions.length === 1 && v.tblOptions[0].name === 'GEARBOX_VIB', '대소문자 구분 없이 부분 일치로 거른다', v.tblOptions.map((o) => o.name).join(','));
   chk(v.cards.length === all, '검색만으로는 화면이 안 바뀐다 — 목록을 좁힐 뿐이다');
-  /* 전체 선택·해제는 보이는 것에 대해서다 — 검색으로 걸러 놓고 눌렀는데 화면 밖의 것까지
-     바뀌면 무엇이 걸렸는지 알 수 없다. */
+  /* 전체 선택·해제는 검색으로 보이는 것에만 적용 */
   v.onTblClearAll();
   v = app.renderVals();
   chk(v.cards.length === all - countIn(app, 'GEARBOX_VIB'), '전체 해제는 보이는 것만 끈다', String(v.cards.length));
@@ -184,10 +173,9 @@ const countIn = (app, tbl) => app._activeEqs().filter((e) => e.table === tbl).le
   chk(app.renderVals().tblQuery === '', '닫으면 검색어를 비운다 — 다시 열었을 때 잘린 목록은 없는 테이블로 읽힌다');
 }
 
-// ── 10. 나중에 생긴 테이블은 자동으로 보인다 ──────────────────────────────
+// ── 10. 나중에 생긴 테이블은 자동 표시 ──────────────────────────────
 {
-  /* 숨긴 것을 저장하는 이유다. 고른 목록을 들고 있었다면 새 테이블이 그 목록에 없어
-     말없이 화면에서 빠진다 — 감시는 도는데 카드가 없는 상태가 조용히 만들어진다. */
+  /* 숨긴 목록을 저장하는 이유 — 고른 목록을 저장하면 새 테이블이 빠져 감시는 도는데 카드가 없는 상태가 됨 */
   const app = mkApp({ srcSel: ['VIBRATION_RAW', 'SENSOR_DATA'], tblHide: ['SENSOR_DATA'] });
   app.setState({ srcSel: ['VIBRATION_RAW', 'SENSOR_DATA', 'GEARBOX_VIB'] });
   const v = app.renderVals();
@@ -196,7 +184,7 @@ const countIn = (app, tbl) => app._activeEqs().filter((e) => e.table === tbl).le
   chk(v.cards.every((c) => !/ \(SENSOR_DATA\)$/.test(c.sub)), '전에 끈 것은 그대로 꺼져 있다');
 }
 
-// ── 11. 소스에서 빠진 테이블이 숨김에 남아 있어도 무해하다 ─────────────────
+// ── 11. 소스에서 빠진 테이블이 숨김에 남아 있어도 무해 ─────────────────
 {
   const app = mkApp({ srcSel: ['VIBRATION_RAW', 'SENSOR_DATA'], tblHide: ['GEARBOX_VIB'] });
   const v = app.renderVals();

@@ -1,8 +1,6 @@
-/* 대역 백필 앵커의 되짚기 검사 — 오프라인(Neo 불필요). npm run smoke에 포함.
-
-   백필 앵커는 벽시계 격자(정각·10분·20분…)에 맞춰 만들어지는데, 간헐 수집(예: 10분마다 1초)의
-   기록 시각은 그 격자와 무관하다. 그대로 두면 앵커가 거의 전부 수집 공백에 떨어져 백필이
-   한 건도 못 쌓고, 대역 베이스라인이 학습되지 않아 세 판정 중 대역만 조용히 죽는다. */
+/* 대역 백필 앵커 되짚기 — 표본이 모자란 앵커는 격자 한 칸 안의 마지막 표본 초로 되짚음
+   · 간헐 수집의 기록 시각이 벽시계 격자와 무관해 앵커가 수집 공백에 떨어지는 경우 대응
+   오프라인(Neo 불필요) · npm run smoke 포함 */
 const Band = (await import('../../cgi-bin/monitor/band.js')).default;
 
 let fail = 0;
@@ -13,7 +11,7 @@ const chk = (ok, msg, extra) => {
 const TAGS = [{ tbl: 'T', tag: 'A', fr: 30, fs: 25600, demod: [5000, 10000], bf: null }];
 const body = (tql) => (/SCRIPT\(\{([\s\S]*)\}\)/.exec(tql) || [])[1] || '';
 
-// ── 백필: 격자를 받아 되짚기·구간 중복검사를 켠다 ─────────────────────────
+// ── 백필: 격자를 받아 되짚기·구간 중복검사 켬 ────────────────────────────
 {
   const tql = Band.buildBandTql({ tags: TAGS, anchors: [1e12, 1e12 + 600000], nowMs: 1e12, grid: 600000 });
   chk(/var GRID=600000;/.test(tql), '격자 간격이 값으로 구워진다');
@@ -27,7 +25,7 @@ const body = (tql) => (/SCRIPT\(\{([\s\S]*)\}\)/.exec(tql) || [])[1] || '';
   try { new Function(body(tql)); } catch (e) { err = e; }
   chk(!err, '생성된 스크립트가 구문상 유효하다 — 임베드 코드라 오류는 실행 때만 드러난다', err ? err.message : '');
 }
-// ── 타이머: 앵커가 MAX_TIME 하나뿐이라 되짚을 필요가 없다 ─────────────────
+// ── 타이머: 앵커가 MAX_TIME 하나라 되짚기 불필요 ───────────────────────────
 {
   const tql = Band.buildBandTql({ tags: TAGS, nowMs: 1e12 });
   chk(/var GRID=0;/.test(tql), '타이머 경로는 격자가 0 — 되짚기와 구간 중복검사가 꺼진다');
@@ -36,7 +34,7 @@ const body = (tql) => (/SCRIPT\(\{([\s\S]*)\}\)/.exec(tql) || [])[1] || '';
   try { new Function(body(tql)); } catch (e) { err = e; }
   chk(!err, '타이머 스크립트도 구문상 유효하다', err ? err.message : '');
 }
-// ── 앱이 격자를 실제로 넘긴다 ─────────────────────────────────────────────
+// ── 앱의 격자 전달 확인 ───────────────────────────────────────────────────
 {
   const { readFile } = await import('node:fs/promises');
   const app = await readFile(new URL('../src/app.js', import.meta.url), 'utf8');

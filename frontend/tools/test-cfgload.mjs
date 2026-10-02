@@ -1,12 +1,9 @@
-/* 설정 읽기 실패 — 오프라인(Neo 불필요). npm run smoke에 포함.
-
-   설정 읽기가 실패했을 때 "저장한 적 없음"으로 삼키면 앱이 기본값으로 떠서 화면은 멀쩡해 보이고,
-   그 상태의 저장 한 번이 실제 설정을 덮는다(알람 토글 = 전 영역, 카드 순서 = 설비 정보,
-   SYS 부팅 = 옛 파일 이관). 세 결과(읽음·없음·실패)가 갈리는지와, 실패 동안 덮어쓰기 경로가
-   전부 막히는지, 복구 흐름(다시 시도·손상 영역만 기본값으로 열기)을 DB 응답을 흉내 내 확인한다. */
+/* 설정 읽기 실패 — 세 결과(읽음·없음·실패) 구분, 실패 동안 덮어쓰기 경로(저장·알람 토글·부분 저장·옛 파일 이관·타이머) 차단
+   · 복구 흐름(다시 시도·손상 영역만 기본값으로 열기)을 DB 응답 흉내로 확인
+   오프라인(Neo 불필요) · npm run smoke 포함 */
 globalThis.window = globalThis;
 
-// CONFIG 표를 메모리 맵으로 흉내 내고, 쓰기·타이머·파일 요청을 센다
+// CONFIG 테이블을 메모리 맵으로 흉내 — 쓰기·타이머·파일 요청 집계
 const store = new Map();
 let failSelect = false;
 const hits = { write: 0, rpc: 0, file: 0 };
@@ -42,7 +39,7 @@ const REAL = { srcSel: ['VIBE_TEST'], equipRpm: { 'VIBE_TEST:A': 1780 }, aliases
   machineClass: 'III', monitorOn: true, monMode: 'server', llmProvider: 'ollama' };
 async function seed(cfg) { store.clear(); failSelect = false; await DB.saveConfig(cfg); hits.write = 0; hits.rpc = 0; hits.file = 0; }
 
-// ── db: 세 결과가 갈린다 ────────────────────────────────────────────────
+// ── db: 세 결과 구분 ───────────────────────────────────────────────────
 await seed(REAL);
 chk((await DB.loadConfig()).machineClass === 'III', '읽음 — 설정 객체');
 store.clear();
@@ -101,7 +98,7 @@ function mkApp() {
   chk(hits.rpc === 0, '타이머를 굽거나 지우지 않는다(기본값 "앱 감시"가 서버 타이머를 지우는 경로)', 'rpc=' + hits.rpc);
   chk(/불러오지 못한/.test(app._lastToast || ''), '거부 사유를 알린다', app._lastToast);
 
-  // 다시 시도 — 이번엔 읽히지만 데이터(테이블 목록)를 못 불러와 설정이 화면에 안 들어간 경우
+  // 다시 시도 — 읽혔지만 데이터(테이블 목록)를 못 불러와 설정이 화면에 미반영인 경우
   failSelect = false;
   app._retryCfg();
   await settle();
@@ -109,7 +106,7 @@ function mkApp() {
   chk(app._cfgOk === false && (await app._persistCfg()) === false && hits.write === 0,
     '설정은 읽었지만 화면에 반영 전(데이터 적재 실패)이면 여전히 저장을 막는다');
 
-  // 설정이 화면에 들어가면 잠금이 풀린다
+  // 설정이 화면에 반영되면 잠금 해제
   Object.assign(app, { _loadReports() {}, _startTimers() {}, _loadEventsLive() {}, _checkRevived() {},
     _judgeLive() { return Promise.resolve(); }, _loadBaselines() { return Promise.resolve(); } });
   app._applyLive({ equipment: [], now: Date.now() }, await DB.loadConfig(), ['VIBE_TEST']);
@@ -121,7 +118,7 @@ function mkApp() {
     '이후 저장은 실제 설정을 그대로 다시 쓴다(설비 정보 보존)');
 }
 {
-  // 세션이 끊겨 실패한 것이면 인증 화면이 먼저다
+  // 세션 끊김이면 인증 화면 우선
   await seed(REAL);
   const app = mkApp();
   app.state.authMsg = '세션이 만료되었습니다';
@@ -145,7 +142,7 @@ function mkApp() {
   chk(hits.write === w0, '누르는 것만으로는 아무것도 저장하지 않는다', 'writes=' + (hits.write - w0));
 }
 {
-  // 없음 — 신규 설치는 기본값으로 시작하고 저장을 연다(덮어쓸 것이 없다)
+  // 없음 — 신규 설치는 기본값으로 시작, 저장 허용(덮어쓸 것 없음)
   store.clear(); failSelect = false;
   const app = mkApp();
   app._bootAs(CH);

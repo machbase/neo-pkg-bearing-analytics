@@ -1,5 +1,4 @@
-// data/mock.js — 목(데모) 데이터 생성기 (vibe-engine에서 분리)
-// DB가 닿지 않을 때(file:// 등)의 폴백 전용. 차트는 chart, 계산은 calc를 쓴다.
+// 목(데모) 데이터 생성기 — 테스트 전용(앱 번들 미포함), 차트는 chart·계산은 calc 모듈 사용
 import CH from '../../cgi-bin/chart/chart.js';
 import VC from '../../cgi-bin/calc/calc.js';
 
@@ -52,7 +51,7 @@ const { ISO_ZONES, UNIT_ZONES, zonesFor, gradeFor, bearingFreqs, BEARINGS, fault
       var zones = zonesFor(m.unit, m.cls);
       var rollup = [];
       var rmsArr = [], peakArr = [], crestArr = [];
-      // 시계열: base + 완만한 상승추세 + 일주기 + 노이즈. 결함 심할수록 후반 급상승.
+      // 시계열: base + 완만한 상승추세 + 일주기 + 노이즈, 추세 클수록 후반 급상승
       var accel = m.trend;
       for (var i = 0; i < ROLLUP_H; i++) {
         var frac = i / (ROLLUP_H - 1);
@@ -99,7 +98,7 @@ const { ISO_ZONES, UNIT_ZONES, zonesFor, gradeFor, bearingFreqs, BEARINGS, fault
     });
 
     // 이벤트 생성 (grade>=1 위주)
-    // 실제 앱이 만드는 유형만 — 'spectrum'은 생성 코드가 없어 목에만 있던 유령 유형이었다
+    // 실제 앱이 만드는 유형만
     var TYPES = [{ k: 'threshold', ko: '임계 초과' }, { k: 'baseline', ko: '베이스라인 이탈' },
       { k: 'band', ko: '대역 이탈' }, { k: 'recovery', ko: '정상 복귀' }];
     var events = [];
@@ -175,7 +174,7 @@ const { ISO_ZONES, UNIT_ZONES, zonesFor, gradeFor, bearingFreqs, BEARINGS, fault
     return { raw: { times_ms: times_ms, values: values, fs: fs }, fft: fftO, envelope: envSpectrum(eq, bf, fr, sev), spectro: spectroGrid(eq, fftO), cepstrum: cepstrum(eq, fftO), indics: specIndics(eq, fftO, values) };
   }
 
-  /* 포락선(envelope) 스펙트럼: 공진대역 밴드패스 → 복조 → FFT. 베어링 결함 주파수와 하모닉을 드러냄 */
+  /* 포락선(envelope) 스펙트럼 합성: 베어링 결함 주파수 하모닉(내륜은 ±fr 측대역 추가) */
   function envSpectrum(eq, bf, fr, sev) {
     var ff = 0, flab = '';
     if (eq.bearing.n) { if (eq.fault === 'bearing-outer') { ff = bf.BPFO; flab = 'BPFO'; } else if (eq.fault === 'bearing-inner') { ff = bf.BPFI; flab = 'BPFI'; } }
@@ -194,7 +193,7 @@ const { ISO_ZONES, UNIT_ZONES, zonesFor, gradeFor, bearingFreqs, BEARINGS, fault
     return { freqs: freqs, mags: mags, markers: markers, fault: ff ? flab : null, hint: ff ? (flab + ' 하모닉이 포락선에 뚜렷 → ' + (eq.fault === 'bearing-outer' ? '외륜' : '내륜') + ' 결함 특징') : '모델된 구름결함 없음 · 포락선 평태' };
   }
 
-  /* 스펙트로그램(워터폴): 시간(세로) × 주파수(가로) × 강도. 열화가 진행될수록 결함대역이 밝아짐 */
+  /* 스펙트로그램(워터폴): 시간(세로) × 주파수(가로) × 강도, 시간·등급 따라 강도 증가 */
   function spectroGrid(eq, fftO) {
     var rows = 22, cols = 52, fmax = fftO.freqs[fftO.freqs.length - 1], grid = [], rnd = mulberry32(eq.id.length * 17 + eq.rpm + 5), sev = eq.grade;
     for (var t = 0; t < rows; t++) {
@@ -205,7 +204,7 @@ const { ISO_ZONES, UNIT_ZONES, zonesFor, gradeFor, bearingFreqs, BEARINGS, fault
     return { grid: grid, rows: rows, cols: cols, fmax: fmax };
   }
 
-  /* 켑스트럼: 스펙트럼 로그의 역변환. 라모닉(rahmonic) 피크 = 주기적 성분 간격(측대역·하모닉) */
+  /* 켑스트럼: 스펙트럼 로그의 역변환, 라모닉(rahmonic) 피크 = 주기적 성분 간격(측대역·하모닉) */
   function cepstrum(eq, fftO) {
     var mags = fftO.mags, res = fftO.res, fr = eq.rpm / 60, logm = new Array(mags.length);
     for (var i = 0; i < mags.length; i++) logm[i] = Math.log(mags[i] + 1e-6);

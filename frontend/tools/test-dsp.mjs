@@ -1,7 +1,5 @@
-// DSP 코어 단위 검사 — 오프라인(Neo 불필요). npm run smoke에 포함.
-// 정답을 아는 합성 신호를 넣어 "계산이 물리적으로 맞는가"를 본다.
-// 라이브 데이터로는 "그럴듯한 값이 나왔다"까지밖에 확인할 수 없다 — 정현파 100 Hz를 넣으면
-// 100 Hz가 나와야 하고, 진폭 2.0이면 스펙트럼 피크도 2.0이어야 한다. 그걸 여기서 못 박는다.
+// DSP 코어 — 정답을 아는 합성 신호로 계산의 물리적 정확성 확인(주파수·진폭·RMS·첨도·베어링 주파수 등)
+// 오프라인(Neo 불필요) · npm run smoke 포함
 import { mulberry32 } from './_rnd.mjs';
 const VC = (await import('../../cgi-bin/calc/calc.js')).default;
 
@@ -15,14 +13,14 @@ const near = (a, b, tolPct) => Math.abs(a - b) <= Math.abs(b) * (tolPct / 100) +
 // ── 신호 생성기 ────────────────────────────────────────────────────────────
 const sine = (n, fs, f, amp, phase) => Array.from({ length: n }, (_, i) => amp * Math.sin(2 * Math.PI * f * i / fs + (phase || 0)));
 const add = (...arrs) => arrs[0].map((_, i) => arrs.reduce((s, a) => s + a[i], 0));
-// 결정론 잡음 — Math.random은 실행마다 결과가 달라져 회귀 판정이 불가능하다
+// 결정론 잡음 — Math.random은 실행마다 달라 회귀 판정 불가
 const rnd = mulberry32(12345);
 const noise = (n, amp) => Array.from({ length: n }, () => amp * rnd());
 const peakOf = (freqs, mags) => { let bi = 0; for (let i = 1; i < mags.length; i++) if (mags[i] > mags[bi]) bi = i; return { f: freqs[bi], m: mags[bi] }; };
 
 const FS = 2048;
 
-// ── 1. amplitudeSpectrum — 주파수와 진폭이 모두 맞아야 한다 ────────────────
+// ── 1. amplitudeSpectrum — 주파수·진폭 정확도 ────────────────────────────────
 {
   const v = sine(FS * 4, FS, 100, 2.0);
   const sp = VC.amplitudeSpectrum(v, FS, 500);
@@ -41,14 +39,14 @@ const FS = 2048;
     `60Hz=${at(60).toFixed(3)} · 180Hz=${at(180).toFixed(3)}`);
 }
 
-// ── 3. welchSpectrum — 평균이 잡음을 줄여야 한다 ───────────────────────────
+// ── 3. welchSpectrum — 평균으로 잡음 감소 ────────────────────────────────────
 {
   const sig = sine(FS * 8, FS, 100, 1.0);
   const v = add(sig, noise(FS * 8, 1.5));
   const w1 = VC.welchSpectrum(v, FS, 500, 8);     // 블록 8초 = 사실상 1블록
   const w8 = VC.welchSpectrum(v, FS, 500, 1);     // 블록 1초 → 다중 평균
   chk(w8.blocks > w1.blocks, '블록을 줄이면 평균 횟수 증가', `${w1.blocks}회 → ${w8.blocks}회`);
-  // 잡음 바닥의 변동(표준편차/평균)이 평균으로 줄어드는지
+  // 잡음 바닥 변동(표준편차/평균)이 평균으로 줄어드는지 확인
   const floorVar = (w) => {
     const off = w.freqs.map((f, i) => (Math.abs(f - 100) > 20 ? w.mags[i] : null)).filter((x) => x != null);
     const mu = off.reduce((a, b) => a + b, 0) / off.length;
@@ -59,8 +57,8 @@ const FS = 2048;
   chk(near(peakOf(w8.freqs, w8.mags).f, 100, 3), '평균 후에도 신호 주파수 유지');
 }
 
-// ── 4. envelopeSpectrum — AM 신호의 변조 주파수를 복조해야 한다 ────────────
-// 반송파 500 Hz를 37 Hz로 진폭변조 → 포락선에 37 Hz가 나와야 한다(베어링 결함의 원리).
+// ── 4. envelopeSpectrum — AM 신호의 변조 주파수 복조 ─────────────────────────
+// 반송파 500 Hz를 37 Hz로 진폭변조 → 포락선에 37 Hz(베어링 결함의 원리)
 {
   const n = FS * 4;
   const carrier = sine(n, FS, 500, 1.0);
@@ -73,11 +71,11 @@ const FS = 2048;
   chk(q && q.f0 > 0 && near(q.f0, 37, 5), 'envelopeQuant가 같은 반복주파수 보고', q && `f0=${q.f0.toFixed(2)} 하모닉 ${q.harm}`);
 }
 
-// ── 5. kurtogram — 충격이 실린 대역을 골라야 한다 ──────────────────────────
+// ── 5. kurtogram — 충격이 실린 대역 선택 ─────────────────────────────────────
 {
   const n = 8192;
   const base = sine(n, FS, 50, 1.0);
-  // 700 Hz 링잉 임펄스를 20 Hz 주기로 — 700 Hz 부근 대역이 선택돼야 한다
+  // 700 Hz 링잉 임펄스를 20 Hz 주기로 — 700 Hz 부근 대역 선택 기대
   const imp = Array.from({ length: n }, (_, i) => {
     const t = i / FS, dt = t - Math.floor(t * 20) / 20;
     return 3 * Math.exp(-300 * dt) * Math.sin(2 * Math.PI * 700 * dt);
@@ -88,7 +86,7 @@ const FS = 2048;
     const c = kg.best.center;
     chk(c > 400 && c < 1000, '충격 링잉(700 Hz)이 실린 대역을 선택', `중심 ${c.toFixed(0)} Hz`);
   }
-  // 상한을 걸면 그 아래에서만 고른다
+  // 상한 지정 시 그 아래에서만 선택
   const kgCap = VC.kurtogram(add(base, imp), FS, 300);
   chk(!kgCap || !kgCap.best || kgCap.best.hiHz <= 300 * 1.05, '상한 지정 시 그 위 대역 미선택',
     kgCap && kgCap.best ? `${kgCap.best.hiHz.toFixed(0)} Hz` : 'null');
@@ -122,8 +120,8 @@ const FS = 2048;
   chk(near(one, 2.0 / Math.SQRT2, 5), '정현파 RMS = 진폭/√2', `${one.toFixed(4)} (기대 ${(2 / Math.SQRT2).toFixed(4)})`);
 }
 
-// ── 8. convertDomain — 적분/미분이 물리적으로 맞아야 한다 ──────────────────
-// 가속도 a = A·sin(ωt) → 속도 진폭 = A/ω. 단위 변환(g→mm/s)까지 포함해 검증.
+// ── 8. convertDomain — 적분/미분의 물리적 정확성 ────────────────────────────
+// 가속도 a = A·sin(ωt) → 속도 진폭 = A/ω(단위 변환 g→mm/s 포함)
 {
   const f = 50, w = 2 * Math.PI * f, A = 1.0;           // 1 g 진폭
   const acc = sine(FS * 4, FS, f, A);
@@ -134,7 +132,7 @@ const FS = 2048;
     `${velRms.toFixed(2)} mm/s (기대 ${expect.toFixed(2)})`);
 }
 
-// ── 9. cepstrum — 하모닉 열의 간격을 되찾아야 한다 ─────────────────────────
+// ── 9. cepstrum — 하모닉 열 간격 복원 ────────────────────────────────────────
 {
   const f0 = 40, n = FS * 4;
   const v = add(...[1, 2, 3, 4, 5].map((k) => sine(n, FS, f0 * k, 1 / k)));
@@ -151,16 +149,15 @@ const FS = 2048;
   const n = 8192;
   const pure = sine(n, FS, 50, 1.0);
   chk(near(VC.kurtosis(pure), 1.5, 20), '정현파 커토시스 = 1.5(이론값)', VC.kurtosis(pure).toFixed(3));
-  // 균일분포의 첨도는 1.8이다(3은 정규분포). Box-Muller로 정규잡음을 만들어 3을 확인한다.
+  // 균일분포 첨도 1.8(정규분포는 3) — 정규잡음은 Box-Muller로 생성해 3 확인
   chk(near(VC.kurtosis(noise(n, 1)), 1.8, 15), '균일잡음 커토시스 = 1.8(이론값)', VC.kurtosis(noise(n, 1)).toFixed(3));
   const gauss = Array.from({ length: n }, () => {
     let u = 0, v = 0; while (u === 0) u = (rnd() + 1) / 2; while (v === 0) v = (rnd() + 1) / 2;
     return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v);
   });
   chk(near(VC.kurtosis(gauss), 3.0, 20), '정규잡음 커토시스 ≈ 3', VC.kurtosis(gauss).toFixed(3));
-  /* 밴드 커토시스 — 고주파 대역만 남긴 신호의 첨도.
-     기준 신호에 약간의 광대역 잡음을 섞는다: 순수 정현파는 컷오프 위 에너지가 0이라
-     함수가 null을 반환하는 게 정상이고(비교 대상이 없음), 그러면 대조 자체가 성립하지 않는다. */
+  /* 밴드 커토시스 — 고주파 대역만 남긴 신호의 첨도
+     · 기준 신호에 광대역 잡음 약간 혼합(순수 정현파는 컷오프 위 에너지 0이라 null → 대조 불성립) */
   const bkBase = add(pure, noise(n, 0.08));
   const imp = Array.from({ length: n }, (_, i) => {
     const t = i / FS, dt = t - Math.floor(t * 15) / 15;
@@ -173,7 +170,7 @@ const FS = 2048;
   chk(VC.bandKurtosis(pure, FS, 300) == null, '컷오프 위 에너지가 없으면 null 반환(계산 거부)');
 }
 
-// ── 11. bearingFreqs — 공식대로 계산되는가 ─────────────────────────────────
+// ── 11. bearingFreqs — 공식 일치 ─────────────────────────────────────────────
 {
   const b = { n: 9, Bd: 9.5, Pd: 46.0, phi: 0 }, rpm = 1800, fr = rpm / 60;
   const f = VC.bearingFreqs(rpm, b);
@@ -184,24 +181,34 @@ const FS = 2048;
   chk(f.BPFI > f.BPFO && f.FTF < fr, '대소 관계: BPFI > BPFO · FTF < 1×');
 }
 
-// ── 12. measuredOneX — 명판 근처 실측 피크를 찾아야 한다 ───────────────────
+// ── 12. measuredOneX — 명판 근처 실측 피크 검출 ─────────────────────────────
 {
   const v = add(sine(FS * 4, FS, 29.2, 1.0), sine(FS * 4, FS, 150, 0.3));
   const sp = VC.amplitudeSpectrum(v, FS, 300);
   const m = VC.measuredOneX(sp.freqs, sp.mags, 30, 10);   // 명판 30 Hz ±10%
-  chk(m && near(m.f, 29.2, 3), '명판 30 Hz → 실측 29.2 Hz 검출', m ? `${m.f.toFixed(2)} Hz` : 'null');
+  chk(m && near(m.f, 29.2, 0.2), '명판 30 Hz → 실측 29.2 Hz 검출(포물선 보간 — 빈 간격보다 정밀)', m ? `${m.f.toFixed(3)} Hz` : 'null');
+  // 2극 전동기(fr 59.3 Hz) + 더 큰 60 Hz 계통 성분 — 계통에 고정되면 실측이 +1.2% 틀림 → 거부(입력값 유지)
+  const v2 = add(sine(FS * 4, FS, 59.3, 1.0), sine(FS * 4, FS, 60, 1.5));
+  const sp2 = VC.amplitudeSpectrum(v2, FS, 300);
+  chk(VC.measuredOneX(sp2.freqs, sp2.mags, 59.5, 5, 60, sp2.resTrue) === null, '계통주파수(60 Hz)에 걸리면 실측 거부 — 입력값으로');
+  chk(VC.measuredOneX(sp2.freqs, sp2.mags, 59.5, 5, 0, sp2.resTrue) !== null, '(대조) 계통 가드 없으면 60 Hz를 1×로 잡음');
+  // 바닥 잡음 수준의 1× — 잡음 봉우리를 실측으로 오인하지 않음
+  let seed = 3; const rnd = () => { seed = (seed * 16807) % 2147483647; return seed / 2147483647 - 0.5; };
+  const v3 = add(sine(FS * 4, FS, 29.2, 0.02), Array.from({ length: FS * 4 }, rnd));
+  const sp3 = VC.amplitudeSpectrum(v3, FS, 300);
+  chk(VC.measuredOneX(sp3.freqs, sp3.mags, 30, 5) === null, '바닥 잡음 수준(주변 중앙값의 8배 미만)이면 실측 없음');
 }
 
 // ── 13. stftGrid — 격자 크기와 시간 진행 ───────────────────────────────────
 {
   const n = FS * 4;
-  // 전반부 100 Hz, 후반부 300 Hz → 스펙트로그램이 변화를 담아야 한다
+  // 전반부 100 Hz, 후반부 300 Hz → 스펙트로그램에 변화 반영
   const v = Array.from({ length: n }, (_, i) => Math.sin(2 * Math.PI * (i < n / 2 ? 100 : 300) * i / FS));
   const g = VC.stftGrid(v, FS, 500, 16, 32);
   chk(g.rows === 16 && g.cols === 32, 'STFT 격자 크기 지정대로', `${g.rows}×${g.cols}`);
   chk(Array.isArray(g.grid) && g.grid.length === 16 && g.grid[0].length === 32, 'STFT grid 2차원 배열 형태');
-  /* 시간에 따라 주파수가 이동하는 것을 실제로 담는지 — 스펙트로그램의 존재 이유.
-     축 배치: grid[행=시간][열=주파수]. 열 c의 주파수 = c/(cols-1) × fmax. */
+  /* 시간에 따른 주파수 이동 반영 확인
+     · 축 배치: grid[행=시간][열=주파수], 열 c의 주파수 = c/(cols-1) × fmax */
   const colOf = (hz) => Math.round(hz / g.fmax * (g.cols - 1));
   const rowPeakCol = (r) => { let bi = 0; for (let c = 1; c < g.cols; c++) if (g.grid[r][c] > g.grid[r][bi]) bi = c; return bi; };
   const early = rowPeakCol(1), late = rowPeakCol(g.rows - 2);

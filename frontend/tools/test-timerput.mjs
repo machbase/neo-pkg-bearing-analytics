@@ -1,7 +1,6 @@
-// 타이머 등록 경로 검사 — 오프라인. npm run smoke에 포함.
-// Neo 타이머 API 는 JSON-RPC 2.0(`POST /web/api/rpc`)이다. 예전 REST 경로 `/web/api/timers` 는
-// 없어져서 404 가 오는데, 그 404 를 조회 실패로 삼키면 "타이머가 없다"로 읽혀 매번 새로 만들려 든다.
-// 그래서 여기서는 경로·메서드·인자 모양까지 고정한다.
+// 타이머 등록 경로(JSON-RPC 2.0 `POST /web/api/rpc`) — 오프라인(Neo 불필요) · npm run smoke 포함
+// · 경로·메서드·인자 모양 고정(REST `/web/api/timers`는 404 — 삼키면 "타이머 없음"으로 읽혀 매번 재생성)
+// · 등록 전 목록 확인, 중복 전부 정지 후 id로 삭제, 삭제 실패 시 등록 중단, 조회 실패는 null
 globalThis.window = globalThis;
 globalThis.localStorage = { getItem: () => 'h.e30.s', setItem() {}, removeItem() {} };
 globalThis.atob = (s) => Buffer.from(s, 'base64').toString('binary');
@@ -13,12 +12,12 @@ const chk = (ok, msg, extra) => {
   else { fail++; console.error('FAIL', msg, extra || ''); }
 };
 
-// ── Neo 흉내 — RPC 호출을 기록하고 실제 서버처럼 답한다 ─────────────
+// ── Neo 흉내 — RPC 호출 기록 + 실제 서버처럼 응답 ─────────────
 let listed = {};        // 지금 등록돼 있는 타이머 (name → id)
 let nextId = 1;
-let listOk = true;      // 목록 조회가 되는가
+let listOk = true;      // 목록 조회 성공 여부
 let addOk = true;
-let deleteWorks = true;   // false 면 삭제 요청을 받기만 하고 무시한다(증식 재현)
+let deleteWorks = true;   // false면 삭제 요청 무시(증식 재현)
 let rpcs = [];          // {method, params}
 let files = [];
 let http5xx = 0;
@@ -67,8 +66,7 @@ console.log('\n== 첫 등록 — 지울 것이 없다 ==');
   await DB.createMonitorTimer('SCRIPT({})', '@every 3s');
   chk(files.length === 1 && only('timer.add').length === 1, 'TQL을 쓰고 등록한다', `파일 ${files.length} · 등록 ${only('timer.add').length}`);
   chk(only('timer.delete').length === 0 && only('timer.stop').length === 0, '없는 타이머를 지우러 가지 않는다');
-  /* 등록 전에 반드시 목록을 본다 — 부르는 쪽의 "없음 확인"을 믿고 건너뛰면 그 판단이 한 번만
-     틀려도 같은 이름이 한 벌 더 생긴다. Neo 는 이름 중복을 막지 않아 그대로 쌓인다. */
+  /* 등록 전 반드시 목록 확인 — 호출측 "없음 확인"만 믿으면 한 번의 오판으로 같은 이름 추가(Neo는 이름 중복 허용) */
   chk(only('timer.list').length === 1, '등록 전에 목록을 확인한다');
   chk(http5xx === 0, 'REST 경로로 새지 않는다');
 }
@@ -96,7 +94,7 @@ console.log('\n== 이미 있는 것 — 멈추고 지우고 다시 만든다 =='
   const si = rpcs.findIndex((r) => r.method === 'timer.stop');
   const di = rpcs.findIndex((r) => r.method === 'timer.delete');
   chk(si >= 0 && di > si, '정지가 삭제보다 먼저 간다');
-  // 이름이 아니라 id 로 지운다 — 이름을 보내면 unmarshal 오류가 나고 타이머가 남는다
+  // 이름 아닌 id로 삭제 — 이름을 보내면 unmarshal 오류로 타이머 잔존
   chk(only('timer.stop')[0].params[0] === 42 && only('timer.delete')[0].params[0] === 42, 'id 로 멈추고 지운다',
     JSON.stringify(only('timer.delete')[0].params));
   chk(http5xx === 0, 'REST 경로로 새지 않는다');
@@ -111,8 +109,7 @@ console.log('\n== 상태를 모를 때 — 목록을 한 번 읽는다 ==');
 
   reset(); listed = {}; listed[DB.monTimer()] = [7];
   await DB.createMonitorTimer('SCRIPT({})', '@every 3s');
-  /* 조회가 두 번인 이유: 지우기 전에 한 번, 정말 사라졌는지 확인하러 한 번.
-     확인을 빼면 삭제 실패가 그대로 중복 등록이 된다. */
+  /* 조회 2회 = 삭제 전 1회 + 삭제 확인 1회(확인 없으면 삭제 실패가 중복 등록으로 이어짐) */
   chk(only('timer.list').length === 2 && only('timer.delete').length === 1, '목록에 있으면 지운 뒤 만든다',
     `list ${only('timer.list').length} · delete ${only('timer.delete').length}`);
   chk(only('timer.add').length === 1, '지운 뒤에만 만든다');
@@ -120,8 +117,7 @@ console.log('\n== 상태를 모를 때 — 목록을 한 번 읽는다 ==');
 
 console.log('\n== 같은 이름이 여러 벌 쌓였을 때 ==');
 {
-  /* 실제로 세 벌까지 쌓였다 — 하나만 지우면 나머지가 같은 TQL 을 계속 돌리며 잠금을 서로 뺏는다.
-     화면에는 그냥 "타이머가 돈다"로 보여 원인을 못 찾는다. */
+  /* 하나만 지우면 나머지가 같은 TQL을 계속 돌리며 잠금을 서로 뺏음 — 화면엔 정상으로 보임 */
   reset(); listed = {}; listed[DB.monTimer()] = [11, 12, 13];
   await DB.createMonitorTimer('SCRIPT({})', '@every 3s');
   chk(only('timer.delete').length === 3, '중복을 전부 지운다', `delete ${only('timer.delete').length}`);
@@ -133,12 +129,11 @@ console.log('\n== 같은 이름이 여러 벌 쌓였을 때 ==');
 
 console.log('\n== 지우지 못하면 만들지 않는다 ==');
 {
-  /* 삭제가 듣지 않는 서버에서 그냥 만들면 같은 이름이 한 벌씩 늘어난다(실측: 다섯 벌).
-     지웠는지 확인하고, 안 지워졌으면 등록을 중단해야 증식이 멈춘다. */
+  /* 삭제가 안 듣는 서버에서 그냥 만들면 같은 이름이 계속 증식 — 삭제 확인 후 안 지워졌으면 등록 중단 */
   reset(); listed = {}; listed[DB.monTimer()] = [21];
   const keep = listed[DB.monTimer()].slice();
   const origDel = 'timer.delete';
-  deleteWorks = false;                       // 삭제가 무시되는 서버를 흉내낸다
+  deleteWorks = false;                       // 삭제가 무시되는 서버 흉내
   let threw = null;
   await DB.createMonitorTimer('SCRIPT({})', '@every 3s').catch((e) => { threw = e; });
   deleteWorks = true;
@@ -152,7 +147,7 @@ console.log('\n== 조회가 안 될 때 ==');
   reset(); listed = {}; listOk = false;
   await DB.createMonitorTimer('SCRIPT({})', '@every 3s');
   listOk = true;
-  // 상태를 모르면 지워 본다 — 남아 있는데 안 지우면 옛 스펙이 계속 돈다
+  // 상태를 모르면 삭제 시도 — 남은 옛 스펙 지속 방지
   chk(only('timer.add').length === 1, '조회 실패해도 등록은 한다');
 }
 
@@ -171,7 +166,7 @@ console.log('\n== 상태 조회 ==');
   const m = await DB.timerStates();
   chk(m && m['NEO_BEARING_MONITOR_JOY'] && m['NEO_BEARING_MONITOR_JOY'].state === 'RUNNING', '이름으로 찾을 수 있게 돌려준다');
   chk(m['NEO_BEARING_MONITOR_JOY'].id === 3, 'id 를 같이 준다 — 삭제에 필요하다');
-  // 같은 이름이 여럿이면 전부 들고 있어야 한다 — 하나만 기억하면 나머지를 영영 못 지운다
+  // 같은 이름이 여럿이면 id 전부 보관 — 하나만 기억하면 나머지 삭제 불가
   reset(); listed = {}; listed['NEO_BEARING_MONITOR_JOY'] = [3, 4, 5];
   const d = await DB.timerStates();
   chk(d['NEO_BEARING_MONITOR_JOY'].ids.join(',') === '3,4,5', '중복된 id 를 모두 돌려준다',

@@ -1,5 +1,4 @@
-// htm을 preact/compat createElement에 바인딩 — 프로토타입(dc-runtime=React 기반)과
-// 동일한 이벤트 의미론(onChange=input 등)과 defaultValue/defaultChecked를 유지한다.
+// htm을 preact/compat createElement에 바인딩 — React식 이벤트 의미론(onChange=input 등)·defaultValue/defaultChecked 유지
 import htm from 'htm';
 import { createElement } from 'preact/compat';
 

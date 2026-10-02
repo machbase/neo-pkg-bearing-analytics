@@ -1,5 +1,5 @@
-// 포락선 산출 방식 3종 비교 — 정류(현행) vs 해석신호 |z| vs 제곱 포락선 |z|².
-// 문서엔 오래 "힐베르트"라 적혀 있었지만 구현은 정류였다. 무엇이 실제로 나은지 같은 오탐률에서 잰다.
+// 포락선 산출 방식 3종 비교 — 정류 vs 해석신호 |z| vs 제곱 포락선 |z|², 같은 오탐률에서 검출·종류 적중 측정
+// · 하모닉 수 H 2~5 교차, 전 수명 시퀀스 제외 · 로컬 데이터셋 필요(D:/vibe-datasets/conv, 없으면 건너뜀)
 import fs from 'node:fs';
 import path from 'node:path';
 const VC = (await import('../../cgi-bin/calc/calc.js')).default;
@@ -19,7 +19,7 @@ const MODES = ['rect', 'env', 'sq'];
 const HS = [2, 3, 4, 5];
 
 const rows = [];
-// 시퀀스(run-to-failure)는 스냅샷 풀이 아니다 — 한 시험대가 표본을 지배해 비교가 기운다
+// 시퀀스(run-to-failure) 제외 — 한 시험대가 표본을 지배해 비교 편향
 const DATASETS = fs.readdirSync(ROOT).filter((d) => !/_seq$/.test(d) && fs.existsSync(path.join(ROOT, d, 'index.json')));
 for (const ds of DATASETS) {
   const dir = path.join(ROOT, ds);
@@ -49,7 +49,7 @@ for (const ds of DATASETS) {
 }
 console.log('');
 
-const FP = 5 / 124;   // 현행 오탐률에 고정
+const FP = 5 / 124;   // 기준 오탐률(5/124) 고정
 const fit = (get) => {
   const v = rows.filter((r) => r.label === 'none').map(get).sort((a, b) => b - a);
   const k = Math.max(0, Math.floor(v.length * FP) - 1);

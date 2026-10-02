@@ -1,16 +1,5 @@
-// 표적 우선 대조 시험 — "지배 피크 하나를 후보와 대조"에서 "후보 자리를 각각 보러 간다"로.
-//
-// 근거: 미검출 231건 중 43%가 포락선 지배 성분이 축 관련(1× 29%·2× 8%·서브동기 6%)이었다.
-// 지배 피크만 보는 구조에서는 결함주파수를 **한 번도 쳐다보지 않고** 떨어진다.
-//
-// 후보마다 다른 통계를 쓰면 순위 비교가 물리가 아니라 귀무분포 모양을 재게 되므로,
-// 셋을 같은 구조로 맞춘다 — 하모닉 열 × 측대역(변조가 있는 계열만):
-//   외륜   BPFO  h=1..H, 측대역 없음   (결함이 하중대에 고정 → 변조 없음)
-//   내륜   BPFI  h=1..H, ±1×           (결함이 축과 함께 하중대를 드나듦)
-//   구름체 2×BSF h=1..H, ±FTF          (결함이 케이지와 함께 드나듦)
-//
-// 다중비교: 후보를 넷 놓고 최댓값을 취하는 구조라 임계를 결함에서 맞추면 함정이다.
-// **정상 오탐률을 현행과 같은 값에 고정**하고 그때의 검출률만 비교한다. LODO도 같이 낸다.
+// 표적 우선 대조 비교 — 지배 피크 대조 vs 후보 자리별 하모닉×측대역 격자, 정상 오탐률 고정·BSF 제외 변형·LODO
+// · 로컬 데이터셋 필요(D:/vibe-datasets/conv, 없으면 건너뜀)
 import fs from 'node:fs';
 import path from 'node:path';
 
@@ -18,8 +7,8 @@ const VC = (await import('../../cgi-bin/calc/calc.js')).default;
 const ROOT = process.argv[2] || process.env.VIBE_DATASETS || 'D:/vibe-datasets/conv';
 const REV = 100, HARD_CAP = 262144;
 const H = 3;          // 하모닉 차수
-const S = 1;          // 측대역 차수 ±1 — 하모닉과 곱해지므로 넓히면 자리 수가 급증한다
-const TARGET_FP = 0.024;   // 현행 실측 오탐 3/124
+const S = 1;          // 측대역 차수 ±1 — 하모닉과 곱해져 넓히면 자리 수 급증
+const TARGET_FP = 0.024;   // 기준 오탐률(≈3/124)
 
 if (!fs.existsSync(ROOT)) { console.log(`데이터 없음 (${ROOT}) — 건너뜀`); process.exit(0); }
 
@@ -36,7 +25,7 @@ const peakNear = (sp, f, tol) => {
   return b;
 };
 
-/** 하모닉 × 측대역 격자의 진폭 평균 ÷ 중앙값. 자리 수를 함께 돌려 계열 간 비교가 되게 한다 */
+/** 하모닉 × 측대역 격자의 진폭 평균 ÷ 중앙값(자리 수·선 수 함께 반환) */
 function gridScore(sp, f, delta, med, res) {
   if (!(f > 0) || !(med > 0)) return { r: 0, n: 0, lines: 0 };
   const top = sp.freqs[sp.freqs.length - 1];
@@ -72,14 +61,14 @@ for (const ds of datasets) {
     if (v.length < 4096) continue;
 
     const fr = c.rpm / 60, bf = VC.bearingFreqs(c.rpm, c.geo);
-    // 격자가 하모닉 3차까지 가므로 상한도 그만큼 필요하다
+    // 격자가 하모닉 3차까지라 포락선 상한도 그만큼 확보
     const env = VC.envelopeSpectrum(v, c.fs, Math.max(VC.envMaxFor(bf, fr, c.fs), 3 * bf.BPFI + 2 * fr), VC.demodFixed(c.fs));
     if (!env.freqs.length) continue;
     const res = env.resTrue || env.res;
     const sorted = env.mags.slice().sort((a, b) => a - b);
     const med = sorted[Math.floor(sorted.length / 2)] || 0;
 
-    // 현행 제품 판정(비교 기준)
+    // 비교 기준: 지배 피크 + 빗 판정(bearingMatch)
     const envQ = VC.envelopeQuant(env.freqs, env.mags, fr);
     const sb = VC.sidebandMatch(env, bf, fr, res);
     const cur = VC.bearingMatch(envQ, bf, fr, res, sb);
@@ -95,7 +84,7 @@ for (const ds of datasets) {
       const g = gridScore(env, cd.f, cd.d, med, res);
       if (g.r > top.r) top = { k: cd.k, r: g.r, lines: g.lines };
     }
-    // BSF를 후보에서 뺀 변형도 같이 잰다 — 구름체 적중이 0이라 후보로 두는 것이 손해인지 확인
+    // BSF를 후보에서 뺀 변형도 측정 — 구름체 후보 유지의 손익 확인
     let top2 = { k: '', r: 0 };
     for (const cd of cands) {
       if (cd.k === 'BSF') continue;

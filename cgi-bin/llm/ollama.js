@@ -1,5 +1,5 @@
-// Ollama 단발 completion 클라이언트 — llm-chat llm/ollama.js의 요청 형태 이식.
-// think:false — 네이티브 thinking 모델(qwen3 등)의 사고 토큰 낭비 차단.
+// Ollama 단발 completion 클라이언트
+// think:false — 네이티브 thinking 모델(qwen3 등)의 사고 토큰 차단
 (function (root, factory) {
   if (typeof module === 'object' && module.exports) module.exports = factory();
   else (root.VibeLLM = root.VibeLLM || {}).ollama = factory();
@@ -9,7 +9,7 @@
   var DEFAULT_MODEL = 'llama3.1:8b';
 
   function complete(cfg, prompt, opts) {
-    opts = opts || {}; // signal: 호출자가 중단할 수 있게 (리포트 생성 중단)
+    opts = opts || {}; // opts.signal — 호출자 중단용(리포트 생성 중단)
     var base = (cfg.baseURL || 'http://127.0.0.1:11434').replace(/\/$/, '');
     var body = JSON.stringify({
       model: cfg.model || DEFAULT_MODEL,

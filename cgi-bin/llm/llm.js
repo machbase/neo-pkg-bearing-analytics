@@ -1,4 +1,4 @@
-// LLM 팩토리 — llm-chat llm/factory.js 대응. 단발 completion 전용(채팅 루프 없음).
+// LLM 팩토리 — 단발 completion 전용(채팅 루프 없음)
 // cfg: { provider: 'claude'|'openai'|'gemini'|'ollama', apiKey, model, baseURL(ollama) }
 (function (root, factory) {
   if (typeof module === 'object' && module.exports) {
@@ -22,7 +22,7 @@
     };
   }
 
-  // 실제 호출에 쓰일 모델명 — 모델 미입력 시 프로바이더 기본값으로 해석됨
+  // 실제 호출 모델명 — 미입력 시 프로바이더 기본값
   function activeModel(cfg) {
     var p = PROVIDERS[cfg.provider];
     return p ? (cfg.model || p.DEFAULT_MODEL) : '';

@@ -1,12 +1,10 @@
-// 라이브 경로 스모크 — 실제 Neo(127.0.0.1:5654)에 붙여 buildLiveData/liveDetail/렌더를 검증한다.
-// 사용: node tools/smoke-live.mjs   (Neo가 떠 있어야 함)
+/* 라이브 경로 스모크 — 실제 Neo에 붙여 buildLiveData/liveDetail/렌더/저장소 왕복 검증
+   라이브 — Neo 필요 · npm run smoke:live 포함
+   로그인: NEO_USER·NEO_PASSWORD 환경변수(_liveauth.mjs), 없으면 건너뜀
+   저장소 왕복은 그 계정에 시험 행·파일을 쓰고 지움 — 설정은 끝나면(실패해도) 원래 값으로 복구 */
 import renderToString from 'preact-render-to-string';
 
-globalThis.window = globalThis;
-// api.js는 브라우저 same-origin 상대경로(/db/...)를 쓰므로 node에서는 호스트를 프리픽스
-const NEO = 'http://127.0.0.1:5654';
-const _fetch = globalThis.fetch;
-globalThis.fetch = (url, opts) => _fetch(typeof url === 'string' && url.startsWith('/') ? NEO + url : url, opts);
+const { DB: AuthDB } = await import('./_liveauth.mjs');
 
 const { view } = await import('../src/view.js');
 const CH = (await import('../../cgi-bin/chart/chart.js')).default;
@@ -15,7 +13,7 @@ const { App } = await import('../src/app.js');
 const L = await import('../src/data/live.js');
 const VC = (await import('../../cgi-bin/calc/calc.js')).default;
 
-const E = Object.assign({}, CH, Mock); // 구 vibe-engine 병합 형태
+const E = Object.assign({}, CH, Mock); // 차트·목 유틸을 한 엔진 객체로 병합
 let fail = 0;
 const ok = (cond, label, extra) => {
   if (cond) console.log('PASS', label, extra || '');
@@ -28,7 +26,17 @@ ok(tables.includes('BEARING') && tables.includes('VIBE_DATA'), '테이블 목록
 
 // 2. 데이터 조립 (진동 테이블 2개)
 const data = await L.buildLiveData(E, ['BEARING', 'VIBE_DATA'], {});
-ok(data.equipment.length === 5, '설비 5개 (C1,C2,vib-x/y/z)', 'got ' + data.equipment.length);
+/* 설비 = 데이터가 있는 태그 — 메타에 이름만 남은(데이터 삭제된) 태그는 제외(DB 상태에 따라 수가 바뀌므로 통계로 기대값 산정) */
+{
+  const withData = [], nameOnly = [];
+  for (const t of ['BEARING', 'VIBE_DATA']) {
+    const st = await L.tagStats(t).catch(() => ({}));
+    const names = await L.listTags(t, 1000).catch(() => []);
+    names.forEach((n) => (st[n] && st[n].count > 0 ? withData : nameOnly).push(t + ':' + n));
+  }
+  const got = data.equipment.map((e) => e.id).sort().join(',');
+  ok(withData.length > 0 && got === withData.sort().join(','), '설비 = 데이터가 있는 태그만', got + (nameOnly.length ? ' · 이름만 남은 태그 제외: ' + nameOnly.join(',') : ''));
+}
 const c1 = data.equipment.find(e => e.id === 'BEARING:C1');
 ok(c1 && c1.rollup.length > 100, 'C1 롤업 버킷', c1 && c1.rollup.length + '개 · step ' + c1.rollupStepSec + 's');
 ok(c1 && c1.rms > 0 && c1.sparkVals.length > 10, 'C1 RMS/스파크', c1 && 'rms=' + c1.rms.toFixed(2) + ' spark=' + c1.sparkVals.length);
@@ -44,7 +52,7 @@ if (tables.includes('VIBE_TEST')) {
     dvt.equipment.map(e => e.name + ':' + e.rollup.length + 'b/rms' + e.rms.toFixed(2)).join(' · '));
 }
 
-// 2b. 설정(별칭/Class/RPM)이 조립에 반영되는지
+// 2b. 설정(별칭/Class/RPM) 조립 반영 확인
 const dataCfg = await L.buildLiveData(E, ['BEARING'], { aliases: { 'BEARING:C1': '1호 베어링' }, equipCls: { 'BEARING:C1': 'IV' }, equipRpm: { 'BEARING:C1': 3600 } });
 const c1cfg = dataCfg.equipment.find(e => e.id === 'BEARING:C1');
 ok(c1cfg && c1cfg.alias === '1호 베어링' && c1cfg.cls === 'IV' && c1cfg.rpm === 3600, '설정 반영(별칭·Class·RPM)', c1cfg && (c1cfg.alias + '/' + c1cfg.cls + '/' + c1cfg.rpm));
@@ -54,10 +62,7 @@ const det = await L.liveDetail(E, c1);
 ok(det.raw.values.length > 1000, 'C1 원시 파형', det.raw.values.length + ' pts');
 ok(det.fft.freqs.length > 100, 'C1 FFT 스펙트럼', det.fft.freqs.length + ' bins · res ' + det.fft.res.toFixed(3) + 'Hz');
 ok(det.indics.length === 4, '시간영역 지표 4종', det.indics.map(i => i.k + '=' + i.v).join(' · '));
-/* 차수 마커(1×/2×/3×)는 rpm/60에서 나오므로 회전수가 있어야 선다. c1은 설정 없이 조립한 것이라
-   rpm이 0이다 — 이 패키지는 회전수를 추측하지 않는다(폴백을 넣으면 2극·6극 설비에서 격자가
-   통째로 어긋나는데 화면은 평소처럼 등급을 낸다). 그래서 두 방향을 다 잠근다:
-   설정이 있으면 마커가 서고, 없으면 아예 그리지 않는다. */
+/* 차수 마커(1×/2×/3×)는 rpm/60 기반 — 회전수 설정 시에만 표시, 미설정이면 미표시(회전수 추측 안 함) */
 ok(det.fft.markers.length === 0, '회전수 미설정이면 차수 마커를 그리지 않는다 — 추측한 격자를 그리느니 비운다',
   det.fft.markers.map(m => m.label).join(',') || '(없음)');
 const detCfg = await L.liveDetail(E, c1cfg);
@@ -69,7 +74,7 @@ ok(det.spectro.rows === 22 && det.spectro.cols === 52, '스펙트로그램(복�
 // 3b. 첨도·대역 에너지 추이 (청크 샘플링)
 const tr = await L.loadTrendChunks(E, c1, c1.rollup);
 ok(tr.kurt.length >= 10, '첨도 추이 청크', tr.kurt.length + '점 · kurt[0]=' + (tr.kurt[0] || 0).toFixed(1));
-// 대역 개수는 제품 목록에서 가져온다 — 숫자를 박아 두면 대역이 늘 때 이 검사만 낡는다
+// 대역 개수는 VC.BAND_FREQ 기준(하드코딩 금지)
 ok(tr.bands.length === VC.BAND_FREQ.length && tr.bands[1].vals.length === tr.kurt.length,
   '대역 에너지 ' + VC.BAND_FREQ.length + '계열(차수 상대 + 절대 kHz)', tr.bands.map(b => b.label).join('/'));
 
@@ -116,28 +121,37 @@ ok(so.includes('BEARING') && so.includes('VIBE_DATA'), '설정탭 실제 테이�
   ok(!html.includes('<script>x') && html.includes('&lt;script&gt;'), '리포트 XSS 이스케이프');
   ok(html.includes('Content-Security-Policy') && html.includes('진동 심각도 평가') && html.includes('theme-btn'), '리포트 양식(프로토타입 고정판)+CSP');
   ok(html.includes('window.RPT') && html.includes('id="cRms"') && html.includes('/*chartlib*/'), '리포트 캔버스 렌더(엔진+데이터 내장)');
-  const fn = 'RPT_SMOKETEST_20260101-20260102_20260101_000000.html';
-  await DB.ensureDir('/vibration-reports');
-  await DB.saveFile('/vibration-reports/' + fn, html, 'text/html');
-  const ls = await DB.listDir('/vibration-reports');
-  ok(ls.some(f => f.name === fn), '리포트 저장→목록 확인');
-  const blob = await DB.readFileBlob('/vibration-reports/' + fn);
-  ok(blob && blob.size > 500, '리포트 읽기(미리보기 경로)', blob.size + ' bytes');
-  await DB.deleteFile('/vibration-reports/' + fn);
-  const ls2 = await DB.listDir('/vibration-reports');
+  // 계정 폴더(앱과 같은 경로) — 시험 파일은 끝나면(실패해도) 지움
+  const fn = 'RPT_SMOKETEST_20260101-20260102_20260101_000000.html', dir = L.reportDir();
+  try {
+    await DB.ensureDir(dir);
+    await DB.saveFile(dir + '/' + fn, html, 'text/html');
+    const ls = await DB.listDir(dir);
+    ok(ls.some(f => f.name === fn), '리포트 저장→목록 확인', dir);
+    const blob = await DB.readFileBlob(dir + '/' + fn);
+    ok(blob && blob.size > 500, '리포트 읽기(미리보기 경로)', blob.size + ' bytes');
+  } finally {
+    await DB.deleteFile(dir + '/' + fn).catch(() => {});
+  }
+  const ls2 = await DB.listDir(dir);
   ok(!ls2.some(f => f.name === fn), '리포트 삭제 확인');
 }
 
-// 5. 설정 저장/복원 (cgi-bin/config/*.json 분할 파일 왕복 — Neo 인증 파일 API)
-const AUTH = { user: 'SYS', password: 'MANAGER' };
-const prev = await L.loadConfig(); // 기존 설정 보존
-const cfgIn = { srcSel: ['BEARING'], machineClass: 'III', equipRpm: { 'BEARING:C1': 3600 }, memo: '스모크' };
-await L.saveConfig(cfgIn, AUTH);
-const cfgOut = await L.loadConfig();
-ok(cfgOut && cfgOut.machineClass === 'III' && cfgOut.equipRpm['BEARING:C1'] === 3600, '설정 저장→복원 왕복(config.json)');
-await L.saveConfig(prev || {}, AUTH); // 원상 복구
+// 5. 설정 저장/복원 왕복(계정 CONFIG 표) — 끝나면(실패해도) 원래 설정으로
+const prev = await L.loadConfig();
+if (!prev) console.log('건너뜀 설정 왕복 — 기존 설정을 읽지 못함(원상 복구 불가)');
+else {
+  try {
+    const cfgIn = { srcSel: ['BEARING'], machineClass: 'III', equipRpm: { 'BEARING:C1': 3600 }, memo: '스모크' };
+    await L.saveConfig(cfgIn);
+    const cfgOut = await L.loadConfig();
+    ok(cfgOut && cfgOut.machineClass === 'III' && cfgOut.equipRpm['BEARING:C1'] === 3600, '설정 저장→복원 왕복(CONFIG)');
+  } finally {
+    await L.saveConfig(prev);
+  }
+}
 
-// 6. 상시감시(P6) 저장소 왕복 — LOOKUP 4종 + 이벤트/베이스라인/MONCFG
+// 6. 상시감시 저장소 왕복 — 베이스라인·이벤트·판정상태
 {
   const DB = (await import('../../cgi-bin/db/db.js')).default;
   await L.ensureMonTables();
@@ -151,22 +165,25 @@ await L.saveConfig(prev || {}, AUTH); // 원상 복구
   await L.deleteBaseline('ZZ:SMOKE');
   bls = await L.loadBaselines();
   ok(!bls['ZZ:SMOKE'], '베이스라인 삭제');
-  // 이벤트 조회 — LOG 테이블(append 전용), GRADE는 단어. 실 테이블 오염 방지 위해 읽기만 검증
+  // 이벤트 조회 — GRADE는 단어, 실 테이블 오염 방지로 읽기만
   const evs = await L.loadEvents(500);
   ok(Array.isArray(evs) && (evs.length === 0 || typeof evs[0].grade === 'string'), '이벤트 로드(GRADE 단어)');
-  /* 기간 지정 조회(CSV/JSON 내보내기용) — 범위 필터 동작.
-     하한을 ms=0으로 두지 않는다: 질의는 로컬 시각 문자열(to_date)로 나가는데 DB는 UTC 기준으로
-     읽어 epoch 바로 아래로 떨어지고, Machbase가 1970-01-01 이전 DATETIME을 거부한다(ERR-2247).
-     시간대 최대 오프셋(±14h)을 넘기려고 하루 뒤에서 잡는다 — 어느 시간대에서 돌려도 안전하다. */
+  /* 기간 지정 조회(CSV/JSON 내보내기용) 범위 필터
+     · 하한은 ms=0 아닌 하루 뒤 — 로컬 시각 문자열이 UTC로 읽혀 1970 이전이 되면 DB가 거부(시간대 ±14h 여유) */
   const PAST = 86400000;                                       // 1970-01-02 — 실 이벤트보다 한참 이전
   const rangeNone = await L.loadEventsRange(PAST, PAST + 1);   // 이 구간엔 이벤트 없음
   const rangeAll = await L.loadEventsRange(PAST, Date.now());  // 전체 범위
   ok(rangeNone.length === 0 && Array.isArray(rangeAll) && rangeAll.length >= evs.length, '이벤트 기간 조회(범위 필터)');
   // 판정상태(MONSTATE, LOOKUP) upsert→조회
-  await L.saveMonState('ZZ:SMOKE', { g: 2, b: true, rms: 3.14, ms: 1 });
-  let ms = await L.loadMonState();
-  ok(ms['ZZ:SMOKE'] && ms['ZZ:SMOKE'].g === 2 && ms['ZZ:SMOKE'].b === true, '판정상태 저장→조회');
-  await DB.q("DELETE FROM MONSTATE WHERE K='ZZ:SMOKE'");
+  try {
+    await L.saveMonState('ZZ:SMOKE', { g: 2, b: true, rms: 3.14, ms: 1 });
+    const ms = await L.loadMonState();
+    ok(ms['ZZ:SMOKE'] && ms['ZZ:SMOKE'].g === 2 && ms['ZZ:SMOKE'].b === true, '판정상태 저장→조회');
+  } finally {
+    await DB.deleteMonState('ZZ:SMOKE');   // 계정 접두 키로 삭제(공용 표)
+  }
+  const ms2 = await L.loadMonState();
+  ok(!ms2['ZZ:SMOKE'], '판정상태 시험 행 삭제');
 }
 
 process.exit(fail ? 1 : 0);

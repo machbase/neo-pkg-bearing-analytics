@@ -1,13 +1,18 @@
 'use strict';
 
-// pkg run install — 런타임 디렉터리 준비.
-// 상주 서비스가 없어(프론트 → Neo API 직접) 설정 저장 폴더(cgi-bin/config)만 만든다.
+// pkg run install — 설치·업데이트 시 실행
+// 준비할 런타임 폴더 없음 — 설정은 전용 DB(NEO_BEARING_STORE.<계정>.CONFIG),
+// 타이머 스크립트 폴더(cgi-bin/tql/<계정>/)는 앱이 타이머 등록 시 생성
+// 업데이트가 남긴 고아 파일만 정리(scripts/obsolete.json)
 
 var path = require('path');
 var process = require('process');
-var fs = require('fs');
 
 var PKG_ROOT = path.resolve(path.dirname(process.argv[1]), '..');
-// 설정 저장 폴더(cgi-bin/config/*.json — 설정탭 카드별 분할 저장). 리포트는 워크스페이스 '진동 분석/'에 저장.
-try { if (!fs.exists(path.join(PKG_ROOT, 'cgi-bin', 'config'))) fs.mkdir(path.join(PKG_ROOT, 'cgi-bin', 'config'), { recursive: true }); } catch (e) {}
+// 정리 실패가 설치를 막지 않음 — 사유만 출력
+try {
+  require('./cleanup').runCleanup(PKG_ROOT);
+} catch (e) {
+  console.println('[install] cleanup skipped: ' + (e && e.message ? e.message : String(e)));
+}
 console.println('install done.');

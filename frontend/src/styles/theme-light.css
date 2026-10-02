@@ -1,7 +1,6 @@
-/* machcode-ds — LIGHT THEME (auto-generated from vendor/machcode.css).
-   Refined cool-slate palette (ink #23262e), values matched to tokens/colors.css
-   (.theme-light). Accent & semantic colors kept identical. Regenerate if
-   machcode.css or the palette changes. */
+/* machcode-ds — LIGHT THEME overrides for machcode component classes.
+   Refined cool-slate palette (ink #23262e), values matched to colors.css
+   (.theme-light). Accent & semantic colors kept identical. */
 
 /* page-level surface so a card whose <html> carries .theme-light flips its own
    dark html/body background even before / without the toggle script. */
@@ -301,7 +300,7 @@
 .theme-light ._toast__container_19gl3_292{box-shadow:none;background-color:transparent}
 .theme-light ._statusIndicator--neutral_1fqfi_324{background-color:#6b7280}
 
-/* --- manual fixes (appended) --- */
+/* --- manual fixes --- */
 .theme-light ._checkbox-checkmark_1djhn_328 svg{color:#ffffff}
 .theme-light ._checkbox_1djhn_292:checked+._checkbox-checkmark_1djhn_328 svg{color:#ffffff}
 
@@ -318,9 +317,8 @@
 .theme-light ._scroll-table-body_1oce0_391 ._active-row_1oce0_334{color:#ffffff}
 .theme-light ._date-picker__calendar_1dyex_348 .MuiButtonBase-root.Mui-selected{color:#ffffff}
 .theme-light ._time-column__item--selected_thz9z_372{color:#ffffff}
-/* BadgeSelect series marker: letter sits on a solid series-color square → keep it white
-   in light mode too (a <div>, so it isn't covered by the ._badgeItem span dark-ink rule
-   and would otherwise inherit the dark selectedBox ink). Matches the dark-theme marker. */
+/* BadgeSelect series marker: letter on a solid series-color square → keep white in light mode
+   (a <div>, not covered by the ._badgeItem span dark-ink rule) */
 .theme-light ._badgeLabel_m6uxf_500{color:#ffffff}
 
 /* --- selected/hover list items on transparent bg → dark ink (not white) --- */
@@ -344,7 +342,7 @@
 .theme-light ._badge--error_1ro35_355 ._dot_1ro35_312{background-color:#d32f2f}
 .theme-light ._badge--warning_1ro35_365 ._dot_1ro35_312{background-color:#b26a00}
 
-/* --- Side collapse/section headers: dark ink on light sidebar (was white-on-white) --- */
+/* --- Side collapse/section headers: dark ink on light sidebar --- */
 .theme-light ._editorsTitle_18a0n_257,.theme-light ._filesOpenOption_18a0n_272,.theme-light ._editorsTitle_18a0n_257 span,.theme-light ._filesOpenOption_18a0n_272 span{color:#23262e}
 
 /* --- Alert: dark body text + readable semantic titles on light tints --- */
@@ -360,7 +358,7 @@
 .theme-light ._toast__container_19gl3_292{background-color:transparent!important;border:0;box-shadow:none}
 .theme-light ._toast__message_19gl3_320{color:#23262e}
 
-/* --- audit round 2: remaining light-text-on-light fixes --- */
+/* --- remaining light-text-on-light fixes --- */
 .theme-light ._modal__body_h4iaz_359{color:#3a3d47}
 .theme-light ._alert--warning_f2km7_311 ._alert__icon_f2km7_302{color:#b26a00}
 .theme-light ._alert__close_f2km7_374:hover{color:#23262e}

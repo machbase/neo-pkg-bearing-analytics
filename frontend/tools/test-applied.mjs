@@ -1,12 +1,9 @@
-/* 저장 전 편집이 판정·서버 타이머로 새는가 — 오프라인(Neo 불필요). npm run smoke에 포함.
-
-   설정 폼은 입력 즉시 state를 고친다. 판정·서버 타이머·재적재가 state를 읽으면 저장 안 한 값이
-   10초 점검에 서버 타이머로 구워지고(폼에서 알람을 끄기만 해도 타이머가 지워진다), "저장 안 함"은
-   표시만 지워 편집값이 남고, 즉시 저장 버튼(헤더 알람 등)이 설정 전체를 딸려 저장했다.
-   지금은 저장에 성공한 값(적용본, app._ac())만 판정·타이머가 읽고, 편집본(state)은 폼 안에만 있다. */
+/* 저장 전 편집 격리 — 판정·서버 타이머·재적재는 적용본(app._ac())만 읽고 편집본(state)은 폼 안에만
+   · 즉시 저장 버튼(헤더 알람 등)은 자기 값만 저장, "저장 안 함"은 폼을 저장본으로 되돌림
+   오프라인(Neo 불필요) · npm run smoke 포함 */
 globalThis.window = globalThis;
 
-// CONFIG 표를 메모리 맵으로 흉내 낸다(test-cfgload와 같은 방식). 쓰기 실패를 켤 수 있다
+// CONFIG 테이블을 메모리 맵으로 흉내(test-cfgload와 같은 방식) — 쓰기 실패 토글 가능
 const store = new Map();
 let failWrite = false;
 globalThis.fetch = async (url) => {
@@ -139,12 +136,6 @@ app.setState(Object.assign({ dirty: true }, EDIT));
   await settle();
   chk(app._ac().monitorOn === true && app._judges >= 1, '다시 켜면 즉시 1회 판정');
 
-  await app._applyFlapFix(2);
-  await settle();
-  const b2 = await DB.loadConfig();
-  chk(b2.evalWindow === '120s' && app._ac().evalWindow === '120s' && JSON.stringify(b2.classThresh) === '{}',
-    '진동 배지 RMS 구간 → 그 값만 저장·적용', b2.evalWindow);
-
   app.state.bandIvNext = '30m'; app.state.bandIvAct = 'keep';
   await app._applyBandInterval();
   await settle();
@@ -167,7 +158,7 @@ app.setState(Object.assign({ dirty: true }, EDIT));
   chk(S.dirty === false && S.tab === 'monitor' && S.srcSel.join() === 'A,B' && JSON.stringify(S.classThresh) === '{}'
     && S.notifTo.webhook === 'https://saved.example/hook' && S.equipRpm['A:X'] === 1800,
     '저장 안 함 → 폼 값이 저장본으로 돌아간다(예전: 표시만 지우고 편집값이 남음)', JSON.stringify({ sel: S.srcSel, ct: S.classThresh }));
-  chk(S.monitorOn === true && S.evalWindow === '120s' && S.bandInterval === '30m',
+  chk(S.monitorOn === true && S.bandInterval === '30m',
     '즉시 저장된 값은 되돌리지 않는다(이미 저장본이다)');
 }
 
@@ -182,6 +173,35 @@ app.setState(Object.assign({ dirty: true }, EDIT));
   const b5 = await DB.loadConfig();
   chk(ok && seen[0] === 'A|2,4,8' && b5.srcSel.join() === 'A', '저장하면 그 값으로 적용본이 바뀌고 서버 타이머를 새 값으로 굽는다', seen[0]);
   chk(app._activeEqs().map((e) => e.table).join() === 'A', '앱 판정 대상도 저장 직후부터 새 선택');
+}
+
+// ── LLM 설정도 저장본으로 — 설정 화면(연결 테스트·상태 표시)만 편집본 ─────────────
+{
+  const LLM = (await import('../../cgi-bin/llm/llm.js')).default;
+  const keep = { createLLM: LLM.createLLM, testConnection: LLM.testConnection };
+  const made = [], tested = [];
+  LLM.createLLM = (cfg) => { made.push(cfg); return keep.createLLM(cfg); };
+  LLM.testConnection = (cfg) => { tested.push(cfg); return Promise.resolve({ ok: true, ms: 1, sample: 'OK' }); };
+  const app = mkApp();
+  app.data = data;
+  app._applied = Object.assign({}, app.state, { srcSel: ['A', 'B'], llmProvider: 'claude', llmKeys: { claude: 'saved-key' }, llmModels: {} });
+  Object.assign(app.state, { ready: true, dirty: true, llmProvider: 'openai', llmKeys: { claude: 'saved-key', openai: 'draft-key' }, llmModels: { openai: 'gpt-draft' } });
+
+  chk(app._llmCfg().provider === 'claude' && app._llmCfg().apiKey === 'saved-key', '호출 설정은 저장본(claude · 저장된 키)', JSON.stringify(app._llmCfg()));
+  made.length = 0;
+  app._dxExplain(data.equipment[0]);
+  chk(made[0] && made[0].provider === 'claude' && made[0].apiKey === 'saved-key', '상세분석 AI 소견은 저장된 키로 호출(예전: 입력 중인 openai 키)', made[0] && made[0].provider);
+  app.state.tab = 'detail';
+  const vd = app.renderVals();
+  chk(/^Claude/.test(vd.dxLlmModel || '') && vd.llmProviderSel === 'claude' && vd.llmProvOptions.map((o) => o.id).join() === 'claude',
+    '상세분석 표시·선택 목록도 저장본', (vd.dxLlmModel || '') + ' · ' + vd.llmProvOptions.map((o) => o.id).join());
+  app._testLLM();
+  chk(tested[0] && tested[0].provider === 'openai' && tested[0].apiKey === 'draft-key', '연결 테스트는 입력 중인 값(저장 전 확인용)', tested[0] && tested[0].provider);
+  app.state.tab = 'settings';
+  const base = {};
+  app._vmSettings(base, data.equipment);
+  chk(/OpenAI/.test(base.llmStatusText), '설정 화면 상태 표시는 입력 중인 값', base.llmStatusText);
+  Object.assign(LLM, keep);
 }
 
 console.log(fail ? `\n${fail} failed` : '\n=== 전부 통과 ===');

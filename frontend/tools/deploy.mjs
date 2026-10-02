@@ -1,4 +1,4 @@
-// dist/ 전체(index.html + public 자산)를 패키지 루트로 복사한다.
+// dist/ 전체(index.html + public 자산)를 패키지 루트로 복사
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -12,6 +12,6 @@ if (!fs.existsSync(path.join(dist, 'index.html'))) {
   process.exit(1);
 }
 fs.cpSync(dist, pkgRoot, { recursive: true });
-// Neo 앱 런처는 main.html을 연다(llm-chat도 index/main 이중 복사) — 동일 내용으로 생성
+// Neo 앱 런처가 main.html을 열므로 동일 내용으로 생성
 fs.copyFileSync(path.join(pkgRoot, 'index.html'), path.join(pkgRoot, 'main.html'));
 console.log('deployed dist/ ->', pkgRoot, '(+ main.html)');

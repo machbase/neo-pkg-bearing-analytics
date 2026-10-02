@@ -1,7 +1,6 @@
-// 메타데이터 A/B — 같은 데이터에 메타(마운팅·구동·날개수)만 바꿔서 판정이 실제로 달라지는지 확인.
-// 안 달라지면 폼은 있어도 의미가 없다(입력만 늘고 결과는 그대로) — 그 회귀를 잡는 하네스.
-// 라이브 하네스: Neo(127.0.0.1:5654)가 떠 있고 BEARING 테이블에 데이터가 있어야 한다.
-// 사용: node tools/verify-meta.mjs   (또는 npm run verify:live)
+// 메타데이터 A/B — 같은 데이터에 메타(마운팅·구동·날개수)만 바꿔 판정 경로 변화 확인(메타 입력 무반영 회귀 검사)
+// · 라이브(Neo 127.0.0.1:5654 + BEARING 테이블 데이터 필요) · npm run verify:live 포함
+//   node tools/verify-meta.mjs
 globalThis.window = globalThis;
 const NEO = 'http://127.0.0.1:5654'; const _f = globalThis.fetch;
 globalThis.fetch = (u, o) => _f(typeof u === 'string' && u.startsWith('/') ? NEO + u : u, o);
@@ -44,7 +43,7 @@ async function run(label, extra) {
   return { det, ev };
 }
 
-// A는 진짜 "메타 없음"이어야 한다 — 사용자가 UI에서 저장한 equipMeta가 BASE에 실려 오므로 명시적으로 비운다
+// A는 진짜 "메타 없음" — UI에서 저장한 equipMeta가 BASE에 실려 오므로 명시적으로 비움
 const A = await run('A. 메타 없음 (equipMeta 강제 제거)', { equipMeta: {} });
 const A0 = await run('A0. 현재 저장된 설정 그대로', {});
 const B = await run('B. 자석 마운트', { equipMeta: { 'BEARING:C1': { mount: 'magnet' } } });
@@ -55,7 +54,7 @@ const D = await run('D. 자석 + 직결 (해당없음 처리 확인)', {
   equipMeta: { 'BEARING:C1': { mount: 'magnet', drive: 'direct' } },
 });
 
-// ── 회귀 어서션: 메타가 판정 경로를 실제로 바꿨는가 ─────────────────────────
+// ── 회귀 어서션: 메타가 판정 경로를 실제로 바꾸는지 ─────────────────────────
 console.log('\n=== 어서션 ===');
 const chk = (ok, msg) => { if (ok) console.log('  PASS', msg); else { fail++; console.log('  FAIL', msg); } };
 chk(B.det.mountFmax === 2000 && B.det.kgCapped, '자석 마운트 → 커토그램 상한 2 kHz 적용·대역 잘림');

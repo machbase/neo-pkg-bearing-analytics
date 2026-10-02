@@ -1,9 +1,7 @@
-/* 결함 패턴을 못 잰 틱 — 오프라인(Neo 불필요). npm run smoke에 포함.
-
-   등급은 결함 패턴(원본 파형, 약 10분 주기)이 켠다. 잴 수 있는 태그인데 한 번 못 재면(조회 실패·표본 부족·
-   첫 측정 전) 예전에는 "패턴 없음 = 양호"로 읽고 회차 식별자도 없어 판정 틱마다 새 회차로 셌다 —
-   알람 중이던 태그가 두 틱(몇 초) 만에 거짓 "정상 복귀"로 확정되고, 다음 측정에서 다시 악화 알림이 나갔다.
-   지금은 calc.patternRound가 "판정 보류"로 직전 등급·회차를 넘겨 전이를 막는다. 앱·서버가 같은 함수다. */
+/* 결함 패턴을 못 잰 틱 — 오프라인(Neo 불필요) · npm run smoke 포함
+   · 잴 수 있는 태그가 못 재면(조회 실패·표본 부족·첫 측정 전) calc.patternRound가 "판정 보류"로 직전 등급·회차 유지
+   · 보류 중 거짓 "정상 복귀" 없음, 복귀는 패턴 없음 측정 두 회차 연속일 때만
+   · 앱·서버 같은 함수, 화면 보류 사유 표시 */
 globalThis.window = globalThis;
 const VC = (await import('../../cgi-bin/calc/calc.js')).default;
 const { buildMonitorTql, validateSpec } = (await import('../../cgi-bin/monitor/monitor.js')).default;
@@ -33,12 +31,12 @@ function alarmed() {   // 두 측정 회차 연속 위험 → 확정
   return b.next;
 }
 {
-  // 예전 방식: 못 잰 틱 = 패턴 없음(0) + 회차 없음(null)
+  // 대조군(보류 없음): 못 잰 틱 = 패턴 없음(0) + 회차 없음(null)
   let s = alarmed(), evs = [];
   for (let i = 1; i <= 3; i++) { const r = judgeTick(s, VC.patternGate(false, 0), false, T0 + 10 * MIN + i * 3000, CFG, null, true, null); evs = evs.concat(r.events); s = r.next; }
   chk(evs.some((e) => e.etype === 'recovery') && s.g === 0, '(재현) 예전 방식은 몇 초 만에 거짓 "정상 복귀"를 확정했다', evs.map((e) => e.etype).join(','));
 
-  // 지금: patternRound로 보류
+  // patternRound로 보류
   s = alarmed(); evs = [];
   for (let i = 1; i <= 5; i++) {
     const pr = VC.patternRound(null, true, s, 0);
@@ -47,7 +45,7 @@ function alarmed() {   // 두 측정 회차 연속 위험 → 확정
   }
   chk(evs.length === 0 && s.g === 2, '못 잰 틱이 이어져도 알림 없이 위험 등급을 유지한다', 'events=' + evs.length + ' g=' + s.g);
 
-  // 실제 측정이 돌아와 패턴이 없다고 두 회차 연속 나오면 그때 복귀한다
+  // 실제 측정에서 패턴 없음이 두 회차 연속이면 복귀
   const m1 = T0 + 20 * MIN, m2 = T0 + 30 * MIN;
   let r = judgeTick(s, VC.patternRound({ on: false, at: m1 }, true, s, 0).rg, false, m1, CFG, null, true, m1);
   const e1 = r.events.map((e) => e.etype); s = r.next;

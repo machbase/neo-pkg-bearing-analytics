@@ -1,14 +1,11 @@
-/* 재적재 실패 — 오프라인(Neo 불필요). npm run smoke에 포함.
-
-   재적재는 판정 틱을 멈춰 두고 데이터를 다시 읽는다. 두 구멍이 있었다:
-   ① 실패하면 틱을 다시 켜지 않아 새로고침 전까지 판정이 조용히 멈췄다.
-   ② 테이블 조회 실패는 오류가 아니라 "그 테이블 태그 0개"로 성공 처리됐다 — 카드가 사라지고,
-      다음 카탈로그 틱이 "감시할 태그 없음"으로 서버 감시 타이머를 지웠다.
-   지금은 조회 실패를 실패로 올리고, 옛 데이터로 감시를 이어 가며 재시도하고, 그동안 서버 타이머를 굽지 않는다. */
+/* 재적재 실패 처리 — 오프라인(Neo 불필요) · npm run smoke 포함
+   · 실패 시 옛 데이터로 감시 지속 + 판정 틱 재시작 + 재시도(백오프)
+   · 테이블 조회 실패를 "태그 0개"가 아닌 실패로 처리, 실패 중 서버 타이머 재굽기 중단
+   · 재적재 겹침 방지, 부팅 시 조회 실패 테이블은 되살아남 검사 제외 */
 globalThis.window = globalThis;
 globalThis.fetch = async () => ({ ok: true, status: 200, json: async () => ({ success: true, data: { rows: [] } }), text: async () => '' });
 
-// 긴 타이머(재시도)는 잡아 두고 직접 돌린다 — 짧은 것은 그대로 흘린다
+// 긴 타이머(재시도)는 잡아 두고 직접 실행, 짧은 것은 그대로
 const realST = setTimeout, realCT = clearTimeout;
 let sched = [];
 globalThis.setTimeout = (fn, ms) => {
@@ -33,7 +30,7 @@ const chk = (ok, msg, extra) => {
 };
 const settle = () => new Promise((r) => realST(r, 20));
 
-// ── 가짜 DB: 테이블별로 실패를 켜고 끈다 ─────────────────────────────────
+// ── 가짜 DB: 테이블별 실패 토글 ─────────────────────────────────
 const T1 = 1700000000000;
 const down = new Set();          // 목록 조회가 실패하는 테이블
 const statDown = new Set();      // 통계 조회가 실패하는 테이블
@@ -55,7 +52,7 @@ DB.rollupBatch = async (table, names) => {
 };
 DB.sampleTimes = async () => { if (timesDown) throw new Error('HTTP 500'); return Array.from({ length: 50 }, (_, i) => (T1 - 1000) * 1000 + i * 1000); };
 
-const E = (await import('../../cgi-bin/chart/chart.js')).default;   // 앱의 ENGINE과 같다
+const E = (await import('../../cgi-bin/chart/chart.js')).default;   // 앱의 ENGINE과 동일
 
 // ── 적재 함수 ────────────────────────────────────────────────────────────
 {
@@ -89,6 +86,7 @@ function mkApp() {
   app._monSpec = function () { this._monSpecCalls++; return { tags: [] }; };
   app._bandSpec = function () { this._monSpecCalls++; return { tags: [] }; };
   app._dropTimer = function () { return Promise.resolve(); };
+  app._leadWait = function () { return Promise.resolve(); };   // 담당 확인 대기 생략(조율은 test-coord)
   app.E = E;
   app.live = true;
   app._cfgOk = true;
@@ -101,7 +99,7 @@ function mkApp() {
   app.data = old;
   app._loadedSel = ['A'];
   Object.assign(app.state, { srcSel: ['A', 'B'], monMode: 'server', monitorOn: true, bandOn: true });
-  down.add('B');                              // 새로 고른 B를 못 읽는다
+  down.add('B');                              // 새로 고른 B 조회 실패
 
   app._reloadLive();
   await settle();
@@ -131,7 +129,7 @@ function mkApp() {
   for (let i = 0; i < 6; i++) await fire();
   chk(pending()[0].ms === 300000, '재시도 간격은 5분에서 멈춘다', pending()[0].ms);
 
-  down.delete('B');                            // 원인이 사라졌다
+  down.delete('B');                            // 원인 해소
   await fire();
   chk(!app.state.loadFail && !app._loadFail && pending().length === 0 && app.data !== old
     && app.data.equipment.map((e) => e.table).sort().join() === 'A,B',
@@ -179,7 +177,7 @@ function mkApp() {
   chk(listCalls === 2 && !app._reloading, '끝난 뒤 한 번으로 모아 다시 돈다(그 사이 바뀐 선택 반영)', 'calls=' + listCalls);
 }
 
-// ── 부팅: 조회 실패 테이블은 되살아남 검사 범위에서 뺀다 ─────────────────
+// ── 부팅: 조회 실패 테이블은 되살아남 검사 범위에서 제외 ─────────────────
 {
   sched = [];
   const app = mkApp();

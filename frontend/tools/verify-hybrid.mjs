@@ -1,10 +1,6 @@
-// 최종 판정 규칙 후보의 검증 — 하이브리드 대역 + 측대역 빗, 그리고 임계의 홀드아웃.
-//
-// 두 가지를 동시에 답한다:
-//  1) 대역을 커토그램 하나로 두지 말고 저역(1~5 kHz)과 **둘 다** 보면 오탐이 얼마나 느는가.
-//     (이 검증 풀에 대형 설비가 없어 저역 고정으로 갈아타는 것은 위험하다 — 고주파 공진 기계를 놓친다)
-//  2) 빗 임계를 평가셋에 맞추면 그건 과적합이다. **데이터셋 하나를 빼고 임계를 정한 뒤
-//     그 셋으로만 평가**해서(leave-one-dataset-out) 임계가 옮겨 가는지 본다.
+// 판정 규칙 후보 비교 — 대역 전략(커토그램·저역 1~5 kHz·둘 다) × 측대역 빗 추가, 검출·오탐·종류 적중 측정
+// · 빗 임계는 목표 오탐률(3%)로 산정, leave-one-dataset-out 홀드아웃으로 임계 이동(과적합) 확인
+// · 로컬 데이터셋 필요(D:/vibe-datasets/conv, 없으면 건너뜀)
 import fs from 'node:fs';
 import path from 'node:path';
 
@@ -42,7 +38,7 @@ function combRatio(sp, f, delta, med, res) {
   return n ? (sum / n) / med : 0;
 }
 
-/** 한 대역에서 단일피크 매칭과 빗 비율을 모두 뽑는다 */
+/** 한 대역에서 단일피크 매칭·빗 비율 산출 */
 function evalBand(v, fsHz, fr, bf, band) {
   const env = VC.envelopeSpectrum(v, fsHz, Math.max(500, 12 * fr), band);
   if (!env.freqs.length) return null;
@@ -88,7 +84,7 @@ for (const ds of datasets) {
 }
 
 const KEYMAP = { BPFO: 'OR', BPFI: 'IR', BSF: 'BALL' };
-/** 판정 규칙 — mode: 'kg' | 'low' | 'both', comb: 임계(없으면 단일피크만) */
+/** 판정 규칙 — mode: 'kg' | 'low' | 'both', T: 빗 임계(null이면 단일피크만) */
 function decide(r, mode, T) {
   const sides = mode === 'kg' ? [r.a] : mode === 'low' ? [r.b] : [r.a, r.b];
   let hit = '', best = 0;
@@ -112,7 +108,7 @@ function score(rows, mode, T) {
   };
   return { fp, hN: h.length, det: det.length, fN: f.length, ok: ok.length, per };
 }
-/** 정상 오탐률이 목표치가 되는 빗 임계 — 단일피크로 이미 뜬 정상은 빼고 센다 */
+/** 정상 오탐률이 목표치가 되는 빗 임계(정상 케이스 빗 비율의 상위 분위) */
 function fitT(rows, mode, fpRate) {
   const h = rows.filter((r) => r.label === 'none');
   const vals = h.map((r) => {

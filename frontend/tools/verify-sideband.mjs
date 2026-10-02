@@ -1,14 +1,5 @@
-// 측대역 무리 판독 시험 — "지배 피크 하나"가 놓치는 내륜·구름체를 잡을 수 있는지 잰다.
-//
-// 물리: 결함이 하중대를 드나들면 충격 크기가 변조돼 에너지가 측대역으로 퍼진다.
-//   내륜  BPFI ± k·1×    (결함이 축과 함께 돈다)
-//   구름체 BSF ± k·FTF    (결함이 케이지와 함께 돈다)
-//   외륜  변조 없음        (결함이 하중대에 고정) ← 그래서 외륜만 단일 피크로 잘 잡힌다
-// 그러니 중앙 피크 하나가 아니라 **빗(comb) 전체 에너지**를 배경 대비로 재야 한다.
-//
-// 다중비교 경계: 후보를 넷(BPFO·BPFI·BSF·2BSF) 놓고 최댓값을 취하는 구조라,
-// 결함에서만 재면 반드시 좋아 보인다. 그래서 **정상 케이스에서 같은 통계를 함께 재고**,
-// 정상 오탐률을 현행과 같은 수준에 고정했을 때의 검출률로만 비교한다.
+// 측대역 빗 판독 비교 — 지배 피크 대조 vs 빗 에너지 비, 정상 오탐률 고정 시 검출·종류 적중 측정(후보 BPFO·BPFI·BSF·2BSF)
+// · 로컬 데이터셋 필요(D:/vibe-datasets/conv, 없으면 건너뜀), --band=lo:hi로 복조 대역 고정
 import fs from 'node:fs';
 import path from 'node:path';
 
@@ -21,7 +12,7 @@ const FIXED_BAND = bandArg
   ? { loHz: +bandArg.slice(7).split(':')[0], hiHz: +bandArg.slice(7).split(':')[1] }
   : null;
 const MAX_N = 65536;
-const M = 3;            // 측대역 차수 ±3까지 — 더 넓히면 배경까지 긁어 비율이 부풀려진다
+const M = 3;            // 측대역 차수 ±3까지 — 더 넓히면 배경까지 긁어 비율 부풂
 
 if (!fs.existsSync(ROOT)) { console.log(`데이터 없음 (${ROOT}) — 건너뜀`); process.exit(0); }
 
@@ -33,7 +24,7 @@ const readF64 = (p, cap) => {
   return out;
 };
 
-/** f 근처(허용오차 tol)의 최대 진폭 — 0이면 그 자리에 성분이 없다 */
+/** f 근처(허용오차 tol)의 최대 진폭 — 0이면 성분 없음 */
 function peakNear(sp, f, tol) {
   if (!(f > 0)) return 0;
   let best = 0;
@@ -43,7 +34,7 @@ function peakNear(sp, f, tol) {
   return best;
 }
 
-/** 빗 에너지 비 — {f, f±Δ … f±MΔ} 의 진폭 합을 스펙트럼 중앙값 대비로 */
+/** 빗 에너지 비 — {f, f±Δ … f±MΔ} 진폭 평균 ÷ 스펙트럼 중앙값 */
 function combRatio(sp, f, delta, med, res) {
   if (!(f > 0) || !(med > 0)) return 0;
   const tol = Math.max(1.5 * res, f * 0.01);
@@ -51,7 +42,7 @@ function combRatio(sp, f, delta, med, res) {
   for (let m = -M; m <= M; m++) {
     const t = f + m * delta;
     if (t < 2 || t > sp.freqs[sp.freqs.length - 1]) continue;
-    // 측대역 간격이 분해능보다 좁으면 이웃끼리 같은 빈을 집는다 — 세지 않는다
+    // 측대역 간격이 분해능보다 좁으면 이웃끼리 같은 빈을 집음 — 제외
     if (m !== 0 && Math.abs(delta) < 2 * res) continue;
     sum += peakNear(sp, t, m === 0 ? tol : Math.max(1.5 * res, Math.abs(t) * 0.01));
     nUsed++;
@@ -89,11 +80,11 @@ for (const ds of datasets) {
     const sorted = env.mags.slice().sort((a, b) => a - b);
     const med = sorted[Math.floor(sorted.length / 2)] || 0;
 
-    // 현행 방식(지배 피크 대조)도 같은 포락선에서 계산해 나란히 비교한다
+    // 지배 피크 대조도 같은 포락선에서 계산해 나란히 비교
     const envQ = VC.envelopeQuant(env.freqs, env.mags, fr);
     const bm = VC.bearingMatch(envQ, bf, fr, res);
 
-    // 빗 후보 — 변조 간격은 물리가 정한다(내륜=1×, 구름체=FTF, 외륜=변조 없음)
+    // 빗 후보 — 변조 간격은 물리로 결정(내륜=1×, 구름체=FTF, 외륜=변조 없음)
     const cands = [
       { key: 'BPFO', f: bf.BPFO, d: 0 },
       { key: 'BPFI', f: bf.BPFI, d: fr },
@@ -113,7 +104,7 @@ for (const ds of datasets) {
 const healthy = recs.filter((r) => r.label === 'none');
 const faults = recs.filter((r) => ['OR', 'IR', 'BALL'].includes(r.label));
 
-// 정상 오탐률을 고정하고 그때의 검출률을 본다 — 임계를 결함 쪽에 맞추면 그게 다중비교다
+// 정상 오탐률 고정 시 검출률 비교 — 임계를 결함 쪽에 맞추면 다중비교
 const hSorted = healthy.map((r) => r.combR).sort((a, b) => b - a);
 const thrFor = (fpRate) => hSorted[Math.max(0, Math.floor(hSorted.length * fpRate) - 1)] || Infinity;
 

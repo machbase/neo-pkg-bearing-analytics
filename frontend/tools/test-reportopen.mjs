@@ -1,9 +1,7 @@
-/* 리포트 열기 격리 — 오프라인(Neo 불필요). npm run smoke에 포함.
-
-   파일 API는 계정 구분이 없어 남이 올린 HTML이 리포트 목록에 섞일 수 있다. 예전처럼 blob URL을
-   새 탭에 그대로 열면 그 문서가 콘솔과 같은 오리진이 되어 localStorage의 로그인 토큰을 읽는다.
-   지금은 새 탭에 틀만 쓰고, 리포트 본문은 allow-same-origin 없는 샌드박스 iframe(불투명 오리진)
-   안에서만 연다. 틀에 무엇이 쓰이는지, 본문이 틀 밖으로 새지 않는지를 본다. */
+/* 리포트 열기 격리 — 오프라인(Neo 불필요) · npm run smoke 포함
+   · 파일 API는 계정 구분이 없어 남의 HTML이 섞일 수 있음 → 새 탭엔 틀만, 본문은 allow-same-origin 없는
+     샌드박스 iframe(불투명 오리진)에서만 실행(콘솔 오리진의 로그인 토큰 접근 차단)
+   · 틀에 본문(스크립트) 미포함, 팝업 차단·파일 읽기 실패 처리 */
 globalThis.window = globalThis;
 import { resolveObjectURL } from 'node:buffer';
 
@@ -62,7 +60,7 @@ function mkApp() {
   const b = src && /^blob:/.test(src) ? resolveObjectURL(src) : null;
   chk(!!b && b.type === 'text/html' && (await b.text()) === EVIL, 'iframe은 파일 내용 그대로를 HTML로 연다(차트·인쇄 기능 유지)');
 }
-// ── 팝업 차단 — 파일을 받기 전에 멈춘다 ─────────────────────────────────
+// ── 팝업 차단 — 파일 받기 전 중단 ─────────────────────────────────
 {
   globalThis.open = () => null;
   const app = mkApp();
@@ -71,7 +69,7 @@ function mkApp() {
   await settle();
   chk(fileHits === h0 && /팝업이 차단/.test((app._lastToast || [])[0]), '팝업이 막히면 파일을 받지 않고 사유를 알린다');
 }
-// ── 파일 읽기 실패 — 빈 탭을 남기지 않는다 ──────────────────────────────
+// ── 파일 읽기 실패 — 빈 탭 안 남김 ──────────────────────────────
 {
   fileOk = false;
   const tab = fakeTab();

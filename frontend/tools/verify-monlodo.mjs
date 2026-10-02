@@ -1,7 +1,6 @@
-// 감시 임계(MON_ADOPT=3.0)가 이 풀에 맞춘 값인지 — leave-one-dataset-out으로 본다.
-//
-// 데이터셋 하나를 빼고 나머지에서 "오탐 4%"가 되는 임계를 구한 뒤, 뺀 셋으로 평가한다.
-// 폴드마다 임계가 크게 흔들리거나 홀드아웃 성적이 무너지면 그 값은 풀에 붙은 것이다.
+// 감시 임계(MON_ADOPT) 풀 과적합 여부 — leave-one-dataset-out(하나 빼고 오탐 4% 임계 산정 → 뺀 셋으로 평가)
+// · 폴드별 임계 범위·홀드아웃 성적과 현재 MON_ADOPT 포함 여부 출력
+// · 로컬 데이터셋 필요(D:/vibe-datasets/conv, 없으면 건너뜀)
 import fs from 'node:fs';
 import path from 'node:path';
 const VC = (await import('../../cgi-bin/calc/calc.js')).default;
@@ -26,7 +25,7 @@ for (const ds of DATASETS) {
     if (!fs.existsSync(fp)) continue;
     const fr = c.rpm / 60, bf = VC.bearingFreqs(c.rpm, c.geo);
     const band = VC.demodFixed(c.fs); if (!band) continue;
-    /* 감시와 같은 창 — 25회전(MON_REV). 상세분석(100회전)과 다른 값을 쓰므로 임계도 따로 맞춰야 한다. */
+    /* 감시와 같은 창(MON_REV 회전) — 상세분석과 창이 달라 임계도 별도 산정 */
     const want = Math.round(c.fs * VC.MON_REV / fr);
     const v = readF64(fp, Math.min(HARD, fs.statSync(fp).size / 8, Math.max(4096, want)));
     if (v.length < 4096) continue;

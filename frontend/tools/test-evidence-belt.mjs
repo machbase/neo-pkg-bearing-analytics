@@ -1,9 +1,6 @@
-/* 근거표(_evidence)의 벨트 항목 — 오프라인(Neo 불필요). npm run smoke에 포함.
-
-   mk(라벨, [[조건, 점수, 근거문구]…])의 세 요소는 전부 먼저 계산된다. 조건이 거짓이어도 문구는 만들어지므로,
-   문구가 참조하는 것은 조건이 확인한 것과 같아야 한다. 벨트 항목이 이 규칙을 어겨서
-   "벨트 제원(길이 포함)은 입력됐는데 벨트 통과주파수에 피크가 없는" 설비의 리포트 생성이 통째로 죽었다
-   (라이브 BEARING:C1 — d1 12·d2 34·len 565, 벨트 주파수 근처 피크 없음). */
+/* 근거표(_evidence)의 벨트 항목 — 벨트 제원이 있는데 벨트 주파수 피크가 없어도 근거표 생성
+   · mk(라벨, [[조건, 점수, 근거문구]…])는 세 요소를 먼저 계산 → 근거문구는 조건이 확인한 값만 참조해야 함
+   오프라인(Neo 불필요) · npm run smoke 포함 */
 globalThis.window = globalThis;
 
 const CH = (await import('../../cgi-bin/chart/chart.js')).default;
@@ -15,14 +12,14 @@ const chk = (ok, msg, extra) => {
   else { fail++; console.error('FAIL', msg, extra || ''); }
 };
 
-// 1× = 30 Hz인 스펙트럼. 벨트 통과주파수(π·d1·fr/L)와 종동축(fr·d1/d2) 근처에는 일부러 피크를 두지 않는다.
+// 1× = 30 Hz 스펙트럼 — 벨트 통과주파수(π·d1·fr/L)·종동축(fr·d1/d2) 근처엔 일부러 피크 없음
 const RPM = 1800, FR = RPM / 60;
 const mkSpec = () => {
   const freqs = [], mags = [];
   for (let i = 0; i < 400; i++) {
     const f = i * 0.5;
     freqs.push(f);
-    // 1×·2×에만 성분을 둔다 — 저주파(벨트·종동축 대역)는 잡음 바닥
+    // 1×·2×에만 성분 — 저주파(벨트·종동축 대역)는 잡음 바닥
     mags.push(Math.abs(f - FR) < 0.3 ? 1.0 : Math.abs(f - 2 * FR) < 0.3 ? 0.4 : 0.001);
   }
   return { freqs, mags, res: 0.5, resTrue: 0.5, markers: [] };
@@ -52,7 +49,7 @@ const mkApp = () => {
   return a;
 };
 
-// ── 1. 벨트 제원 전부 입력 + 벨트 주파수에 피크 없음 = 리포트가 죽었던 조합 ──────────
+// ── 1. 벨트 제원 전부 입력 + 벨트 주파수에 피크 없음 ────────────────────────────
 {
   const app = mkApp();
   const eq = mkEq({ mount: 'stud', drive: 'belt', vanes: 10, belt: { d1: 12, d2: 34, len: 565 } });
@@ -66,7 +63,7 @@ const mkApp = () => {
     chk(belt && belt.score === 0, '근거가 없으면 점수도 0', belt ? String(belt.score) : '');
   }
 }
-// ── 2. 길이만 빠진 경우 — 대조 불가 사유가 남아야 한다 ────────────────────────────
+// ── 2. 길이만 빠진 경우 — 대조 불가 사유 기록 ──────────────────────────────────
 {
   const app = mkApp();
   const eq = mkEq({ mount: 'stud', drive: 'belt', belt: { d1: 12, d2: 34 } });
@@ -76,7 +73,7 @@ const mkApp = () => {
   const belt = ev && ev.conf.filter((c) => /^벨트·풀리/.test(c.f))[0];
   chk(belt && /벨트길이 미입력/.test(belt.caveat || ''), '길이 미입력을 사유로 남긴다', belt ? belt.caveat : '');
 }
-// ── 3. 벨트 구동이 아니면 후보 자체가 빠진다(기존 동작 유지) ──────────────────────
+// ── 3. 벨트 구동이 아니면 후보 제외 ────────────────────────────────────────────
 {
   const app = mkApp();
   const eq = mkEq({ mount: 'stud', drive: 'direct' });
@@ -85,7 +82,7 @@ const mkApp = () => {
   chk(!err, '직결 구동에서도 죽지 않는다', err ? String(err.message || err) : '');
   chk(ev && !ev.conf.some((c) => /^벨트·풀리/.test(c.f)), '벨트 구동이 아니면 벨트 후보를 내지 않는다');
 }
-// ── 4. 같은 함정이 다른 항목에 생기지 않게 — 근거문구가 널 가능 객체를 그대로 참조하는지 ──
+// ── 4. 벨트 근거문구가 beltHit을 함께 확인하는지 소스 검사 ────────────────────
 {
   const { readFile } = await import('node:fs/promises');
   const src = await readFile(new URL('../src/app.js', import.meta.url), 'utf8');

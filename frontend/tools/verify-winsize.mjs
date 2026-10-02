@@ -1,8 +1,6 @@
-// 감시용 창 길이 — 표본을 줄이면 검출이 얼마나 떨어지나.
-//
-// 서버 감시(goja)는 앱보다 100~400배 느려서 창 길이가 곧 회차 소요다.
-// 감시는 **트리거**만 하고 확정은 상세분석이 하므로, 놓치지만 않으면 짧아도 된다.
-// 그래서 "같은 오탐률에서 검출이 얼마나 남는가"를 창 길이별로 잰다.
+// 감시용 창 길이별 검출 — 같은 오탐률(4%)에서 창(회전수 기준·표본 고정)별 검출·종류 적중·goja 소요 추정
+// · 서버 감시(goja)는 느려 창 길이 = 회차 소요, 감시는 트리거(확정은 상세분석)라 검출 유지 여부만 확인
+// · 로컬 데이터셋 필요(D:/vibe-datasets/conv, 없으면 건너뜀)
 import fs from 'node:fs';
 import path from 'node:path';
 const VC = (await import('../../cgi-bin/calc/calc.js')).default;
@@ -14,7 +12,7 @@ const readF64 = (p, n) => {
   const o = new Array(k); for (let i = 0; i < k; i++) o[i] = b.readDoubleLE(i * 8); return o;
 };
 const KEY = { BPFO:'OR', BPFI:'IR', BSF:'BALL' };
-/* 창 후보 — REV는 회전수 기준(제품 방식), N은 표본 고정(대역 방식). 둘을 같이 본다. */
+/* 창 후보 — rev는 회전수 기준(제품 방식), n은 표본 고정(대역 방식) */
 const WINS = [
   { k:'rev100', ko:'100회전 (현행)', rev:100 },
   { k:'rev50',  ko:'50회전',  rev:50 },
@@ -69,7 +67,7 @@ for (const w of WINS) {
   const ok = fired.filter((r) => KEY[r[w.k].k] === r.label).length;
   const ns = rows.map((r) => r[w.k].n).filter((x) => x > 0).sort((a,b) => a-b);
   const nm = ns[Math.floor(ns.length/2)] || 0;
-  /* goja 실측: 16,384에서 855 ms. FFT는 N log N이라 그 비로 환산한다. */
+  /* goja 기준값(16,384 표본 855 ms)을 FFT N log N 비로 환산 */
   const ms = nm > 0 ? 855 * (nm * Math.log2(nm)) / (16384 * 14) : 0;
   console.log(w.ko.padEnd(22) + String(nm).padStart(9) + T.toFixed(2).padStart(8)
     + `${H.filter((r)=>get(r)>=T).length}/${H.length}`.padEnd(9) + '  '

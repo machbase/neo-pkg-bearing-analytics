@@ -1,8 +1,11 @@
 ---
 title: Fault types and signatures
+weight: 53
 ---
 
 # Fault types and signatures
+
+[한국어](./faults.kr.md) | **English**
 
 This document sets out **which faults the app distinguishes, on what evidence**, and **what each distinction requires**.
 
@@ -12,23 +15,23 @@ One principle runs through all of it:
 
 ## Learning is not a prerequisite for analysis
 
-There are four evaluation axes, and they split into two kinds.
+There are four evaluation axes, and they split into two roles.
 
-| | Axis | Learning | Where it is needed |
+| | Axis | Learning | What it does |
 | :--- | :--- | :--- | :--- |
-| **Core** | ISO zone · fault pattern | **Not required** | Detail analysis and reports are complete on these two alone |
-| **Supplementary** | Baseline · band | Required | "Compared to normal" is a continuous-monitoring concept |
+| **Grade-forming axes** | Fault pattern · ISO zone | **Not required** | Grades and alerts. Detail analysis and reports are complete on these two alone |
+| **Evidence axes** | Baseline · band | Required | "Versus normal" evidence. No grades, no alerts |
 
-A one-off analysis has no "normal" to compare against. Detail analysis and reports therefore work on equipment that has never been trained; trained axes simply **add sensitivity**.
+A one-off analysis has no "normal" to compare against. Detail analysis and reports therefore work on equipment that has never been trained; trained axes simply **add a layer of evidence** — the grade does not change.
 
 ## Two separate questions
 
 | | Asks | Series | Action |
 | :--- | :--- | :--- | :--- |
-| **Vibration axis** | Has vibration at this point risen | sub · 1× · fault band · high · vh1–vh4 | Balancing · alignment · fastening (hours) |
+| **Vibration axis** | Has vibration at this point risen | sub · 1× · fault band · high · 1–2 · 2–4 · 4–8 · 8 kHz+ | Balancing · alignment · fastening (hours) |
 | **Bearing axis** | Has this bearing degraded | envelope BPFO · BPFI · BSF | Parts procurement · teardown (weeks) |
 
-**They must not be collapsed into one.** In measurements a *healthy* bearing read `2–4 kHz ×3.97`, higher than a *faulty* one (`×2.35`) — the neighbouring bearing's damage travelled through the shaft into that sensor. "Vibration is high" was true; "this bearing is damaged" was not. Looking at envelope fault frequencies alone separates them cleanly: healthy max `×1.26` vs faulty min `×1.42`.
+**They must not be collapsed into one.** When a neighbouring bearing's damage travels through the shaft, the sensor on a *healthy* bearing can read higher in the high-frequency bands than the one on the *faulty* bearing. "Vibration is high" is true; "this bearing is damaged" is not. Looking at the envelope fault frequencies separates the two.
 
 ---
 
@@ -71,48 +74,20 @@ Fault frequencies follow from shaft speed and bearing geometry. **A part number 
 Each impact against a defect rings the housing's **multi-kHz resonance**. The raw spectrum only shows "there is high-frequency content"; **the repetition rate hides inside the amplitude modulation**. Envelope demodulation pulls that rate out as a line.
 
 ### The demodulation band is fixed at 1–5 kHz
-Automatic selection (a kurtogram) is not used. It was tried twice and lost twice.
+Picking the most impulsive band automatically (a kurtogram) is not used for judgment. That method latches easily onto signals that are not faults — filter noise at the top of the range, electrical components from inverters — and tends to avoid the band precisely when a fault is clear, so detection dropped sharply in verification on public data.
 
-**① It latches onto anti-aliasing noise.** Just below Nyquist the filter has killed the signal, so only numerical noise remains and its kurtosis explodes, dragging the kurtogram there every time. Without a cap, fault-type identification measured **0/18**; capping at 80% of Nyquist gave **7/18**.
+The demodulation band is therefore **fixed at 1–5 kHz**. The kurtogram is still computed and shown in detail analysis as **per-band impulsiveness** — which band is most impulsive is diagnostic information in itself. It is **not used for judgment**, however.
 
-**② Even with a cap it latches onto an electrical component.** Detailed below.
+When the sampling rate is too low for 1–5 kHz to be valid (the highest measurable frequency cannot reach 5 kHz), demodulation falls back to the **full band**. The evidence is weak then, and early bearing faults are not detected.
 
-**Rewriting it as a proper spectral kurtosis on the analytic signal changed nothing** — real 6%, complex magnitude 6%, complex SK 7%, all three settling on 12–16 kHz. The problem is the **objective function itself**, not the implementation: kurtosis structurally penalises tonal bands (a pure sinusoid has kurtosis 1.5, below Gaussian 3), so the clearer the fault, the more it avoids that band.
-
-### The kurtogram can also be captured by an electrical component
-
-The Nyquist cap alone is not enough. On an inverter-driven test rig (Paderborn) the kurtogram chose
-**12–19 kHz for healthy and faulty bearings alike**, and that band's envelope was dominated by a single component.
-
-Re-measuring the same bearings at a different shaft speed settles what it is:
-
-| Shaft speed | Dominant order | Absolute frequency |
-| :--- | :--- | :--- |
-| 1500 rpm | 2.10× | **52.5 Hz** |
-| 900 rpm | 3.50× | **52.8 Hz** |
-
-**The order changes while the absolute frequency stays put.** Bearing fault frequencies scale with shaft speed,
-so this is electrical or structural in origin, not mechanical. Detection fell to **1/104** (and **0/84** at 900 rpm).
-
-The demodulation band is therefore **fixed at 1–5 kHz**. Across all 383 cases detection rises
-**10% → 25%**, false positives go 2% → 3%, and type accuracy actually improves 90% → 95%.
-The kurtogram is still computed and displayed — which band is most impulsive is diagnostic information in itself.
-It is **no longer used for judgment**, however.
-
-> **Whether this band fits large machines is unknown.** The verification pool contains no large machines.
+> **Whether this band fits large machines is unknown.** The verification data contains no large machines.
 > What actually tends to sit in 1–5 kHz is the **accelerometer mounting resonance** (a few kHz depending
 > on attachment), while the bending modes of the bearing ring itself go **down** as the machine grows.
 > So "large machines are missed because their resonance is higher" is not physically sound —
 > **which direction it fails has never been measured.**
 
-When the sampling rate is too low for 1–5 kHz to be valid (Nyquist cannot reach 5 kHz), demodulation falls back to the **full-band analytic signal**. Older versions fell back to the kurtogram, which was removed for the reasons above. Falling back to rectification is avoided for the same reason — measuring one tag by a different method splits the judgment path in two.
-
-> **A near miss** — this fixed component (52.5 Hz, 2.10×) sits **3% away** from BSF (50.9 Hz, 2.04×).
-> Had the BSF tolerance been ±2% instead of ±1%, **every healthy bearing would have read as a ball fault**.
-> A 4-pole 1500 rpm inverter drive is a very common configuration.
-
 ### FTF is not evidence of a fault
-**The cage turns in a healthy bearing too.** In measurements a healthy channel produced `0.45× with 3 harmonics` from day one. It is recorded as an observation only and contributes no score.
+**The cage turns in a healthy bearing too.** A healthy channel shows cage-rotation components from the start, so they are recorded as an observation only and contribute no score.
 
 ### Oil whirl
 The shaft riding on the oil film in a journal bearing.
@@ -130,8 +105,11 @@ The shaft riding on the oil film in a journal bearing.
 
 ### Belt / pulley
 - **Signature** — belt passing frequency and its harmonics
-- **Requires** — **both pulley diameters plus belt length.** Without them there is nothing to compare
-- Pulley ratio alone still resolves the driven shaft's 1×, which often closes the attribution of an otherwise unexplained non-synchronous component
+- **Requires** — drive type **belt**, both pulley **pitch diameters** (D1 drive · D2 driven) plus belt length. Without the length there is no belt passing frequency to compare
+- The pulley ratio alone still resolves the other shaft's 1×, which often closes the attribution of an otherwise unexplained non-synchronous component
+- **If the sensor sits across the belt (fan, pump, …)**, set the sensor position to **driven side**. The fault pattern, fault frequencies, and bands are then computed from the **driven-shaft speed** — a measured driven speed if you enter one, otherwise RPM × D1 ÷ D2. If the driven speed cannot be known, that tag does not measure the fault pattern at all — matching against the motor speed would make unrelated frequencies line up by chance
+
+> A driven-shaft speed off by only 1–2% still detects the fault but often names the wrong site. Use pitch diameters rather than outer diameters, or enter a measured speed.
 
 ### Vane / blade pass
 - **Signature** — vane count × 1×
@@ -146,7 +124,7 @@ The shaft riding on the oil film in a journal bearing.
 - Usually a belt-driven shaft, an adjacent machine, or a gear-driven shaft. A drive layout diagram normally closes the attribution
 
 ### Electrical
-- **Signature** — components tied to line frequency
+- **Signature** — components tied to line frequency (120 Hz on a 60 Hz grid) that do not move when speed changes
 - **To confirm** — check whether it disappears when power is cut
 
 ---
@@ -155,29 +133,28 @@ The shaft riding on the oil film in a journal bearing.
 
 | Setting | Without it |
 | :--- | :--- |
-| **Shaft speed (RPM)** | No order analysis at all — every candidate closes |
-| **Unit** | No ISO zone verdict (the standard is velocity, so acceleration and displacement need conversion) |
-| **Machine class** | No ISO zone boundaries |
-| **Bearing part number / geometry** | No BPFO/BPFI/BSF comparison; no oil-whirl exclusion |
-| **Mounting** | No valid high-frequency ceiling — bands above it may be mounting resonance |
-| **Pulley diameters / belt length** | No belt passing frequency |
+| **Shaft speed (RPM)** | No order analysis at all — every candidate closes, and the fault pattern (grade) and band extraction stop |
+| **Bearing part number / geometry** | No fault pattern (grade), no BPFO/BPFI/BSF comparison, no oil-whirl exclusion |
+| **Unit** | Treated as velocity (mm/s) — acceleration and displacement sensors get a wrong ISO conversion, so the grade height is off |
+| **Class** | Judged with Class II zone boundaries |
+| **Mounting** | No trustworthy high-frequency ceiling — bands above it that may be mounting resonance cannot be flagged |
+| **Pulley pitch diameters / belt length** | No belt passing frequency, no driven-shaft 1× |
+| **Sensor position (belt) / driven-shaft speed** | A driven-side sensor's fault frequencies are computed from the motor speed and miss |
 | **Vane count / gear drive** | No vane-pass or mesh frequency |
 
 ---
 
 ## How far this currently gets
 
-Measured over **383 cases** from four public datasets (CWRU, MFPT, Paderborn, XJTU-SY).
+A summary of verification on 383 cases from four public datasets (CWRU, MFPT, Paderborn, XJTU-SY):
 
 | | Result |
 | :--- | :--- |
-| **False positives on healthy** | **3/100 (3%)** |
-| **Faults detected** | **188/283 (66%)** |
-| Site correct among detected | 157/174 |
+| False positives on healthy | 3 of 100 (3%) |
+| Faults detected | 188 of 283 (66%) |
+| Faults located correctly, out of all faults | 157 of 283 (about 55%) |
 
-
-That last row matters. "83% among detected" improves as adoption gets more conservative, so it must
-never be quoted on its own. What actually reaches the user is **one in two faults located correctly**.
+Counting only detected faults makes site accuracy look much higher, but that figure improves as judgment gets more conservative, so it must not be read on its own. What actually reaches the user is **a correct site for a little over one fault in two**. The full tables are in [What this tool does and does not do](./scope.en.md).
 
 ### By site — only the outer race works well
 
@@ -187,32 +164,14 @@ never be quoted on its own. What actually reaches the user is **one in two fault
 | Inner race | passes in and out with the shaft | spreads into `BPFI ± k·1×` sidebands | middling |
 | Rolling element | passes in and out with the cage | spreads into `BSF ± k·FTF` sidebands | **site not asserted** |
 
-Rolling-element faults are detected but **the site is not asserted**. In measurements, ball-labelled
-cases were never attributed to BSF, while seven inner/outer cases were wrongly sent there. Physically a
-defective element damages the races too, so "site unknown" is the honest statement.
+Rolling-element faults are detected but **the site is not asserted**. In verification, verdicts naming the rolling element were almost never right, and inner/outer-race faults were sometimes wrongly sent there. Physically a defective element damages the races too, so "site unknown" is the honest statement.
 
 ### On the time axis — outer race early, inner race late
 
-Run-to-failure tests (XJTU-SY, one file per minute) answer **"how long before failure did it first alarm"**.
-
-| Bearing | Site | First alarm |
-| :--- | :--- | :--- |
-| 3_5 · 2_2 · 1_1 | outer race | with **97% · 67% · 41%** of life remaining |
-| 2_1 · 3_3 | inner race | with **8%** of life remaining |
-| 1_4 | cage | **never** |
-
-This table is a more honest picture of usefulness than the snapshot rate:
-**the outer race buys planning time; the inner race is closer to a notice that it is about to stop.**
-
-### How often does it cry wolf
-
-With the alarm state machine applied (2 consecutive to enter, 5 to clear), healthy operation produced
-**12.5 alarms per asset-month**. Both of those alarms are cases that may have been genuine early
-degradation, and **four of six bearings were completely silent**. Since these are accelerated-life tests,
-"the first half is healthy" is itself shaky — read the figure as a **conservative upper bound**.
+Measuring "how long before failure did it first alarm" on run-to-failure data shows that **the outer race buys planning time; the inner race is closer to a notice that it is about to stop.** The figures are in [What this tool does and does not do › Time-axis performance](./scope.en.md#time-axis-performance--run-to-failure-tests).
 
 ### When the type is left undecided
-If the top two ratios are close, the app **lists both candidates and says "insufficient separation"**. In measurements `BPFO ×1.42 / BSF ×1.39` — a 2 % gap — was being declared "outer race".
+If the evidence for the top two fault frequencies is close, the app **lists both candidates and says "insufficient separation"**.
 
 **Either way the bearing gets replaced, so the maintenance plan stands on detection alone.** The type matters for **root-cause analysis**: an inner race defect points to overload or misalignment, an outer race defect to the housing or current passage — which is what changes the prevention measure.
 

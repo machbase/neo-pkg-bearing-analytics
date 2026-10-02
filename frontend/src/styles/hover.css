@@ -1,10 +1,9 @@
-/* view.js의 class="vhovN"에 대응하는 :hover 규칙. 인라인 style로는 :hover를 못 쓰기 때문에 여기로 뺀다.
-   새 hover가 필요하면 다음 번호를 여기 추가하고 템플릿에서 그 클래스를 쓴다. */
+/* view.js class="vhovN"용 :hover 규칙(인라인 style은 :hover 불가) — 새 hover는 다음 번호로 추가 */
 .vhov1:hover { background: rgba(255,255,255,.04); }
 .vhov2:hover { border-color: var(--primary-light); }
 .vhov3:hover { background: rgba(255,255,255,.06); }
 .vhov4:hover { background: rgba(255,255,255,.03); }
-/* 라이트 테마 — 흰 오버레이는 흰 배경에서 안 보여 잉크 오버레이로 뒤집는다 (vhov2는 토큰이라 공용) */
+/* 라이트 테마 — 흰 오버레이 대신 잉크 오버레이(vhov2는 토큰이라 공용) */
 .theme-light .vhov1:hover { background: rgba(35,38,46,.05); }
 .theme-light .vhov3:hover { background: rgba(35,38,46,.07); }
 .theme-light .vhov4:hover { background: rgba(35,38,46,.04); }

@@ -1,6 +1,7 @@
-// 대역 이벤트 구성 검사 — 오프라인(Neo 불필요). npm run smoke에 포함.
-// 확정한 사양(①설비당 1건 ②DETAIL 컬럼 ③배수 등급 ④히스테리시스 ×0.9 ⑤시간홀드 미적용)이
-// 실제 코드에서 그대로 지켜지는지 본다.
+// 대역 판정·저장 구성 — DETAIL 컬럼·배수 등급·히스테리시스 ×0.9·대역 무이벤트(상태만 추적)
+// · 임베드 판정기 앱↔서버 동등성·EVENTS INSERT 자릿수·알림 라우팅/페이로드
+// · 밀도 균일화·채울 앵커·백필 계산부 동일성·측정 불가 대역·마운팅 상한 잠정 강등
+// 오프라인(Neo 불필요) · npm run smoke 포함
 globalThis.window = globalThis;
 const VC = (await import('../../cgi-bin/calc/calc.js')).default;
 const SQL = (await import('../../cgi-bin/db/sql.js')).default;
@@ -12,7 +13,7 @@ const chk = (ok, msg, extra) => {
   else { fail++; console.error('FAIL', msg, extra || ''); }
 };
 
-// 실측 BEARING:C1 대역값 + 정상 시절 베이스라인(가정)
+// 대역값 예시(BEARING:C1) + 정상 베이스라인(가정)
 const NOW = { sub: 0.630, one: 1.090, fault: 1.783, high: 1.142, vh2: 2.559 };
 const BLS = {
   sub: { mu: 0.60, sigma: 0.04, k: 3 }, one: { mu: 1.05, sigma: 0.06, k: 3 },
@@ -20,8 +21,8 @@ const BLS = {
   vh2: { mu: 1.60, sigma: 0.12, k: 3 },
 };
 
-// ── ② DETAIL 컬럼 ──────────────────────────────────────────────────────────
-// 이벤트 표는 TAG 테이블이다 — NAME='<테이블>:<태그>'라 설비 단위로 지울 수 있다(LOG는 불가능했다).
+// ── DETAIL 컬럼·삭제 SQL ───────────────────────────────────────────────────
+// 이벤트 표는 TAG 테이블 — NAME='<테이블>:<태그>'라 설비 단위 삭제 가능
 chk(/DETAIL VARCHAR\(400\)/.test(SQL.monCreateTables().join('')), 'CREATE에 DETAIL 컬럼');
 chk(/CREATE TAG TABLE EVENTS/.test(SQL.monCreateTables().join('')), '이벤트 표가 TAG 테이블');
 chk(!/SUMMARIZED/.test(SQL.monCreateTables()[0]), '이벤트는 SUMMARIZED 없음(롤업 미생성)');
@@ -29,22 +30,21 @@ chk(/GRADE, LIM, DETAIL/.test(SQL.eventsSelect(10)), 'SELECT가 DETAIL 포함');
 {
   const ins = SQL.eventInsert({ eid: 'e', ts: 1, tbl: 'T', tag: 'A', etype: 'band', grade: '주의', val: 1.34, lim: 1, detail: "fault=1.783/1.440 · o'x" });
   chk(/'fault=1.783\/1.440 · o''x'/.test(ins), 'INSERT가 DETAIL을 이스케이프해 담음');
-  chk(/values\('T:A', to_date\(/.test(ins), 'INSERT의 NAME이 <테이블>:<태그>');
+  chk(/values\('T:A', from_timestamp\(/.test(ins), 'INSERT의 NAME이 <테이블>:<태그>');
 }
 {
-  // 태그별 삭제 — TAG로 바꾼 이유 그 자체
+  // 태그별 삭제
   chk(/where NAME='T:A'$/.test(SQL.eventsDeleteTag('T', 'A')), '태그별 삭제 SQL');
-  /* 구간 삭제 — 이름마다 한 문장. 표를 계정이 공유하므로 시간만으로 지우면 남의 행까지 날아가고,
-     TAG 표는 LIKE 로 좁힐 수도 없다(ERR-2073: NAME 정확일치 + 시간범위만 받는다). */
+  /* 구간 삭제 — 이름마다 한 문장(공유 표라 시간만으로 지우면 남의 행까지 삭제, TAG 표는 NAME 정확일치 + 시간범위만 허용) */
   const evDel = SQL.eventsDeleteRange(['T:A', 'T:B'], 1, 2);
-  chk(evDel.length === 2 && evDel.every((q) => /where NAME='T:[AB]' and TIME between to_date\(.*\) and to_date\(/.test(q)),
+  chk(evDel.length === 2 && evDel.every((q) => /where NAME='T:[AB]' and TIME between from_timestamp\(.*\) and from_timestamp\(/.test(q)),
     '기간 삭제 SQL — 이름마다 한 문장', evDel[0]);
   const bdDel = SQL.bandDeleteRange(['T:A:fault'], 1, 2);
-  chk(bdDel.length === 1 && /where NAME='T:A:fault' and TIME between to_date\(/.test(bdDel[0]),
+  chk(bdDel.length === 1 && /where NAME='T:A:fault' and TIME between from_timestamp\(/.test(bdDel[0]),
     '대역 기간 삭제 SQL', bdDel[0]);
 }
 
-// ── ③ 배수 등급 ────────────────────────────────────────────────────────────
+// ── 배수 등급 ──────────────────────────────────────────────────────────────
 {
   const j = VC.bandJudge(NOW, BLS, false);
   chk(j && j.on, '이탈 판정');
@@ -58,9 +58,9 @@ chk(/GRADE, LIM, DETAIL/.test(SQL.eventsSelect(10)), 'SELECT가 DETAIL 포함');
   chk(VC.bandJudge(mk(4.0), { fault: BLS.fault }, false).gi === 3, '×4.0 → 심각');
 }
 
-// ── ④ 히스테리시스 ─────────────────────────────────────────────────────────
+// ── 히스테리시스 ───────────────────────────────────────────────────────────
 {
-  // 한계의 0.95배 — 신규면 정상, 이탈 중이면 계속 이탈로 유지되어야 한다
+  // 한계의 0.95배 — 신규면 정상, 이탈 중이면 이탈 유지
   const lim = VC.baselineLimit(BLS.fault);
   const mild = { fault: lim * 0.95 };
   chk(!VC.bandJudge(mild, { fault: BLS.fault }, false).on, '신규 판정: ×0.95는 정상');
@@ -70,10 +70,8 @@ chk(/GRADE, LIM, DETAIL/.test(SQL.eventsSelect(10)), 'SELECT가 DETAIL 포함');
   chk(Math.abs(VC.BAND_HYST - 0.9) < 1e-9, '히스테리시스 상수 0.9', String(VC.BAND_HYST));
 }
 
-// ── 대역은 이벤트를 내지 않는다 · 상태만 추적 ──────────────────────────────
-/* 8개 계열을 각각 한계와 대보고 하나라도 넘으면 켜는 구조라 그 자체가 작은 다중비교다
-   (대역 단독 오탐 13% · 베이스라인 0%). 대역이 움직이면 대개 베이스라인도 같이 움직이므로
-   알림은 그쪽이 내고, 대역 값은 근거표에서 "어느 계열이 움직였나"로 원인을 좁히는 데 쓴다. */
+// ── 대역은 이벤트 없음 · 상태만 추적 ─────────────────────────────────────────
+/* 대역 단독 알림은 계열 다중비교라 오탐이 큼 — 알림은 베이스라인이 내고 대역은 근거표에서 원인 계열 식별용 */
 {
   const cfg = { escHold: 300000, recHold: 300000, reno: {} };
   let st = null; const seq = [], bbs = [];
@@ -105,27 +103,21 @@ chk(VC.bandJudge(null, BLS, false) === null, '대역값 없으면 판정 안 함
 chk(VC.bandJudge({ fault: 1.0 }, { one: BLS.one }, false) === null, '겹치는 대역이 없으면 판정 불가');
 
 // ── 서버 모드 동등성 ───────────────────────────────────────────────────────
-// 대역 판정은 앱과 서버(타이머 TQL) 양쪽에서 돌아야 한다. 서버는 소스를 문자열로 임베드하므로
-// (a) 임베드본이 원본과 같은 답을 내는지 (b) TQL이 판정을 실제로 호출하는지 둘 다 본다.
+// 임베드본 = 원본 답 · TQL 판정 호출 · INSERT 자릿수 확인
 {
   const Mon = (await import('../../cgi-bin/monitor/monitor.js')).default;
-  /* (a) 임베드본은 바깥 이름을 하나도 안 써야 한다 — 상수든 baselineLimit이든.
-     예전엔 상수를 문자열로 앞에 붙여 감싸고 baselineLimit은 인자로 넣어 줬는데, 그렇게 하면
-     검사만 통과하고 실제 TQL에서는 죽는다(감싸는 이름과 압축된 몸통 안 이름이 어긋난다).
-     그래서 아무것도 넣어 주지 않고 그대로 평가한다 = TQL과 같은 조건. */
+  /* 임베드본은 바깥 이름(상수·baselineLimit) 무참조 — 아무것도 주입하지 않고 평가(TQL과 같은 조건) */
   const src = VC.bandJudgeSrc();
   const embedded = new Function('return ' + src)();
 
-  /* 판정 계열 목록이 두 벌이라는 것이 이 구조의 유일한 약점이다 — bandJudge는 TQL에 통째로
-     박혀 홀로 도느라 바깥 BAND_ORDER를 못 쓰고 제 안에 리터럴을 갖는다. 한쪽만 늘리면
-     학습은 되는데 판정만 조용히 건너뛰어, 값이 다 있는데 알람만 안 나는 상태가 된다.
-     문자열을 비교하지 않고 실제로 판정시켜 본다 — 목록이 어긋나면 그 계열이 걸러진다. */
+  /* 판정 계열 목록이 두 벌(임베드 bandJudge 내부 리터럴 ↔ BAND_ORDER) — 어긋나면 알람만 조용히 누락
+     · 문자열 비교 대신 실제 판정으로 확인 */
   {
     const bl = { mu: 1, sigma: 0.1, k: 3 };
     const judges = (bn) => { const r = embedded({ [bn]: 10 }, { [bn]: bl }, false); return !!(r && r.on); };
     const missed = VC.BAND_ORDER.filter((bn) => !judges(bn));
     chk(missed.length === 0, '임베드 판정기가 판정 계열을 하나도 빠뜨리지 않는다', missed.join(',') || '전부 판정');
-    // 반대 방향 — 저장 전용 계열을 판정하면 "반복주파수가 올랐다"를 이탈로 알린다
+    // 반대 방향 — 저장 전용 계열은 판정 제외("반복주파수 상승"을 이탈로 알리지 않게)
     const extra = VC.BAND_CTX.filter(judges);
     chk(extra.length === 0, '저장 전용 계열은 임베드 판정기도 무시한다', extra.join(',') || '없음');
   }
@@ -140,9 +132,8 @@ chk(VC.bandJudge({ fault: 1.0 }, { one: BLS.one }, false) === null, '겹치는 �
     cfg: { escHold: 0, recHold: 0, reno: {} },
   };
   const tql = Mon.buildMonitorTql(spec);
-  /* 예비 목록(bandOrder 미지정)도 정본과 같아야 한다 — BORDER가 대역값을 읽는 NAME IN 목록이라
-     여기서 빠진 계열은 조회 자체가 안 된다. 앱은 항상 넘기므로 이 경로는 평소 안 도는데,
-     그래서 어긋나도 아무도 모른다. 목록을 직접 꺼내 정본과 대조한다. */
+  /* 예비 목록(bandOrder 미지정 시 BORDER)도 정본과 일치해야 함 — 대역값 조회 NAME IN 목록이라 빠지면 조회 불가
+     · 평소 안 도는 경로라 목록을 직접 꺼내 대조 */
   {
     const noOrder = Object.assign({}, spec);
     delete noOrder.bandOrder;
@@ -152,28 +143,23 @@ chk(VC.bandJudge({ fault: 1.0 }, { one: BLS.one }, false) === null, '겹치는 �
     chk(JSON.stringify(got) === JSON.stringify(VC.BAND_ORDER),
       '예비 대역 목록이 정본(BAND_ORDER)과 같다', got.join(',') || '못 찾음');
   }
-  /* 7번째 run은 정지·두절 때 판정을 얼리고, 8번째 cyc는 회차를 세는 기준이다(패턴을 잰 시각).
-     cyc가 빠지면 판정 틱마다 회차가 세어져 "2회차 연속"이 20초가 된다 — 서버에서만 그렇게 되면 못 잡는다. */
-  // 회차는 patternRound가 정한다 — 측정 결과가 있으면 그 시각, 잴 수 있는데 못 쟀으면 직전 회차(보류)
+  /* judgeTick 7번째 run = 정지·두절 시 판정 동결, 8번째 cyc = 회차 기준(패턴 측정 시각, patternRound가 결정)
+     · cyc가 빠지면 판정 틱마다 회차가 세어짐 */
   chk(/judgeTick\(prev,rg,breach,now,CFG,bj,run,_pr\.cyc\)/.test(tql), '서버 TQL이 대역·운전여부·회차를 judgeTick에 전달');
   chk(/bandJudge\(bandNow\(t\), t\.bb/.test(tql), '서버 TQL이 최신 대역값으로 판정');
   chk(/BAND/.test(tql), '서버 TQL이 대역 테이블 조회');
   chk(/"대역 이탈"/.test(tql) || /대역 이탈/.test(tql), '알림 문구에 대역 이벤트 한글명');
 
-  /* (b) INSERT 인자 수 == EVENTS 컬럼 수.
-     DETAIL을 추가하면서 서버 INSERT를 안 고쳐 ERR-2026("insert values와 컬럼 수 불일치")으로
-     서버 감시가 통째로 죽은 적이 있다. 타이머 컨텍스트는 SQL 오류 하나가 스크립트를 즉사시키므로
-     조용히 전면 중단된다 — 생성된 식을 실제로 평가해 자릿수를 센다. */
-  // 이벤트 INSERT는 한 곳이 아니다(일반 이벤트 · 신호 두절) — 전부 평가한다.
-  // 새 INSERT를 추가할 때 컬럼 수를 안 맞추면 그 경로만 조용히 스크립트를 죽인다.
+  /* INSERT 인자 수 == EVENTS 컬럼 수 — 어긋나면 SQL 오류로 타이머 스크립트가 조용히 전면 중단
+     · INSERT가 여러 곳(일반 이벤트·신호 두절)이라 전부 실제로 평가해 자릿수를 셈 */
   const inserts = [...tql.matchAll(/db\.exec\((\"insert into \"\+TBLP\+\"EVENTS values\([\s\S]*?)\);/g)].map((x) => x[1]);
   chk(inserts.length >= 2, 'INSERT 식 추출 (일반 + 신호 두절)', inserts.length + '곳');
-  // VARCHAR(120) 안의 괄호 때문에 [^)]*로는 첫 괄호에서 끊긴다 — 마지막 ')'까지 잡고 타입 괄호를 지운다
+  // 타입 괄호(VARCHAR(120) 등) 때문에 마지막 ')'까지 잡고 타입 괄호 제거
   const decl = /EVENTS \(([\s\S]*)\)/.exec(SQL.monCreateTables().find((s) => /EVENTS/.test(s)))[1];
   const cols = decl.replace(/\([^)]*\)/g, '').split(',').length;
-  // 생성 식이 참조하는 이름을 전부 채워 실제로 평가한다(문자열 조립이라 정적 검사로는 자릿수를 못 센다)
-  // dtms — TAG 표가 되면서 TIME을 to_date 문자열로 찍는다(monitor.js가 자체 정의)
-  // TBLP·UPFX — 표 위치(공용 스키마)와 행 키 접두. TQL 안에서 이어 붙는다(여기선 빈 값으로 평가)
+  // 생성 식이 참조하는 이름을 전부 채워 실제 평가(문자열 조립이라 정적 검사로는 자릿수 불명)
+  // dtms — TIME을 to_date 문자열로 변환(monitor.js 자체 정의)
+  // TBLP·UPFX — 표 위치(공용 스키마)·행 키 접두(여기선 빈 값)
   const NAMES = ['esc', 'eid', 't', 'now', 'ev', 'GW', 'v2', 'l2', 'dt', 'key', 'last', 'durAgo', 'dtms', 'TBLP', 'UPFX'];
   const VALS = [String, 'T:A:1:band', { tbl: 'T', tag: 'A' }, 1, { etype: 'band', gi: 1 },
     ['양호', '주의'], 1.3, 1, 'fault=1/2', 'T:A', 0, () => '2시간', () => '2026-08-04 10:30:45 123', '', ''];
@@ -189,8 +175,7 @@ chk(VC.bandJudge({ fault: 1.0 }, { one: BLS.one }, false) === null, '겹치는 �
 }
 
 // ── 알림 라우팅 ────────────────────────────────────────────────────────────
-// 라우팅 표는 심각도(주의/위험/심각) 행만 있다. 복귀 계열은 등급이 '양호'라 행이 없어
-// 예외 처리를 안 하면 이탈 알림만 가고 해제 알림은 영영 안 간다.
+// 라우팅 표는 심각도(주의/위험/심각) 행만 — 복귀 계열('양호')은 예외로 발송(해제 통지)
 {
   const N = (await import('../../cgi-bin/notify/notify.js')).default;
   const cfg = { channels: { webhook: { on: true, to: 'http://x' } }, routes: { '주의': { webhook: true, timing: '즉시' } } };
@@ -201,8 +186,8 @@ chk(VC.bandJudge({ fault: 1.0 }, { one: BLS.one }, false) === null, '겹치는 �
   chk(!t('심각', 'band'), '미라우팅 심각도는 발송 안 함');
   chk(/bandrec/.test(N.serverSrc()), '서버 임베드 소스에도 bandrec 예외 포함');
 
-  /* 채널 체크박스를 없앤 뒤의 판정 — timing 하나가 전부다.
-     '무시'는 옛 저장본의 표기라 계속 꺼짐으로 읽어야 한다(이관 전 서버 TQL·설정 호환). */
+  /* 발송 여부는 timing 하나로 결정
+     · 옛 저장본 표기 '무시'도 꺼짐으로 읽음(설정·서버 TQL 호환) */
   const t2 = (routes) => N.shouldNotify('주의', 'band', 'webhook',
     { channels: { webhook: { on: true, to: 'http://x' } }, routes });
   chk(t2({ '주의': { timing: '즉시' } }), 'timing 즉시면 발송 — 체크박스 없이');
@@ -210,13 +195,11 @@ chk(VC.bandJudge({ fault: 1.0 }, { one: BLS.one }, false) === null, '겹치는 �
   chk(!t2({ '주의': { timing: '무시' } }), "옛 표기 '무시'도 미발송(저장본 호환)");
   chk(t2({ '주의': { webhook: false, timing: '즉시' } }), '남은 webhook 키는 무시된다 — 이관이 timing으로 옮겨 둔다');
 
-  /* 대상별 페이로드 — Slack·Discord는 필드가 배타적이고, Google Chat은 protobuf 기반이라
-     모르는 필드가 하나라도 있으면 400으로 거부한다. 범용 페이로드(전 필드)를 보내면 안 되는
-     대상들이라 URL 판별이 정확해야 한다. */
+  /* 대상별 페이로드 — URL로 판별(Slack·Discord는 필드 배타적, Google Chat은 모르는 필드면 400) */
   const msg = { subject: 's', text: 's\nline2\nline3', html: '<b>h</b>', event: { gradeKo: '위험' } };
   const P = (url) => N.payloadFor(msg, url);
   {
-    // Discord는 embed — 평문이 연달아 쌓이면 등급이 눈에 안 들어와 색 막대로 구분한다
+    // Discord는 embed — 등급을 색 막대로 구분
     const d = P('https://discord.com/api/webhooks/1/x');
     chk(!d.content && d.embeds && d.embeds.length === 1, 'Discord는 embed로 보낸다');
     chk(d.embeds[0].title === 's' && d.embeds[0].description === 'line2\nline3', '제목은 title로, 본문에서 첫 줄은 뺀다');
@@ -231,9 +214,8 @@ chk(VC.bandJudge({ fault: 1.0 }, { one: BLS.one }, false) === null, '겹치는 �
   chk(gen.text === msg.text && gen.subject === 's' && gen.body === '<b>h</b>' && !!gen.event, '자체 엔드포인트는 전 필드(메일형 포함)');
   chk(/chat\\.googleapis\\.com/.test(N.serverSrc()), '서버 임베드 소스에도 Google Chat 판별 포함');
 
-  /* 메시지 본문 — 제목에 이미 있는 정보(등급·설비·유형)를 본문에 반복하지 않고,
-     값 줄은 유형마다 다르다. 유형 무관 한 틀이면 계측 이상이 "측정값 0.000"으로 나간다
-     (0은 자리 채움이지 측정이 아니다 — 받는 쪽은 측정값으로 읽는다). */
+  /* 메시지 본문 — 제목 정보(등급·설비·유형) 반복 없음, 값 줄은 유형별
+     · 계측 이상에 자리 채움 0을 "측정값 0.000"으로 내보내지 않음 */
   {
     const m1 = N.eventMessage({ alias: '3번 펌프', tag: 'LOAD_03', typeKo: '임계 초과', gradeKo: '위험', etype: 'threshold', val: 5.753, lim: 2.8, unit: 'mm/s', timeText: 'T1' });
     chk(m1.subject === '[위험] 3번 펌프 (LOAD_03) · 임계 초과', '제목 한 줄에 판정의 전부', m1.subject);
@@ -248,8 +230,7 @@ chk(VC.bandJudge({ fault: 1.0 }, { one: BLS.one }, false) === null, '겹치는 �
 }
 
 // ── 밀도 균일화 ────────────────────────────────────────────────────────────
-// 학습 창 안에서 구간별 표본 밀도가 다르면 촘촘한 쪽이 기준을 결정해 버린다.
-// 주기 변경뿐 아니라 타이머가 몇 시간 멈춰도 같은 일이 생기므로 안전망이 필요하다.
+// 학습 창 안 구간별 표본 밀도 차이 보정 — 촘촘한 쪽이 기준을 지배하지 않게(주기 변경·타이머 정지 대비)
 {
   const rows = [];
   for (let i = 0; i < 720; i++) rows.push({ ms: i * 60000, v: 2.0 + 0.1 * Math.sin(i) });        // 앞 12h · 1분 · 이상
@@ -260,7 +241,7 @@ chk(VC.bandJudge({ fault: 1.0 }, { one: BLS.one }, false) === null, '겹치는 �
   chk(Math.abs(rawMu - 1.985) < 0.02, '균일화 전: 촘촘한 구간이 기준을 지배', 'μ=' + rawMu.toFixed(3));
   chk(Math.abs(evenMu - 1.500) < 0.02, '균일화 후: 시간 기준 절반씩', 'μ=' + evenMu.toFixed(3));
   chk(VC.evenSample(rows, 600000).length === 144, '10분 격자 → 72+72 = 144점');
-  // 대표 한 점을 그대로 써야 한다 — 버킷 평균/중앙값으로 뭉치면 σ가 줄어 한계가 좁아지고 오경보가 는다
+  // 격자당 대표 한 점 그대로 — 평균·중앙값으로 뭉치면 σ가 줄어 오경보 증가
   const spread = [];
   for (let i = 0; i < 300; i++) spread.push({ ms: i * 60000, v: 1 + (i % 7) * 0.3 });
   const sdOf = (v) => { const f = VC.baselineFit(VC.steadyStateFilter(v).vals); return f ? f.sigma : NaN; };
@@ -272,15 +253,15 @@ chk(VC.bandJudge({ fault: 1.0 }, { one: BLS.one }, false) === null, '겹치는 �
 }
 
 // ── 채울 앵커 선정 ─────────────────────────────────────────────────────────
-// 태그를 새로 추가하고 다시 채우면 그 태그만 채워져야 한다(이미 찬 칸은 건너뜀).
-// TAG 테이블은 같은 NAME+TIME 중복을 막지 않아, 안 빼면 다시 누를 때마다 겹쳐 쌓인다(실측 확인).
+// 이미 찬 칸은 건너뜀(태그 추가 후 재채우기 시 그 태그만)
+// TAG 테이블은 NAME+TIME 중복을 막지 않아 안 빼면 겹쳐 쌓임
 {
   const iv = 600000, now = 1785312345678;
   const all = VC.bandAnchors(now, iv, 5, {});
   chk(all.length === 5, '요청한 칸 수만큼', all.length + '개');
   chk(all.every((t) => t % iv === 0), '격자에 스냅 — 타이머가 찍을 칸과 같은 위치');
   chk(all.every((t, i) => i === 0 || t < all[i - 1]), '최신 → 과거 순서(중단해도 최신이 남게)');
-  // 진행 중인 칸(floor(now/iv))은 아직 안 끝났으므로 제외한다 → 첫 앵커는 마지막 '완료된' 칸
+  // 진행 중인 칸(floor(now/iv)) 제외 → 첫 앵커는 마지막 완료 칸
   chk(all[0] < now && now - all[0] <= 2 * iv, '첫 앵커는 마지막 완료 칸(진행 중인 칸 제외)');
   chk(all[0] !== Math.floor(now / iv) * iv, '현재 칸은 만들지 않음');
   const have = {};
@@ -295,7 +276,7 @@ chk(VC.bandJudge({ fault: 1.0 }, { one: BLS.one }, false) === null, '겹치는 �
 }
 
 // ── 백필 앵커 ──────────────────────────────────────────────────────────────
-// 백필과 타이머는 같은 계산부를 써야 값이 이어붙는다(다르면 두 구간을 함께 학습할 수 없다).
+// 백필·타이머는 같은 계산부 사용 — 값이 이어붙어야 두 구간을 함께 학습 가능
 {
   const Band = (await import('../../cgi-bin/monitor/band.js')).default;
   const tags = [{ tbl: 'T', tag: 'A', fr: 25, fs: 302 }];
@@ -304,7 +285,7 @@ chk(VC.bandJudge({ fault: 1.0 }, { one: BLS.one }, false) === null, '겹치는 �
   chk(/var ANCHORS=null;/.test(timer), '타이머 모드: 앵커 없음 → MAX_TIME 하나');
   chk(/var ANCHORS=\[1000,400,100\];/.test(back), '백필 모드: 앵커 배열 임베드');
   chk(/MAX_TIME/.test(back), '백필도 MAX_TIME 경로를 유지(앵커 미지정 폴백)');
-  // 계산부(FFT·대역적분·INSERT)는 두 모드가 완전히 동일해야 한다
+  // 계산부(FFT·대역적분·INSERT)는 두 모드 완전 동일
   const core = (s) => s.slice(s.indexOf('var durMs'), s.indexOf('$.yield("done"'))
     .replace(/var anch=ANCHORS;[\s\S]*?anch\.forEach\(function\(maxMs\)\{/, '');
   chk(core(timer) === core(back), '계산부가 두 모드에서 문자 단위로 동일 (값이 이어붙는 근거)');
@@ -313,23 +294,21 @@ chk(VC.bandJudge({ fault: 1.0 }, { one: BLS.one }, false) === null, '겹치는 �
 }
 
 // ── 측정 불가 대역 ─────────────────────────────────────────────────────────
-/* 대역 하한이 Nyquist보다 높으면 값이 항상 0이다(1× 30Hz면 초고주파 하한 990Hz인데
-   302Hz 샘플링은 151Hz까지만 본다). 그대로 학습하면 μ=0·σ=0 → 한계 0이 되어
-   0보다 큰 값이 한 번만 나와도 이탈로 잡힌다. 판정과 집계 양쪽에서 걸러야 한다. */
+/* 대역 하한 > Nyquist면 값이 항상 0 — 학습하면 한계 0이라 조금만 커도 이탈
+   · 판정·집계 양쪽에서 한계 0 대역 제외 */
 {
   const zero = { mu: 0, sigma: 0, k: 3 };
   chk(VC.baselineLimit(zero) === 0, '전부 0인 대역의 한계는 0');
   const j = VC.bandJudge({ vh2: 0.0001, fault: 2.0 }, { vh2: zero, fault: { mu: 1.5, sigma: 0.1, k: 3 } }, false);
   chk(j && !/vh2/.test(j.detail), '판정이 한계 0인 대역을 건너뜀', j ? j.detail : 'null');
   chk(j && j.over.length === 1, '정상 대역만 이탈로 집계', String(j.over.length));
-  // 한계 0짜리만 있으면 판정 자체가 불가(any=false)여야 한다
+  // 한계 0 대역만 있으면 판정 불가(null)
   chk(VC.bandJudge({ vh2: 0.0001 }, { vh2: zero }, false) === null, '쓸 수 있는 대역이 없으면 판정 불가');
 }
 
 // ── 대역 경계와 측정 가능성 ────────────────────────────────────────────────
-/* 초고주파는 회전주파수와 무관하게 1000 Hz 고정 하한이다 — 33× 같은 상대값이 아니다.
-   그래서 샘플레이트가 2 kHz 미만이면 하한이 Nyquist를 넘어 빈 대역이 되고, 값이 항상 0이 된다.
-   그 태그는 5/5가 원리적으로 불가능하므로 분모를 "측정 가능한 대역 수"로 줄여야 한다. */
+/* 1 kHz 위 대역은 회전주파수 무관 고정 하한 — 샘플레이트 2 kHz 미만이면 Nyquist 초과로 빈 대역
+   · 분모는 측정 가능한 대역 수 */
 {
   const nyq = (fs) => fs / 2;
   const e1k = VC.bandEdges(30, nyq(1000));
@@ -344,24 +323,23 @@ chk(VC.bandJudge({ fault: 1.0 }, { one: BLS.one }, false) === null, '겹치는 �
 
   // 25.6 kHz면 전부 가능
   chk(VC.BAND_FREQ.every((bn) => VC.bandMeasurable(bn, 30, 25600)), '25.6 kHz에서는 대역 전부 가능');
-  /* 포락선 계열은 주파수 대역이 아니라 경계라는 것이 없다 — "측정 가능한가"가 성립하지 않으므로
-     통과시킨다. BAND_ORDER로 이 함수를 돌리면 bandEdges에 없는 칸을 물어 깨진다. */
+  /* 포락선 계열은 대역 경계가 없어 측정 가능 검사 통과(BAND_ORDER 전체로 돌려도 안 깨져야 함) */
   chk(VC.BAND_ORDER.filter((bn) => VC.BAND_FREQ.indexOf(bn) < 0).every((bn) => VC.bandMeasurable(bn, 30, 1000)),
     '포락선 계열은 대역 경계 검사를 통과한다');
 
-  // 인자가 없으면 막지 않는다 — 판단 불가를 "불가"로 단정하면 학습이 통째로 막힌다
+  // 인자 없으면 허용 — 판단 불가를 "불가"로 단정하면 학습이 통째로 막힘
   chk(VC.bandMeasurable('vh1', 0, 0), '회전주파수·샘플레이트 불명이면 허용');
 }
-// ── 측정 불가 대역도 저장한다 ──────────────────────────────────────────────
-/* 행을 빼면 "측정 불가"인지 "타이머가 안 돌았는지" 구분이 안 된다. 0으로 남겨두고,
-   0을 정상으로 오해하는 것은 학습(전부 0이면 거부)과 판정(한계 0이면 건너뜀)에서 막는다. */
+// ── 측정 불가 대역도 저장 ──────────────────────────────────────────────────
+/* 0으로 저장(행을 빼면 "측정 불가"와 "타이머 미실행" 구분 불가)
+   · 0 오해는 학습(전부 0이면 거부)·판정(한계 0이면 건너뜀)에서 차단 */
 {
   const Band = (await import('../../cgi-bin/monitor/band.js')).default;
   const tql = Band.buildBandTql({ tags: [{ tbl: 'T', tag: 'A', fr: 30, fs: 1000 }], nowMs: 1, dryRun: true });
   chk(!/continue;/.test(tql.slice(tql.indexOf('for(var b=0;b<acc.length'))),
     '추출은 대역을 걸러내지 않는다 — 5개 전부 저장');
   chk((tql.match(/NAMES\[b\]/g) || []).length >= 1, '대역 이름으로 저장');
-  // 0이 나오는 조건 자체는 유지된다(빈 대역은 acc가 0이라 v=0)
+  // 빈 대역은 acc가 0이라 v=0
   const fr = 30, fs = 1000, nyq = fs / 2;
   const B = [[2, 15], [15, 45], [45, 300], [300, 1000], [1000, nyq]];
   chk(B[4][0] >= Math.min(B[4][1], nyq), '초고주파는 빈 대역이라 값이 0으로 나온다');
@@ -369,10 +347,8 @@ chk(VC.bandJudge({ fault: 1.0 }, { one: BLS.one }, false) === null, '겹치는 �
 }
 
 // ── 마운팅 유효 상한 초과 대역 ─────────────────────────────────────────────
-/* 가속도계는 부착 방식이 믿을 수 있는 상한을 정한다. 그 위의 융기는 설비가 아니라 센서
-   부착부가 울린 것일 수 있으므로 확정 근거로 쓸 수 없다 — 그렇다고 빼지는 않는다.
-   빼면 베어링 초기 결함이 제일 먼저 나타나는 대역을 통째로 안 보게 되고, 마운트가
-   헐거워진 것도 못 알아챈다. 값은 남기고 등급만 '주의'로 묶는다. */
+/* 마운팅 유효 상한 위 대역 = 잠정(부착부 공진일 수 있어 확정 근거 불가)
+   · 제외하지 않고 값은 유지, 등급만 '주의'로 묶음(초기 베어링 결함·마운트 헐거움 관측용) */
 {
   const fr = 30, fs = 25600;
   chk(JSON.stringify(VC.softBands(fr, fs, 'magnet')) === JSON.stringify(['vh2', 'vh3', 'vh4']),
@@ -380,9 +356,9 @@ chk(VC.bandJudge({ fault: 1.0 }, { one: BLS.one }, false) === null, '겹치는 �
   chk(JSON.stringify(VC.softBands(fr, fs, 'stud')) === JSON.stringify(['vh4']),
     '스터드(10 kHz): vh4만 잠정', VC.softBands(fr, fs, 'stud').join(','));
   chk(VC.softBands(fr, fs, 'probe').length === 4, '프로브(1 kHz): vh1~vh4 전부 잠정');
-  // 상한과 대역 상한이 정확히 같으면 잠정이 아니다 — 그 대역은 상한 안에서 끝난다
+  // 대역 상한 = 마운팅 상한이면 잠정 아님(상한 안에서 끝남)
   chk(VC.softBands(fr, fs, 'magnet').indexOf('vh1') < 0, '1~2 kHz는 자석 상한(2 kHz)에 딱 맞아 유효');
-  // 미상은 제한하지 않는다 — 모르는 것을 자석으로 가정하면 과잉 차단이 된다
+  // 마운팅 미상은 제한 없음(자석 가정은 과잉 차단)
   chk(VC.softBands(fr, fs, '').length === 0 && VC.softBands(fr, fs, 'unknown').length === 0, '마운팅 미상이면 제한 없음');
   chk(VC.softBands(0, fs, 'magnet').length === 0 && VC.softBands(fr, 0, 'magnet').length === 0, '회전주파수·샘플레이트 불명이면 제한 없음');
 
@@ -399,8 +375,7 @@ chk(VC.bandJudge({ fault: 1.0 }, { one: BLS.one }, false) === null, '겹치는 �
   const rt = VC.bandParse(soft.detail);
   chk(rt.length === 1 && rt[0].soft === true, '저장된 DETAIL에서도 잠정이 읽힌다');
 
-  /* 믿을 수 있는 대역이 함께 이탈했으면 등급은 그쪽 배수로만 정한다 —
-     잠정 대역이 더 크게 올라갔다고 심각까지 올리면 확정 근거 없는 값으로 설비를 세우게 된다. */
+  /* 유효 대역이 함께 이탈하면 등급은 유효 대역 배수로만 결정(잠정 대역으로 심각 승격 금지) */
   const BLf = { mu: 1.0, sigma: 0.1, k: 3 };
   const both = { fault: VC.baselineLimit(BLf) * 2.0, vh3: lim3 * 4.0 };
   const mixed = VC.bandJudge(both, { fault: BLf, vh3: BL3 }, false, ['vh3']);
@@ -408,7 +383,7 @@ chk(VC.bandJudge({ fault: 1.0 }, { one: BLS.one }, false) === null, '겹치는 �
   chk(mixed.soft === false, '유효 대역이 함께 걸리면 잠정 판정이 아니다');
   chk(mixed.over.length === 2 && mixed.over.some((o) => o.soft), '잠정 대역도 이탈 목록에는 남는다');
 
-  // 인자를 안 주면 예전과 완전히 같아야 한다 — 옛 호출부·저장된 TQL이 그대로 돈다
+  // softKeys 미지정 = 잠정 없음과 동일(옛 호출부·저장된 TQL 호환)
   chk(JSON.stringify(VC.bandJudge(NOW, BLS, false, undefined)) === JSON.stringify(VC.bandJudge(NOW, BLS, false)),
     'softKeys 미지정은 기존 동작과 동일');
 }
@@ -430,8 +405,8 @@ chk(VC.bandJudge({ fault: 1.0 }, { one: BLS.one }, false) === null, '겹치는 �
   chk(/bandJudge\(bandNow\(t\), t\.bb, !!\(prev&&prev\.bb\), t\.soft, prev&&prev\.elat, now\)/.test(tql),
     '서버 TQL이 상한 초과 대역과 포락선 이탈 이력을 판정에 전달');
   chk(/"soft":\["vh3"\]/.test(tql), '태그 스펙에 잠정 대역 목록이 값으로 구워짐');
-  /* 포락선 이탈 이력은 저장까지 관통해야 뜻이 있다 — 판정에만 넘기고 안 담으면 매 틱 초기화된다.
-     앱(app.js)과 서버가 같은 필드(elat)를 쓰지 않으면 모드를 바꿀 때 이력이 사라진다. */
+  /* 포락선 이탈 이력(elat)은 판정 상태에 저장 — 안 담으면 매 틱 초기화
+     · 앱·서버가 같은 필드를 써야 모드 전환 시 이력 유지 */
   chk(/res\.next\.elat=_elat/.test(tql), '이탈 이력을 판정 상태에 담아 다음 틱으로 넘긴다');
 }
 

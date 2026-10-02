@@ -1,9 +1,6 @@
-// 두 가지를 따로 답한다 — 이 둘은 다른 질문이다.
-//  Q1 "이상이 있다는 것 자체"는 데이터셋마다 잡히는가 → 정상/결함이 **분리되는가**(진폭·충격성 포함)
-//  Q2 결함 종류가 **순위 안에** 있는가 → 1등이 아니어도 후보 목록에 들어오면 정비는 좁혀진다
-//
-// 검출률(1등 적중)만 보면 "못 잡는다"로 읽히지만, 순위 2위까지 열어 주면 실제 쓸모가 달라진다.
-// 그래서 순위를 따로 센다. 다만 후보가 셋뿐이라 3위까지 열면 아무것도 배제 못 하는 것과 같다 — 그 점도 같이 인쇄한다.
+// 결함 검출 두 질문 분리 측정 — 로컬 데이터셋 필요(D:/vibe-datasets/conv, 없으면 건너뜀)
+//  Q1 이상 자체: 데이터셋별 정상 최댓값을 넘는 결함 비율(RMS·첨도·결함주파수 순위 1위)
+//  Q2 결함 종류 순위: 1위·1~2위·3위 비율(후보 셋뿐이라 3위 = 배제 불가), 라벨별 순위
 import fs from 'node:fs';
 import path from 'node:path';
 
@@ -71,7 +68,7 @@ for (const ds of datasets) {
   const hiK = Math.max(...h.map((r) => r.kurt));
   const overR = f.filter((r) => r.rms > hiR).length;
   const overK = f.filter((r) => r.kurt > hiK).length;
-  // 결함주파수 쪽은 앞선 하네스와 같은 판정(지배 피크 매칭)을 쓴다 — 여기서는 순위 1등 근거가 라벨과 일치하는지
+  // 결함주파수는 빗 비율 순위 1위 근거가 라벨과 일치하는 비율
   const overF = f.filter((r) => r.rank === 1).length;
   const pc = (a, b) => String(Math.round(a / b * 100)).padStart(3) + '%';
   console.log(`${ds.padEnd(15)} ${String(h.length).padStart(4)} ${String(f.length).padStart(5)}`

@@ -1,12 +1,7 @@
-// 공개 데이터셋 교차검증 — 베어링 축(포락선 → 결함주파수 대조)의 실측 성적을 낸다.
-// 합성 신호 검사(test-dsp)가 "계산이 맞는가"를 보는 자리라면, 여기는 "실제 결함을 잡는가"를 본다.
-//
-// 원본 아카이브를 변환한 .f64 + index.json이 있어야 한다(변환 스크립트는 데이터 옆에 둔다).
-// 데이터가 없으면 조용히 건너뛴다 — 이 검사는 smoke에 넣지 않는다(수백 MB 원본이 전제).
-//   node tools/verify-datasets.mjs [데이터루트] [데이터셋…]
-//
-// 기억할 것: 판별자를 고치기 전에 정상/결함 양쪽에서 먼저 잰다. 결함만 보고 임계를 맞추면
-// 다중비교 함정에 빠진다 — 이 프로젝트에서 이미 세 번 기각당한 경로다.
+// 공개 데이터셋 교차검증 — 베어링 축(포락선 → 결함주파수 대조)의 정상 오탐·결함 검출·종류 적중 측정
+// · 계산 정확성은 합성 신호 검사(test-dsp), 여기는 실제 결함 검출 여부
+// · 로컬 데이터셋 필요(변환된 .f64 + index.json, 기본 D:/vibe-datasets/conv, 없으면 건너뜀) · smoke 미포함
+//   node tools/verify-datasets.mjs [데이터루트] [데이터셋…] [--band=lo:hi] [--rev=N]
 import fs from 'node:fs';
 import path from 'node:path';
 
@@ -15,15 +10,13 @@ const VC = (await import('../../cgi-bin/calc/calc.js')).default;
 const argv = process.argv.slice(2).filter((a) => !a.startsWith('--'));
 const ROOT = argv[0] || process.env.VIBE_DATASETS || 'D:/vibe-datasets/conv';
 const ONLY = argv.slice(1);
-// --band=1000:5000 으로 복조 대역을 고정해 커토그램과 대조할 수 있다(verify-demodband의 후속 확인용)
+// --band=1000:5000으로 복조 대역 고정(커토그램 대조용)
 const bandArg = process.argv.find((a) => a.startsWith('--band='));
 const FIXED_BAND = bandArg
   ? { loHz: +bandArg.slice(7).split(':')[0], hiHz: +bandArg.slice(7).split(':')[1] }
   : null;
-/* 분석 창 — 샘플 수를 고정하면 데이터셋마다 **회전수**가 달라진다.
-   64 kHz·1500 rpm이면 1.02 s = 26회전인데 같은 샘플로 900 rpm이면 15회전뿐이다.
-   측대역 하나를 분해하려면 충분한 회전이 필요하므로, 회전수를 기준으로 잡는다.
-   --rev=N 으로 목표 회전수를 바꿔 가며 잴 수 있다(기본 0 = 예전처럼 샘플 고정). */
+/* 분석 창 — 샘플 수 아닌 회전수 기준(샘플 고정이면 데이터셋마다 회전수가 달라 측대역 분해 불균일)
+   --rev=N으로 목표 회전수 지정(기본 100, 0이면 샘플 고정) */
 const HARD_CAP = 262144;
 const revArg = process.argv.find((a) => a.startsWith('--rev='));
 const REV = revArg ? +revArg.slice(6) : 100;   // 제품(live.js REV_TARGET)과 같은 값
@@ -47,19 +40,14 @@ const readF64 = (p, cap) => {
   return out;
 };
 
-/** 앱의 베어링 축과 같은 순서로 돌린다: 커토그램 → 대역통과 포락선 → 결함주파수 대조 */
+/** 베어링 축 분석: 복조 대역(고정 대역, 불성립 시 커토그램) → 포락선 → 결함주파수 대조 */
 function analyze(v, fs_, rpm, geo, mount) {
-  /* 앱과 같은 순서 — 1×를 실측해 결함주파수를 그 위에 세운다(명판 RPM은 슬립을 반영 못 한다) */
-  /* 1×를 실측해 결함주파수를 그 위에 세운다 — 명판 RPM은 슬립을 반영하지 못한다.
-     단 **분해능보다 큰 차이일 때만** 채택한다. 구분되지 않는 차이로 축을 옮기면
-     결함주파수가 잡음만큼 흔들려 오탐이 는다(가드 없이 MaFaulDa 오탐 1/24 → 10/24). */
-  const rpmUse = rpm;   // 명판 그대로 — 실측 1×는 같은 오탐에서 검출을 54%→31%로 떨어뜨렸다
+  const rpmUse = rpm;   // 명판 회전수 그대로(1× 실측 보정 미적용)
   const fr = rpmUse / 60;
   const bf = VC.bearingFreqs(rpmUse, geo);
-  // 커토그램 상한: 마운팅 상한과 별개로 Nyquist 상한을 항상 건다.
-  // 안티에일리어싱 롤오프 구간은 에너지가 죽어 첨도가 폭발하므로 늘 그쪽이 뽑힌다.
+  // 커토그램 상한: 마운팅 상한과 별개로 Nyquist 상한 항상 적용(롤오프 구간은 첨도 폭발로 늘 선택됨)
   const nyq = fs_ / 2;
-  // 제품과 같은 순서를 쓴다: 저역 고정 대역이 성립하면 그것, 아니면 커토그램
+  // 고정 대역 성립 시 그것, 아니면 커토그램(제품은 전대역 복조)
   let kg = null, band = FIXED_BAND || VC.demodFixed(fs_);
   if (!band) {
     const caps = [nyq * VC.KG_NYQ_FRAC];
@@ -70,15 +58,14 @@ function analyze(v, fs_, rpm, geo, mount) {
   } else if (band.hiHz > nyq * 0.95) {
     band = null;
   }
-  const env = VC.envelopeSpectrum(v, fs_, VC.envMaxFor(bf, fr, fs_), band);   // 앱과 같은 식(envMaxFor가 4×최고후보)
+  const env = VC.envelopeSpectrum(v, fs_, VC.envMaxFor(bf, fr, fs_), band);   // 앱과 같은 식(envMaxFor = 최고 후보 × 6)
   const envQ = VC.envelopeQuant(env.freqs, env.mags, fr);
   const sb = VC.targetedMatch(env, bf, fr, env.resTrue || env.res);
   const bm = VC.bearingMatch(envQ, bf, fr, env.resTrue || env.res, sb);
   return { kg, env, envQ, bm, sb };
 }
 
-/* xjtu_seq는 전 수명 시퀀스라 초반 파일이 실제로는 건전한데 최종 고장 부위로 라벨돼 있다.
-   스냅샷 성적에 섞으면 분모가 오염되므로 뺀다 — 그쪽은 verify-leadtime이 시간축으로 본다. */
+/* 전 수명 시퀀스는 초반 건전 파일이 최종 고장 부위로 라벨돼 분모 오염 → 제외(verify-leadtime 담당) */
 const SEQ_ONLY = ['xjtu_seq', 'nasa_seq'];
 const datasets = fs.readdirSync(ROOT).filter((d) => {
   if (ONLY.length) return ONLY.includes(d);
@@ -112,7 +99,7 @@ for (const ds of datasets) {
       faultN++;
       if (hit) {
         faultHit++;
-        // 종류 적중은 단일 라벨에만 매긴다 — MIX는 어느 쪽을 집어도 맞아서 성적을 부풀린다
+        // 종류 적중은 단일 라벨만 — MIX는 어느 쪽을 집어도 맞아 성적 과대
         if (c.label === 'OR' || c.label === 'IR' || c.label === 'BALL') {
           typeN++;
           if (KEYMAP[hit.key] === c.label) typeOk++;

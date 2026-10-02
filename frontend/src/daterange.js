@@ -1,11 +1,10 @@
-// 기간 선택 위젯 — 트리거 버튼 + 팝오버 달력. 화면 어디서든 같은 방식으로 기간을 고른다.
-// 고른 값은 팝오버 안에서만 살아 있고 '적용'을 눌러야 바깥(onApply)으로 나간다 — 날짜와
-// 시각을 맞추는 동안 조회가 나가지 않고, 취소하면 원래 기간이 그대로 남는다.
+// 기간 선택 위젯 — 트리거 버튼 + 팝오버 달력(화면 공용)
+// 고른 값은 '적용' 시에만 onApply로 전달(편집 중 조회 없음, 취소 시 원래 기간 유지)
 import { Component } from 'preact/compat';
 import { html } from './html.js';
+import CH from '../../cgi-bin/chart/chart.js';
 
-/* 팝오버가 열려 있는 동안은 화면 자동 갱신(틱)을 멈추기 위한 열림 수 — 고르는 중에
-   버튼이 움직이거나 값이 되돌려지면 안 된다. app.js의 틱이 이 값을 본다. */
+/* 열린 팝오버 수 — app.js 틱이 참조해 열려 있는 동안 자동 갱신 중지(고르는 중 값 되돌림 방지) */
 export var pickerOpen = { n: 0 };
 
 var WD = ['일', '월', '화', '수', '목', '금', '토'];
@@ -15,31 +14,26 @@ var PANEL_PAD = 14;
 var MONTH_GAP = 18;
 
 function pad(n) { return (n < 10 ? '0' : '') + n; }
-// 'YYYY-MM-DD[THH:MM]' → 로컬 ms. Date.parse는 날짜만 있으면 UTC로 읽어 하루가 밀린다.
-function parseLocal(s) {
-  var m = /^(\d{4})-(\d{1,2})-(\d{1,2})(?:[T ](\d{1,2}):(\d{2}))?/.exec(String(s || ''));
-  if (!m) return NaN;
-  return new Date(+m[1], +m[2] - 1, +m[3], +(m[4] || 0), +(m[5] || 0), 0, 0).getTime();
-}
+// 날짜 계산은 전부 표시 시간대 기준(CH.parts·makeTime) — 브라우저 시간과 다를 수 있음
+// 'YYYY-MM-DD[THH:MM]' → ms
+function parseLocal(s) { return CH.parseDT(s); }
 function fmtVal(ms, withTime) {
-  var d = new Date(ms);
-  var s = d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate());
-  return withTime ? s + 'T' + pad(d.getHours()) + ':' + pad(d.getMinutes()) : s;
+  var p = CH.parts(ms);
+  var s = p.Y + '-' + pad(p.M) + '-' + pad(p.D);
+  return withTime ? s + 'T' + pad(p.h) + ':' + pad(p.m) : s;
 }
-function dayStart(ms) { var d = new Date(ms); return new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime(); }
-function monthStart(ms) { var d = new Date(ms); return new Date(d.getFullYear(), d.getMonth(), 1).getTime(); }
-function addMonths(ms, n) { var d = new Date(ms); return new Date(d.getFullYear(), d.getMonth() + n, 1).getTime(); }
-function hhmm(ms) { var d = new Date(ms); return pad(d.getHours()) + ':' + pad(d.getMinutes()); }
-// 날짜(그 날 0시) + 'HH:MM' → ms. 시각이 덜 적혔으면 fb를 쓴다.
+function dayStart(ms) { return CH.startOfDay(ms); }
+function monthStart(ms) { var p = CH.parts(ms); return CH.makeTime(p.Y, p.M, 1); }
+function addMonths(ms, n) { var p = CH.parts(ms); return CH.makeTime(p.Y, p.M + n, 1); }
+function hhmm(ms) { var p = CH.parts(ms); return pad(p.h) + ':' + pad(p.m); }
+// 날짜(그 날 0시) + 'HH:MM' → ms, 시각 형식이 불완전하면 fb 사용
 function joinTime(dayMs, t, fb) {
   var m = /^(\d{1,2}):(\d{2})$/.exec(String(t || ''));
   if (!m) m = /^(\d{1,2}):(\d{2})$/.exec(fb);
-  var d = new Date(dayStart(dayMs));
-  if (m) d.setHours(Math.min(23, +m[1]), Math.min(59, +m[2]));
-  return d.getTime();
+  var p = CH.parts(dayStart(dayMs));
+  return CH.makeTime(p.Y, p.M, p.D, m ? Math.min(23, +m[1]) : 0, m ? Math.min(59, +m[2]) : 0);
 }
-/* 어느 달을 펼쳐 보일지 — 두 달을 그릴 땐 끝나는 달을 오른쪽에 둔다. 진동 데이터는 늘 과거이고
-   구간을 넓힐 때도 뒤로 가므로, 앞달이 왼쪽에 미리 나와 있어야 한 번 더 넘기지 않는다. */
+/* 펼칠 달 — 두 달이면 끝 달을 오른쪽에(데이터가 과거 방향이라 앞달을 왼쪽에 미리 표시) */
 function viewFor(fromMs, toMs, months) {
   return months === 2 ? addMonths(monthStart(toMs), -1) : monthStart(fromMs);
 }
@@ -52,22 +46,21 @@ function spanText(ms) {
   var d = h / 24;
   return (d < 10 ? d.toFixed(1) : String(Math.round(d))) + '일';
 }
-/* 팝오버에서 시각까지 받을지. mode='date'면 날짜만이 기본이고, showTime으로 뒤집는다 —
-   달력은 일 단위로만 고르되 값은 날짜+시각 형식으로 내보내는 자리(조회 기간)가 있다. */
+/* 팝오버 시각 입력 여부 — mode='date'면 기본 날짜만, showTime으로 재지정
+   (일 단위로 고르되 값은 날짜+시각 형식으로 내보내는 자리 있음) */
 function useTime(p) { return p.showTime != null ? !!p.showTime : p.mode !== 'date'; }
-// 하루 경계에 딱 맞는 구간인가 — 달력으로 고른 구간(00:00~23:59)과 그 밖의 구간을 가른다
+// 하루 경계(00:00~23:59)에 맞는 구간 여부 — 달력으로 고른 구간 판별
 function dayBounded(f, t) {
-  var a = new Date(f), b = new Date(t);
-  return a.getHours() === 0 && a.getMinutes() === 0 && b.getHours() === 23 && b.getMinutes() === 59;
+  var a = CH.parts(f), b = CH.parts(t);
+  return a.h === 0 && a.m === 0 && b.h === 23 && b.m === 59;
 }
-/* 트리거 버튼에 적을 기간. 연도는 날짜만 고르는 자리(내보내기·삭제)에서 늘 적는다 —
-   되돌릴 수 없는 동작에서 "07-01"만 보이면 어느 해인지 짐작해야 한다. */
+/* 트리거 버튼 기간 문구 — 날짜 전용 자리(내보내기·삭제 등 되돌릴 수 없는 동작)는 연도 항상 표기 */
 function rangeLabel(f, t, withTime, withYear) {
-  var thisYear = new Date().getFullYear();
+  var thisYear = CH.parts(Date.now()).Y;
   var one = function (ms) {
-    var d = new Date(ms);
-    var s = (withYear || d.getFullYear() !== thisYear ? d.getFullYear() + '-' : '') + pad(d.getMonth() + 1) + '-' + pad(d.getDate());
-    return withTime ? s + ' ' + pad(d.getHours()) + ':' + pad(d.getMinutes()) : s;
+    var p = CH.parts(ms);
+    var s = (withYear || p.Y !== thisYear ? p.Y + '-' : '') + pad(p.M) + '-' + pad(p.D);
+    return withTime ? s + ' ' + pad(p.h) + ':' + pad(p.m) : s;
   };
   return one(f) + ' ~ ' + one(t);
 }
@@ -85,8 +78,7 @@ export class DateRange extends Component {
     clearTimeout(this._noticeT);
     if (this.state.open) { pickerOpen.n = Math.max(0, pickerOpen.n - 1); document.removeEventListener('keydown', this._onKey, true); }
   }
-  /* 팝오버 높이는 그려 보기 전엔 모르므로 일단 어림값으로 놓고, 그린 뒤 실제 높이로 한 번만
-     올려 잡는다 — 화면 아래쪽 트리거(모달 안 등)에서 패널이 잘려 '적용'이 안 보이는 것을 막는다. */
+  /* 팝오버 높이는 어림값으로 배치 후 그린 뒤 실제 높이로 1회 보정 — 화면 아래쪽 트리거에서 '적용' 잘림 방지 */
   componentDidUpdate() {
     if (!this.state.open || !this._panelEl) return;
     var h = this._panelEl.offsetHeight, vh = window.innerHeight;
@@ -107,7 +99,7 @@ export class DateRange extends Component {
     var r = this._btnEl ? this._btnEl.getBoundingClientRect() : { left: 20, right: 20, bottom: 60, top: 20 };
     var left = p.align === 'right' ? r.right - w : r.left;
     left = Math.max(8, Math.min(left, window.innerWidth - w - 8));
-    // 펼칠 달을 데이터가 있는 쪽으로 당긴다 — 열자마자 빈 달을 보고 넘겨야 하는 일이 없게
+    // 펼칠 달을 데이터 있는 쪽으로 당김(열자마자 빈 달 방지)
     var bd = this._bounds();
     var view = viewFor(f, t, months);
     if (bd.maxD) view = Math.min(view, addMonths(monthStart(bd.maxD), -(months - 1)));
@@ -145,20 +137,18 @@ export class DateRange extends Component {
     if (!this.state.open) return;
     var r = this._range();
     if (r.bad) return;
-    var fmtT = this.props.mode !== 'date'; // 값 형식은 mode가 정한다 — 달력에서 시각을 안 받아도 T HH:MM으로 내보내는 자리가 있다
+    var fmtT = this.props.mode !== 'date'; // 값 형식은 mode 기준 — 시각 입력이 없어도 T HH:MM으로 내보내는 자리 있음
     this._close();
     if (this.props.onApply) this.props.onApply(fmtVal(r.f, fmtT), fmtVal(r.t, fmtT));
   }
-  /* 막힌 동작의 이유를 팝오버 안에 적는다. 토스트가 아니라 여기인 이유는 시선이 달력에 있어서다 —
-     화면 아래 토스트는 고르는 중에 눈에 안 들어온다. 다음 동작을 하면 지워진다. */
+  /* 막힌 동작 이유를 팝오버 안에 표시 — 시선이 달력에 있음, 일정 시간 뒤·다음 동작 시 지움 */
   _notify(msg) {
     var self = this;
     clearTimeout(this._noticeT);
     this.setState({ notice: msg });
     this._noticeT = setTimeout(function () { self.setState({ notice: '' }); }, 3500);
   }
-  /* 달 넘기기. 데이터가 있는 달까지만 가되 화살표를 흐리게 죽이지는 않는다 —
-     흐린 단추는 "왜 안 눌리는지"를 사용자가 짚어야 한다. 눌리게 두고 이유를 말한다. */
+  /* 달 넘기기 — 데이터 있는 달까지만, 화살표는 비활성화 대신 눌렀을 때 이유 표시 */
   _navMonth(dir) {
     var st = this.state, b = this._bounds();
     var edge = dir < 0 ? st.view : addMonths(st.view, st.months - 1);
@@ -167,10 +157,10 @@ export class DateRange extends Component {
     clearTimeout(this._noticeT);
     this.setState({ view: addMonths(st.view, dir), notice: '' });
   }
-  // 첫 클릭은 시작, 다음 클릭은 종료 — 시작보다 앞을 누르면 그쪽이 새 시작이 된다
+  // 첫 클릭 시작, 다음 클릭 종료 — 시작보다 앞을 누르면 새 시작
   _pickDay(ms) {
     var st = this.state, b = this._bounds();
-    // 데이터 없는 날은 고를 수 없다 — 눌린 것을 무시만 하면 고장으로 읽히므로 이유를 적는다
+    // 데이터 없는 날은 선택 불가 — 무시하지 않고 이유 표시
     if ((b.minD && ms < b.minD) || (b.maxD && ms > b.maxD)) { this._notify('그 날짜에는 데이터가 없습니다'); return; }
     clearTimeout(this._noticeT);
     if (st.pick === 0) this.setState({ fromDay: ms, toDay: ms, pick: 1, hover: ms, notice: '' });
@@ -185,7 +175,7 @@ export class DateRange extends Component {
       var s = {}; s[k] = v; self.setState(s);
     };
   }
-  // 흘려 적은 시각을 HH:MM으로 되돌린다 ('9' → 09:00, '930' → 09:30, 범위 밖은 자른다)
+  // 입력 시각을 HH:MM으로 정규화 ('9' → 09:00, '930' → 09:30, 범위 밖은 클램프)
   _timeFix(k, fb) {
     var self = this;
     return function (ev) {
@@ -211,14 +201,12 @@ export class DateRange extends Component {
       self.setState(s);
     };
   }
-  // 데이터가 있는 날의 범위(일 단위). 0 = 모름 — 모르면 아무것도 막지 않는다
+  // 데이터 있는 날의 범위(일 단위). 0 = 모름(제한 없음)
   _bounds() {
     var p = this.props;
     return { minD: p.minMs ? dayStart(p.minMs) : 0, maxD: p.maxMs ? dayStart(p.maxMs) : 0 };
   }
-  /* 팝오버 안 빠른 선택 — 날짜만 고르는 곳(모달)엔 프리셋 버튼이 따로 없어 여기가 유일한 지름길이다.
-     데이터가 오늘까지 오지 않는 태그(정지 설비·적재가 끝난 표)에서는 오늘을 기준으로 삼을 수 없어
-     마지막 데이터 날에 붙이고, 이름도 그렇게 바꿔 적는다 — '오늘'이라 적고 다른 날을 고르면 거짓말이다. */
+  /* 팝오버 빠른 선택 — 데이터가 오늘까지 없는 태그는 마지막 데이터 날 기준(이름도 맞춤) */
   _quick() {
     var self = this, ut = useTime(this.props);
     var b = this._bounds();
@@ -246,11 +234,12 @@ export class DateRange extends Component {
   }
   _month(anchor, key) {
     var self = this, st = this.state, p = this.props;
-    var d = new Date(anchor), y = d.getFullYear(), mo = d.getMonth();
-    var lead = new Date(y, mo, 1).getDay();
-    var days = new Date(y, mo + 1, 0).getDate();
+    // 달력 칸 배치는 날짜 산술(시간대 무관 — UTC로 계산), 칸의 ms는 표시 시간대 그 날 0시
+    var ap = CH.parts(anchor), y = ap.Y, mo = ap.M - 1;
+    var lead = new Date(Date.UTC(y, mo, 1)).getUTCDay();
+    var days = new Date(Date.UTC(y, mo + 1, 0)).getUTCDate();
     var today = dayStart(Date.now());
-    // 끌어 고르는 중(pick=1)에는 마우스가 가리키는 날까지 미리 칠한다
+    // 시작만 고른 상태(pick=1)엔 마우스가 가리키는 날까지 미리 칠함
     var a = st.fromDay, b = (st.pick === 1 && st.hover) ? st.hover : st.toDay;
     var lo = Math.min(a, b), hi = Math.max(a, b);
     var bd = this._bounds(), minD = bd.minD, maxD = bd.maxD;
@@ -258,13 +247,12 @@ export class DateRange extends Component {
     for (var i = 0; i < lead; i++) cells.push(html`<span></span>`);
     for (var n = 1; n <= days; n++) {
       cells.push((function (dayN) {
-        var ms = new Date(y, mo, dayN).getTime();
+        var ms = CH.makeTime(y, mo + 1, dayN);
         var inR = ms >= lo && ms <= hi, edge = ms === lo || ms === hi;
-        var wd = new Date(ms).getDay();
-        // 데이터가 없는 날은 고를 수 없다 — 골라 봐야 빈 차트·빈 리포트가 나오고, 그것을 "이상 없음"으로 읽는다
+        var wd = (lead + dayN - 1) % 7;
+        // 데이터 없는 날 선택 불가 — 빈 차트·리포트가 "이상 없음"으로 읽히는 것 방지
         var outside = (minD && ms < minD) || (maxD && ms > maxD);
-        /* 밴드 안에서는 주말 색을 쓰지 않는다 — 파란 밴드 위의 파란 토요일은 어느 테마에서도 묻힌다.
-           밴드 밖에서만 요일 색이 의미가 있고, 안쪽은 "고른 구간"이라는 것이 먼저다. */
+        /* 선택 밴드 안에서는 주말 색 미사용(파란 밴드 위 파란 토요일은 묻힘) */
         var color = edge ? '#fff' : outside ? 'var(--text-muted)' : inR ? 'var(--text-primary)'
           : wd === 0 ? 'var(--danger)' : wd === 6 ? 'var(--cal-sat)' : 'var(--text-primary)';
         var bg = edge ? 'var(--cal-edge)' : inR ? 'var(--cal-band)' : 'transparent';
@@ -299,7 +287,7 @@ export class DateRange extends Component {
     var months = [];
     for (var i = 0; i < st.months; i++) months.push(this._month(addMonths(st.view, i), 'm' + i));
     var bd = this._bounds();
-    // 한쪽만 아는 경우도 있다(통계가 시작 시각을 안 줄 때) — 아는 만큼만 적는다
+    // 한쪽만 알 때(통계에 시작 시각 없음 등)는 아는 쪽만 표기
     var hintTxt = p.hint || (bd.minD && bd.maxD ? '데이터 ' + fmtVal(bd.minD, false) + ' ~ ' + fmtVal(bd.maxD, false)
       : bd.maxD ? '데이터 ' + fmtVal(bd.maxD, false) + '까지'
         : bd.minD ? '데이터 ' + fmtVal(bd.minD, false) + '부터' : '');
@@ -336,7 +324,7 @@ export class DateRange extends Component {
             </span>` : html`
             <span style="font-size: 11px; color: ${r.bad ? 'var(--danger)' : 'var(--text-muted)'};">
               ${r.bad ? '종료가 시작보다 빠릅니다'
-        // 날짜만 고르는 자리는 "며칠치"가 읽고 싶은 값이다 — 하루를 24.0시간으로 적으면 세어야 한다
+        // 날짜만 고르는 자리는 일수로 표시 — 시간 단위(24.0시간)는 세어야 읽힘
         : '선택 구간 ' + (ut ? spanText(r.t - r.f) : (Math.round((st.toDay - st.fromDay) / 86400000) + 1) + '일')}
             </span>
             ${(!r.bad && hintTxt) ? html`<span style="font-size: 11px; color: var(--text-muted);">· ${hintTxt}</span>` : null}`}
@@ -348,14 +336,12 @@ export class DateRange extends Component {
   render(p, st) {
     var self = this;
     var f = parseLocal(p.from), t = parseLocal(p.to);
-    /* 시각은 하루 경계에 안 맞을 때만 적는다 — 달력으로 고른 구간은 날짜만으로 충분하고,
-       프리셋·이벤트 클릭처럼 하루 안의 창일 때는 시각을 지우면 무슨 구간인지 알 수 없다. */
+    /* 시각은 하루 경계에 안 맞는 구간(프리셋·이벤트 클릭 등)에만 표기 */
     var withT = useTime(p) || (p.mode !== 'date' && !dayBounded(f, t));
-    // label을 주면 구간 대신 그것을 적는다 — 태그마다 구간이 다른 프리셋처럼 한 구간으로 적으면 틀리는 자리에 쓴다
+    // label 있으면 구간 대신 표기 — 태그마다 구간이 다른 프리셋 등 단일 구간 표기가 틀리는 자리용
     var label = p.label || ((isNaN(f) || isNaN(t)) ? (p.placeholder || '기간 선택') : rangeLabel(f, t, withT, p.mode === 'date'));
-    /* 직접 고른 구간임을 알리는 색은 --info를 쓴다 — --primary-base·--primary-light는 흰 바탕 기준
-       진한 파랑이라 다크 표면 위에서 대비가 떨어져 탁하게 앉는다(--info는 다크에서 밝은 쪽으로 잡혀 있다).
-       글자는 두 테마 모두 --text-primary로 두고, 강조는 옅은 배경과 테두리가 맡는다. */
+    /* 직접 고른 구간 표시 색은 --info(--primary-*는 다크 표면에서 대비 부족)
+       글자는 두 테마 모두 --text-primary, 강조는 옅은 배경·테두리 */
     var on = !!p.active;
     var btn = 'display: inline-flex; align-items: center; gap: 7px; height: ' + (p.height || 34) + 'px; padding: 0 11px; box-sizing: border-box;'
       + ' border-radius: 6px; border: 1px solid ' + (on ? 'var(--info)' : 'var(--border-medium)') + ';'

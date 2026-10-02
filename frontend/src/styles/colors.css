@@ -2,9 +2,8 @@
    Values are verbatim from the machbase neo-web source:
      · src/design-system/tokens/_colors.scss   (modern DS tokens — DARK, canonical)
      · src/assets/scss/variables.scss           ($d-* dark / $l-* light legacy shell)
-   The product ships DARK by default (`:root`). The legacy app shell also defines a
-   LIGHT theme (home / modals / worksheet / sql), exposed here under
-   [data-theme="light"]. Raw palette first, semantic aliases second. */
+   DARK by default (`:root`), LIGHT under the .theme-light class.
+   Raw palette first, semantic aliases second. */
 
 :root {
   /* ---- Surfaces (dark, layered) ---- */
@@ -15,9 +14,7 @@
   --bg-sub-tab-active: #2e2e2e;
   --bg-input: rgba(255, 255, 255, 0.13);
   --bg-input-dark: #353535;
-  /* 카드 안에 한 단 들어간 설명 블록의 바닥 — 카드보다 한 톤 낮다.
-     input 채움(흰색 13%)처럼 밝은 쪽으로 올리면 그 위의 muted 텍스트와
-     accent 링크가 배경에 묻힌다. */
+  /* 카드 안 설명 블록 바닥 — 카드보다 한 톤 낮게(밝게 올리면 muted 텍스트·accent 링크가 묻힘) */
   --bg-inset: #1f1f1f;
   --bg-user-message: #323233;     /* rgb(50,50,51) */
   --surface-menu: #2d2d2d;        /* dropdown / menu popover */
@@ -29,8 +26,7 @@
   --surface-elevated: var(--bg-elevated);
   --surface-input: var(--bg-input);
 
-  /* ---- Text (cool-tinted to harmonize with the cool #262831 main surface;
-     nudged off neutral gray — imperceptibly close to vendor #f1f1f1 neighbours) ---- */
+  /* ---- Text (cool-tinted to harmonize with the cool main surface) ---- */
   --text-primary: #f0f1f4;
   --text-secondary: #c3c7cf;
   --text-tertiary: #9ba0aa;
@@ -52,16 +48,15 @@
   --accent-hover: var(--primary-hover);
 
   /* ---- Semantic (DARK) --------------------------------------------------
-     Refined to natural, non-neon tones that stay legible on dark surfaces.
-     Original verbatim source values are noted in comments for traceability. */
-  --success: #5cc26e;             /* natural leaf green   (src #71e071) */
-  --success-light: #7bd98a;       /*                      (src #9df486) */
-  --danger: #f36b6b;              /* softened red         (src #ff5353) */
-  --danger-light: #f78a8a;        /*                      (src #fa6464) */
-  --danger-border: #e05656;       /* input error border   (src #e53935) */
-  --warning: #f2a63a;             /* warm amber           (src #ff9800) */
-  --warning-event: #f2cd6b;       /* event-match / etc    (src #ffdc72) */
-  --info: #2b7cd3;                /* info blue (tuned to accent family, src #005fb8) */
+     Refined to natural, non-neon tones that stay legible on dark surfaces. */
+  --success: #5cc26e;             /* natural leaf green */
+  --success-light: #7bd98a;
+  --danger: #f36b6b;              /* softened red */
+  --danger-light: #f78a8a;
+  --danger-border: #e05656;       /* input error border */
+  --warning: #f2a63a;             /* warm amber */
+  --warning-event: #f2cd6b;       /* event-match / etc */
+  --info: #2b7cd3;                /* info blue (tuned to accent family) */
 
   /* ---- Toast fills (theme-invariant: mid-tones set for white text) ---- */
   --toast-ok: #2e7d5b;
@@ -69,10 +64,9 @@
   --toast-err: #c14545;
 
   /* ---- Canvas ----
-     The colour actually painted behind the app. Not the same as --bg-primary: the DS shell rule
-     (.theme-light in theme-light.css) repaints the app root with !important, so on light the page
-     is grey while --bg-primary stays white for cards. Anything that must blend into the page —
-     a sticky bar floating over scrolled content — has to use this, not --bg-primary. */
+     Colour actually painted behind the app (≠ --bg-primary: on light, the shell rule in
+     theme-light.css paints the root grey while --bg-primary stays white for cards).
+     Use this for anything that must blend into the page (e.g. sticky bars). */
   --bg-canvas: #1e1e1e;
 
   /* ---- Switch (on/off toggles) ----
@@ -83,16 +77,16 @@
   --switch-knob-shadow: rgba(0, 0, 0, 0.4);
 
   /* ---- Status circle (mirror semantic light variants) ---- */
-  --status-true: var(--success-light);   /* src #9df486 */
-  --status-false: var(--danger-light);    /* src #fa6464 */
-  --status-none: #868b94;                 /* cool neutral (src #717171) */
+  --status-true: var(--success-light);
+  --status-false: var(--danger-light);
+  --status-none: #868b94;                 /* cool neutral */
 
   /* ---- Table-type tags (natural, hue identity preserved) ---- */
-  --tag-table: #2b7cd3;           /* TAG = info   (src #005fb8) */
-  --log-table: #ec5f5f;           /* LOG = danger (src #ff4747) */
-  --kv-table: #1fa896;            /* KV  = teal   (src #009688) */
-  --vol-table: #f2a63a;           /* VOL = warning(src #ff9800) */
-  --etc-table: #f2cd6b;           /* ETC = event  (src #ffdc72) */
+  --tag-table: #2b7cd3;           /* TAG = info */
+  --log-table: #ec5f5f;           /* LOG = danger */
+  --kv-table: #1fa896;            /* KV  = teal */
+  --vol-table: #f2a63a;           /* VOL = warning */
+  --etc-table: #f2cd6b;           /* ETC = event */
 
   /* ---- Buttons ---- */
   --btn-create: #005fb8;
@@ -107,8 +101,7 @@
   --chart-orange: #fdb532;
 
   /* ---- 기간 달력 (DateRange) ----
-     accent blue(--primary-*)는 흰 바탕 기준 진한 파랑이라 다크 표면 위에서는 밴드가 배경에,
-     끝날이 밴드에 묻힌다. 밴드·끝날·토요일만 테마별로 따로 잡는다. */
+     밴드·끝날·토요일은 테마별 별도 색(--primary-*는 다크 표면에서 묻힘) */
   --cal-band: #2a4a6b;            /* 선택 구간 밴드 */
   --cal-edge: #0075e2;            /* 구간의 시작·종료 날 */
   --cal-sat: #6aa9e9;             /* 토요일 */
@@ -143,10 +136,8 @@
 
 /* ============================================================================
    LIGHT THEME — canonical light palette (refined cool-slate; ink #23262e).
-   A crisp, premium light scheme (GitHub/Linear-light quality): cool neutral
-   surfaces, a rich text hierarchy, and soft low-alpha borders/shadows.
    Scoped on the .theme-light CLASS (same hook the component overrides in
-   tokens/theme-light.css and the card toggle use — one source of truth).
+   theme-light.css and the card toggle use — one source of truth).
    These are the exact values the dark→light component remap resolves to.
    ============================================================================ */
 .theme-light {

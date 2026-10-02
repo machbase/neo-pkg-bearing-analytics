@@ -1,10 +1,6 @@
-/* 미지원 컬럼 구성 table 차단 검사 — 오프라인(Neo 불필요). npm run smoke에 포함.
-
-   TAG table은 컬럼 '이름'이 아니라 역할 키워드(PRIMARY KEY·BASETIME·SUMMARIZED)로 정해져서 이름은 자유다.
-   카탈로그는 TYPE=6이면 전부 올리는데 이 앱의 조회는 NAME·TIME·VALUE를 그대로 쓰므로,
-   다른 이름을 쓰는 table은 태그 목록(_<t>_meta)부터 실패한다.
-   목록에 올려놓고 고를 수 있게 두면 저장까지 끝난 뒤에야 "조회 실패"를 만난다 — 고르기 전에 막아야 한다.
-   (라이브 확인: SENSOR_TEST = DEVICE_ID·TS·READING, SENSOR_DATA = DEVICE_ID·TIME·TEMPERATURE) */
+/* 미지원 컬럼 구성 table 차단 — 오프라인(Neo 불필요) · npm run smoke 포함
+   · TAG table 컬럼 이름은 역할 키워드로 정해져 자유, 앱 조회는 NAME·TIME·VALUE 고정 → 선택 전에 차단·사유 표시
+   · 스키마 미확인 시 차단 안 함, 저장된 미지원 선택·전체 선택에서 제외, 스키마 SQL은 콤마 조인 */
 globalThis.window = globalThis;
 import renderToString from 'preact-render-to-string';
 
@@ -49,12 +45,12 @@ const mk = (schemas, sel) => {
   chk(/DEVICE_ID · TS · READING/.test(a._srcBlock('SENSOR_TEST')),
     '무엇을 쓰는 table인지 사유에 적는다', a._srcBlock('SENSOR_TEST'));
 }
-// ── 스키마를 못 읽었으면 막지 않는다(권한·구버전) ────────────────────────
+// ── 스키마 미확인(권한·구버전)이면 차단 안 함 ────────────────────────
 {
   const a = mk(null);
   chk(a._srcBlock('SENSOR_TEST') === '', '스키마를 모르면 막지 않는다 — 모른다고 못 쓰게 하면 되던 것이 안 된다');
 }
-// ── 토글이 실제로 막힌다 ──────────────────────────────────────────────────
+// ── 토글 차단 ──────────────────────────────────────────────────
 {
   const a = mk(SCHEMAS);
   a._toggleSrcTable('SENSOR_TEST');
@@ -63,15 +59,15 @@ const mk = (schemas, sel) => {
   a._toggleSrcTable('BEARING');
   chk(a.state.srcSel.indexOf('BEARING') >= 0, '정상 table은 그대로 선택된다');
 }
-// ── 이미 저장돼 있던 미지원 선택은 제외된다 ───────────────────────────────
+// ── 저장돼 있던 미지원 선택 제외 ───────────────────────────────
 {
   const a = mk(null, ['BEARING', 'SENSOR_TEST']);
   a.liveSchemas = SCHEMAS;
-  // _loadSchemas의 제외 로직과 같은 판정 — 조회 없이 결과만 확인한다
+  // _loadSchemas 제외 로직과 같은 판정 — 조회 없이 결과만 확인
   const drop = a.state.srcSel.filter((t) => !!a._srcBlock(t));
   chk(drop.length === 1 && drop[0] === 'SENSOR_TEST', '저장돼 있던 미지원 table을 골라낸다', JSON.stringify(drop));
 }
-// ── 전체 선택은 고를 수 있는 것만 담는다 ──────────────────────────────────
+// ── 전체 선택은 선택 가능한 것만 ──────────────────────────────────
 {
   const a = mk(SCHEMAS);
   const v = a.renderVals();
@@ -81,14 +77,14 @@ const mk = (schemas, sel) => {
     '전체 선택에 미지원 table이 섞이지 않는다 — 섞이면 저장 직후 조회가 실패한다', JSON.stringify(sel));
   chk(sel.length === 2, '고를 수 있는 것만 담긴다', JSON.stringify(sel));
 }
-// ── 화면에 사유가 보인다 ──────────────────────────────────────────────────
+// ── 화면에 사유 표시 ──────────────────────────────────────────────────
 {
   const a = mk(SCHEMAS);
   const html = renderToString(view(a.renderVals()));
   chk(html.indexOf('DEVICE_ID · TS · READING') >= 0, '목록에 사유가 렌더된다');
   chk(/disabled/.test(html), '체크박스가 비활성으로 렌더된다');
 }
-// ── SQL은 콤마 조인이어야 한다(명시적 3단 JOIN은 이 빌드에서 깨진다) ──────
+// ── SQL은 콤마 조인(명시적 3단 JOIN은 이 빌드에서 실패) ──────
 {
   const s = SQL.tagSchemas('SYS');
   chk(!/\bJOIN\b/i.test(s), '명시적 JOIN을 쓰지 않는다 — 3단이면 TK_ID is not resolved로 깨진다', s.slice(0, 60));

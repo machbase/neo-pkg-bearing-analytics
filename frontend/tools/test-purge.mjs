@@ -1,6 +1,6 @@
-// 데이터 삭제 경로 검사 — 오프라인. npm run smoke에 포함.
-// 핵심 주장: 행을 지우면 데이터가 하나도 안 남은 태그의 "이름"도 같이 사라진다.
-// TAG 표는 데이터와 이름 등록이 따로라, 행만 지우면 철거한 설비가 태그 목록에 영영 남는다.
+// 데이터 삭제 경로 — 오프라인(Neo 불필요) · npm run smoke 포함
+// · 행 삭제 시 데이터가 안 남은 태그 이름(METADATA)도 정리(TAG 표는 데이터·이름 등록이 별개)
+// · 기간 삭제는 이름별 문장(계정 접두, 시간 조건만인 DELETE 없음), db.js 배선 확인
 globalThis.window = globalThis;
 const SQL = (await import('../../cgi-bin/db/sql.js')).default;
 
@@ -14,18 +14,16 @@ const chk = (ok, msg, extra) => {
 {
   const q = SQL.metaPurgeOrphans('BAND');
   chk(/^delete from BAND metadata\b/.test(q), '이름 삭제는 METADATA 절을 쓴다', q);
-  /* 조건이 "데이터가 남은 이름의 여집합"이어야 한다. 구간을 조건에 넣으면 안 된다 —
-     일부만 지운 태그의 이름까지 지워져, 살아 있는 설비가 목록에서 사라진다. */
+  /* 조건 = "데이터가 남은 이름의 여집합", 기간 조건 금지(일부만 지운 태그의 이름까지 삭제됨) */
   chk(/not in \(select NAME from BAND group by NAME\)/.test(q), '데이터가 남은 이름은 건드리지 않는다', q);
   chk(!/TIME|between/i.test(q), '이름 삭제에는 기간 조건이 없다', q);
 
   chk(/EVENTS metadata/.test(SQL.metaPurgeOrphans('EVENTS')), '이벤트 표에도 같은 규칙');
 }
 
-// ── 삭제 경로가 두 문장을 모두 낸다 ────────────────────────────────────────
+// ── 삭제 경로가 두 문장 모두 실행 ────────────────────────────────────────
 {
-  /* db.js는 fetch를 타므로 q()만 가로채 어떤 SQL이 나갔는지 본다.
-     행 삭제만 하고 이름을 안 지우면 "지웠는데 태그가 그대로"가 된다 — 실제로 그랬다. */
+  /* 가짜 q()로 실행 SQL 관찰 — 행만 지우고 이름을 안 지우면 "지웠는데 태그가 그대로" */
   const seen = [];
   const fake = {
     q: (sql) => { seen.push(String(sql)); return Promise.resolve([]); },
@@ -38,11 +36,11 @@ const chk = (ok, msg, extra) => {
     chk(del >= 1 && meta === 1, name, `행 삭제 ${del}건 · 이름 정리 ${meta}건`);
   };
 
-  // db.js 내부 함수를 그대로 재현한다(모듈이 fetch를 물고 있어 직접 import가 안 된다)
+  // db.js 내부 함수(purgeNames·순차 실행) 재현
   const purgeNames = (t) => fake.q(SQL.metaPurgeOrphans(t)).catch(() => null);
   const runAll = (list) => list.reduce((p2, sql) => p2.then(() => fake.q(sql)), Promise.resolve());
-  /* 기간 삭제는 이름마다 한 문장이다 — 표를 계정이 공유하므로 시간만으로 지우면 남의 행까지
-     날아간다. TAG 표는 LIKE 로 좁힐 수도 없다(ERR-2073: NAME 정확일치 + 시간범위만 받는다). */
+  /* 기간 삭제는 이름마다 한 문장 — 계정 공유 표라 시간만으로 지우면 남의 행까지 삭제,
+     TAG 표는 LIKE 불가(ERR-2073: NAME 정확일치 + 시간범위만) */
   const KEYS = ['T:A:fault', 'T:B:fault'];
   await run('기간 삭제(대역) — 행과 이름을 함께 지운다', () =>
     runAll(SQL.bandDeleteRange(KEYS, 1, 2)).then(() => purgeNames('BAND')));
@@ -52,10 +50,9 @@ const chk = (ok, msg, extra) => {
     fake.q(SQL.eventsDeleteTag('T', 'A')).then(() => purgeNames('EVENTS')));
 }
 
-// ── 기간 삭제가 남의 행을 건드리지 않는가 ─────────────────────────────────
+// ── 기간 삭제가 남의 행 미접촉 ─────────────────────────────────
 {
-  /* 시간 조건만 있는 DELETE 가 하나라도 나오면 공용 표에서 전 계정의 데이터가 지워진다.
-     에러가 아니라 "남의 데이터가 사라짐"으로 나타나므로 화면으로는 절대 알 수 없다. */
+  /* 시간 조건만인 DELETE는 공용 표에서 전 계정 데이터 삭제 — 에러 없이 "남의 데이터 소실"로만 나타남 */
   SQL.setScope('NEO_BEARING_STORE', 'JOY');
   const stmts = SQL.bandDeleteRange(['T:A:fault'], 1, 2).concat(SQL.eventsDeleteRange(['T:A'], 1, 2));
   chk(stmts.length === 2, '이름 하나당 문장 하나', `${stmts.length}건`);
@@ -65,10 +62,9 @@ const chk = (ok, msg, extra) => {
   SQL.setScope('', '');
 }
 
-// ── 실제 소스에 배선돼 있는가 ──────────────────────────────────────────────
+// ── 실제 소스 배선 ──────────────────────────────────────────────
 {
-  /* 위 검사는 "이렇게 부르면 맞다"까지만 본다. 진짜 배선은 db.js가 하므로 소스를 직접 확인한다
-     — 배선을 빠뜨리면 위 검사는 통과하는데 화면에서는 이름이 안 지워진다. */
+  /* 위 검사는 호출 규칙까지만 — 실제 배선은 db.js 소스로 확인 */
   const fs = await import('node:fs');
   const src = fs.readFileSync(new URL('../../cgi-bin/db/db.js', import.meta.url), 'utf8');
   ['deleteEventsRange', 'deleteBandRange', 'deleteEventsOfTag', 'deleteBandOfTag'].forEach((fn) => {

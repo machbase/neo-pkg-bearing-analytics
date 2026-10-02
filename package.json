@@ -1,6 +1,6 @@
 {
     "name": "neo-pkg-bearing-analytics",
-    "version": "0.1.0",
+    "version": "1.0.0",
     "minServerVersion": "8.5.9",
     "packageService": {
         "managed": false

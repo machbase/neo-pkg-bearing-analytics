@@ -1,15 +1,22 @@
-/* 서버 감시의 ISO 판정 단위 — 오프라인(Neo 불필요). npm run smoke에 포함.
-
-   ISO 10816 존은 속도(mm/s) 규격이다. 앱은 가속도·변위 원본을 속도로 바꾼 뒤 ISO를 재고
-   클래스별 mm/s 경계로 판정한다. 서버 감시가 원본 그대로 재서 원본 단위 존에 대면 같은 신호가
-   앱과 서버에서 다른 등급이 된다(가속도 태그의 알림 등급이 화면과 갈린다).
-   생성된 TQL의 원문을 떼어내 앱 계산과 같은 값·같은 등급이 나오는지 본다 — 옮겨 적으면
-   생성기가 바뀌어도 테스트만 통과한다. */
+/* 서버 감시의 ISO 판정 단위 — 가속도·변위 원본을 속도로 환산해 ISO를 재고 mm/s 존으로 판정(앱과 같은 값·등급)
+   · 변환 정확도·convSrc 자체 완결·조용한 태그 재측정 간격·패턴 높이·이벤트 값/근거 원본 단위 표기
+   · 속도 설비 이벤트 값 = 등급 높이를 정한 ISO(패턴을 잰 파형) — 1초 창 ISO를 적으면 값<기준인 위험 행 가능
+   · 생성된 TQL 원문을 떼어내 실행(옮겨 적지 않음)
+   오프라인(Neo 불필요) · npm run smoke 포함 */
 globalThis.window = globalThis;
+// 앱 판정 루프 실행용 — 세션·DB 응답 흉내, 보낸 SQL 기록
+globalThis.atob = (s) => Buffer.from(s, 'base64').toString('binary');
+const b64 = (o) => Buffer.from(JSON.stringify(o)).toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+const ls = { accessToken: `h.${b64({ sub: 'joy' })}.sig` };
+globalThis.localStorage = { getItem: (k) => (k in ls ? ls[k] : null), setItem: (k, v) => { ls[k] = String(v); }, removeItem: (k) => { delete ls[k]; } };
+const sent = [];
+globalThis.fetch = async (p) => { sent.push(decodeURIComponent(String(p))); return { ok: true, status: 200, json: async () => ({ success: true, data: { rows: [] } }), text: async () => '' }; };
+const DB = (await import('../../cgi-bin/db/db.js')).default;
+const CH = (await import('../../cgi-bin/chart/chart.js')).default;
 const VC = (await import('../../cgi-bin/calc/calc.js')).default;
 const { buildMonitorTql, validateSpec } = (await import('../../cgi-bin/monitor/monitor.js')).default;
 const Notify = (await import('../../cgi-bin/notify/notify.js')).default;
-const { judgeTick } = await import('../src/app.js');
+const { judgeTick, App } = await import('../src/app.js');
 
 let fail = 0;
 const chk = (ok, msg, extra) => {
@@ -21,7 +28,7 @@ const near = (a, b, tol) => Math.abs(a - b) <= tol * Math.abs(b);
 
 // ── 변환 정확도 — 해석해와 대조 ─────────────────────────────────────────
 {
-  const FS = 4096, N = 4096, F = 100;   // 창 안에 정수 주기 — 누설 없이 해석해와 맞는다
+  const FS = 4096, N = 4096, F = 100;   // 창 안에 정수 주기 — 누설 없이 해석해와 일치
   const sine = Array.from({ length: N }, (_, i) => Math.sin(2 * Math.PI * F * i / FS));
   const v = VC.convertDomain(sine, FS, 'g', 'mm/s', 0);
   chk(near(rms(v) / rms(sine), 9806.65 / (2 * Math.PI * F), 0.005), '가속도 → 속도는 적분(1/ω) — 1 g RMS @100 Hz = 15.608 mm/s', (rms(v) / rms(sine)).toFixed(3));
@@ -34,7 +41,7 @@ const near = (a, b, tol) => Math.abs(a - b) <= tol * Math.abs(b);
   chk(VC.convertDomain(sine, FS, '', 'mm/s', 0)[7] === sine[7], '모르는 단위는 변환하지 않는다(원본 그대로)');
 }
 
-// ── 서버 임베드 소스가 자체 완결인가(모듈 상수를 참조하면 압축본 서버에서만 죽는다) ──
+// ── 서버 임베드 소스 자체 완결(모듈 상수 참조 시 압축본 서버에서만 죽음) ──
 {
   const FS = 12000, raw = Array.from({ length: 12000 }, (_, i) => 0.3 * Math.sin(2 * Math.PI * 47 * i / FS) + 0.05 * Math.sin(2 * Math.PI * 2100 * i / FS));
   let iso, err = '';
@@ -75,7 +82,7 @@ const line = (needle) => {
   return l.trim();
 };
 
-// 4.0 mm/s RMS @30 Hz(1×)에 해당하는 가속도 신호 — 클래스 II에서 '위험'(2.8~7.1) 구간이다
+// 4.0 mm/s RMS @30 Hz(1×)에 해당하는 가속도 신호 — 클래스 II '위험'(2.8~7.1) 구간
 const VRMS = 4.0, F1 = 29.3;
 const aPeakG = VRMS * Math.SQRT2 * 2 * Math.PI * F1 / 9806.65;
 const rawG = Array.from({ length: FS }, (_, i) => aPeakG * Math.sin(2 * Math.PI * F1 * i / FS) + 0.002 * Math.sin(2 * Math.PI * 3100 * i / FS));
@@ -92,7 +99,7 @@ const T = spec.tags[0], KEY = 'T:A', NOW = 1700000000000;
 
 // 10초 축 ISO — 앱 _isoRefresh와 같은 계산(변환 → 버터워스 ISO)
 {
-  WVAL[KEY] = [{ rms: 3.0, cnt: FS }];   // 원본 단위(g)로 양호 경계 위 — 조용하지 않다
+  WVAL[KEY] = [{ rms: 3.0, cnt: FS }];   // 원본 단위(g)로 양호 경계 위 — 조용하지 않음
   const r = mkIsoValue(rawG, NOW)(T, 3.0, null, KEY, false);
   const app = VC.isoRms(VC.convertDomain(rawG, FS, 'g', 'mm/s', RPM / 60), FS);
   chk(r.fresh && r.v === app, '서버 10초 축 ISO가 앱 계산과 같다(속도 변환 후)', r.v && r.v.toFixed(3));
@@ -104,7 +111,7 @@ const T = spec.tags[0], KEY = 'T:A', NOW = 1700000000000;
   chk(g === 2, "4.0 mm/s는 클래스 II '위험' — 앱과 같은 등급", g);
   chk(VC.gradeFor(rms(rawG), Zg) === 0, '(고치기 전 방식: 원본 g를 g 존에 대면 양호로 나왔다)');
 }
-// 조용한 가속도 태그 — 전대역 지름길은 안 쓰고 재측정 간격만 늘린다(앱과 같은 30초/5분)
+// 조용한 가속도 태그 — 전대역 지름길 없이 재측정 간격만 늘림(앱과 같은 30초/5분)
 {
   WVAL[KEY] = [{ rms: 0.1, cnt: FS }];   // 원본 단위 양호 경계(0.5 g) 미만
   const iv = mkIsoValue(rawG, NOW);
@@ -115,7 +122,7 @@ const T = spec.tags[0], KEY = 'T:A', NOW = 1700000000000;
   const busy = iv(T, 0.1, { iso: 1.23, isoAt: NOW - 120000 }, KEY, true);
   chk(busy.fresh, '베이스라인 근처(near)면 30초 간격으로 돌아간다');
 }
-// 속도 원본은 예전과 같다 — 변환 없음·지름길 유지
+// 속도 원본 — 변환 없음·지름길 유지
 {
   const Tv = Object.assign({}, T, { unit: 'mm/s', zones: Ziso });
   const rawV = Array.from({ length: FS }, (_, i) => 3 * Math.sin(2 * Math.PI * F1 * i / FS));
@@ -140,13 +147,13 @@ const T = spec.tags[0], KEY = 'T:A', NOW = 1700000000000;
 }
 
 // ── 이벤트 값·기준 — 원본 단위 표기 ─────────────────────────────────────
-/* 가속도·변위 설비의 등급 이벤트는 원본 단위 값만 적는다. 등급은 속도 ISO로 매기므로 원본 단위의
-   "기준" 숫자가 없다 — 숫자를 비우고 근거(ISO 존·결함 패턴)를 DETAIL 머리에 말로 적는다. */
+/* 가속도·변위 설비 등급 이벤트 — 원본 단위 값만, 기준 숫자는 비우고 근거(ISO 존·결함 패턴)를 DETAIL 머리에 말로 기록
+   · 등급은 속도 ISO로 매겨 원본 단위 기준값이 없음 */
 {
-  const L = [line('var nat = !isS'), line('var v2 = isS'), line('var l2 = nat'), line('if(nat) dt = ')].join('\n');
+  const L = [line('var _hv = '), line('var nat = !isS'), line('var v2 = isS'), line('var l2 = '), line('if(nat) dt = ')].join('\n');
   const GWk = ['양호', '주의', '위험', '심각'];
-  const run = (t, ev, dt) => new Function('t', 'z', 'val', 'wide', 'isS', '_hG', 'GW', 'ev', 'dt',
-    L + '\nreturn {v2:v2, l2:l2, dt:dt, nat:nat};')(t, t.isoZones || t.zones, 3.975, 0.077, false, 2, GWk, ev, dt);
+  const run = (t, ev, dt, pv, val, isS) => new Function('t', 'z', 'val', 'wide', 'isS', '_hG', 'GW', 'ev', 'dt', '_pv',
+    L + '\nreturn {v2:v2, l2:l2, dt:dt, nat:nat};')(t, t.isoZones || t.zones, val == null ? 3.975 : val, 0.077, !!isS, 2, GWk, ev, dt, pv || null);
   const jd = '격자 3.1 · 외륜(BPFO) · 2회 연속 확정';
   const a = run(T, { etype: 'threshold', gi: 2 }, jd);
   chk(a.nat && a.v2 === 0.077 && a.l2 === 0, '가속도 설비: 값은 원본 단위 구간 RMS, 기준 숫자는 비운다', JSON.stringify(a));
@@ -156,6 +163,16 @@ const T = spec.tags[0], KEY = 'T:A', NOW = 1700000000000;
   chk(r.v2 === 0.077 && r.l2 === 0 && Notify.basisText(r.dt) === 'ISO 위험 구간', '복귀도 원본 단위 값 + ISO 존만(패턴 부위 없음)', r.dt);
   const d = run(Object.assign({}, T, { unit: 'mm/s' }), { etype: 'threshold', gi: 1 }, 'x');
   chk(!d.nat && d.v2 === 3.975 && d.l2 === 1.12 && d.dt === 'x', '속도 설비는 예전과 같다 — ISO 값·ISO 경계', JSON.stringify(d));
+  // 서버 — 높이를 정한 ISO(패턴 파형 2.9, 위험)와 1초 창 ISO(2.75, 주의 구간)가 다를 때
+  const sv = run(Object.assign({}, T, { unit: 'mm/s' }), { etype: 'threshold', gi: 2 }, 'x', { iso: 2.9 }, 2.75);
+  chk(sv.v2 === 2.9 && sv.l2 === 2.8 && sv.v2 >= sv.l2, '서버: 속도 설비 이벤트 값 = 등급 높이를 정한 ISO(예전: 1초 창 2.75 < 기준 2.8인 위험 행)', JSON.stringify(sv));
+  const sv0 = run(Object.assign({}, T, { unit: 'mm/s' }), { etype: 'threshold', gi: 2 }, 'x', null, 2.75);
+  chk(sv0.v2 === 2.75, '패턴 ISO가 없으면 높이도 1초 창 값이라 그 값 그대로');
+  // 계측 이상·복귀 — 지표값 없음, 앱 _judgeLive와 같이 값·기준 모두 0
+  const sf = run(Object.assign({}, T, { unit: 'mm/s' }), { etype: 'sensor_fault', gi: 2 }, '플랫라인 — x', null, null, true);
+  const so = run(T, { etype: 'sensor_ok', gi: 0 }, '계측 정상 복귀', null, null, true);
+  chk(sf.v2 === 0 && sf.l2 === 0 && so.v2 === 0 && so.l2 === 0 && sf.dt === '플랫라인 — x',
+    '서버: 계측 이상·복귀는 값·기준 0(예전: 존 경계가 기준으로 저장돼 목록에 "0 · 기준 2.8")', JSON.stringify([sf, so]));
 
   const m = Notify.eventMessage({ alias: '펌프', tag: 'A', typeKo: '임계 초과', gradeKo: '위험', etype: 'threshold',
     val: 0.077, lim: null, unit: 'g', detail: a.dt, timeText: 'T' });
@@ -164,6 +181,30 @@ const T = spec.tags[0], KEY = 'T:A', NOW = 1700000000000;
     val: 3.975, lim: 1.12, unit: 'mm/s', detail: 'x', timeText: 'T' });
   chk(/3\.975 mm\/s \/ 기준 1\.120/.test(m2.text), '속도 설비 알림은 예전과 같다(값 / 기준)', m2.text.split('\n')[1]);
   chk(Notify.basisText('') === '' && Notify.basisText('격자 2.0 · 2회 연속 확정') === '', '근거가 없으면 빈 문자열(부위 자리에 확정 문구를 잡지 않는다)');
+}
+
+// 앱 모드 판정 — 실제 판정 루프가 저장하는 이벤트 행
+{
+  DB.setUser('JOY');
+  const app = new App({ seed: 7, equipmentCount: 1 });
+  app.setState = function (st) { Object.assign(this.state, st); }; app.forceUpdate = () => {}; app._toast = () => {};
+  app.E = CH; app.live = true; app.user = 'JOY';
+  const eq = { id: 'T:A', table: 'T', name: 'A', alias: 'A', unit: 'mm/s', zones: Ziso, fs: FS, rpm: RPM, secBuckets: [], lastSeen: Date.now() };
+  app.data = { now: Date.now(), equipment: [eq], events: [], reports: [] };
+  app._applied = Object.assign({}, app.state, { monitorOn: true, monMode: 'app', monitorInterval: '3s', renotify: { '주의': '0', '위험': '0', '심각': '0' } });
+  app._isLead = () => true; app._checkIdentity = () => true;
+  app._activeEqs = () => [eq]; app._evalValue = () => 3.0;
+  app._isoValue = () => ({ v: 2.75, basis: 'iso' });                                   // 1초 창 ISO — 주의 구간
+  app._refreshBandNow = () => {}; app._refreshPatNow = () => {};
+  app._patNow = { 'T:A': { on: true, iso: 2.9, r: 40, at: NOW, key: 'BPFO' } };        // 패턴 파형 ISO — 위험 구간
+  app._patCapable = () => true; app._isoZones = () => Ziso; app._monState = {};
+  sent.length = 0;
+  await app._judgeLive();
+  await new Promise((r) => setTimeout(r, 20));
+  const ins = sent.find((q) => /insert into \S+EVENTS values/.test(q)) || '';
+  const m = /values\('[^']*', [^,]*\([^)]*\), ([\d.]+), '(\w+)', '([^']+)', ([\d.]+),/.exec(ins);
+  chk(m && m[2] === 'observe' && m[3] === '위험' && +m[1] === 2.9 && +m[4] === 2.8,
+    '앱: 이벤트 행 = 위험 · 값 2.9 · 기준 2.8 (예전: 값 2.75 — 기준보다 낮은 위험)', m ? m.slice(1).join(' / ') : ins.slice(0, 160));
 }
 
 console.log(fail ? `\n${fail} failed` : '\n=== 전부 통과 ===');

@@ -1,14 +1,10 @@
-/* 서버 감시의 발송 설정 경로 — 오프라인(Neo 불필요). npm run smoke에 포함.
-
-   웹훅 URL은 감시 스크립트에 싣지 않는다. 스크립트는 파일 API로 저장되고 파일 API는 계정 구분 없이
-   로그인한 누구나 열기 때문이다. 대신 보낼 알림이 생긴 회차에 계정 설정 표(CONFIG)에서 읽는다.
-
-   저장(db.js writeDomain)과 해석(notify.configFromRows·notifyCfgFrom)이 서로 다른 파일이라, 형식이
-   어긋나면 에러 없이 "알림 꺼짐"으로 읽혀 한 건도 안 나간다. 그래서 실제 저장 경로로 만든 행을
-   생성된 TQL에서 떼어낸 원문 함수에 그대로 먹여 본다(옮겨 적으면 생성기가 바뀌어도 테스트만 통과한다). */
+/* 서버 감시의 발송 설정 경로 — 오프라인(Neo 불필요) · npm run smoke 포함
+   · 웹훅 URL은 감시 스크립트에 미포함(파일 API는 계정 구분 없음) — 알림 회차에 계정 CONFIG 표에서 조회
+   · 저장(db.js writeDomain)↔해석(notify.configFromRows·notifyCfgFrom) 왕복, 앱·서버 해석 일치
+   · 생성 TQL에서 떼어낸 원문 함수로 발송·놓친 알림 기록(회차 상태의 nf)·앱 배너 확인 */
 globalThis.window = globalThis;
 
-// LOOKUP 테이블을 메모리 맵으로 흉내낸다 — test-cfgstore와 같은 방식
+// LOOKUP 테이블을 메모리 맵으로 흉내(test-cfgstore와 같은 방식)
 const store = new Map();
 globalThis.fetch = async (url) => {
   const sql = decodeURIComponent(String(url).replace(/^[^?]*\?q=/, '').replace(/&.*$/, ''));
@@ -35,25 +31,25 @@ const chk = (ok, msg, extra) => {
 };
 
 DB.setUser('JOY');
-// 조각이 둘 이상 나오도록 긴 URL — 조각 경계에서 %XX가 갈라지면 해독이 깨지는 것까지 본다
+// 조각 둘 이상 나오는 긴 URL — 조각 경계의 %XX 분할 해독까지 확인
 const URL = 'https://chat.googleapis.com/v1/spaces/AAA/messages?key=K&token=' + 'x%y'.repeat(1500) + '&한글=값';
 const DEFS = { order: ['주의', '위험', '심각', '감시 이상'], timing: { '주의': '즉시', '위험': '즉시', '심각': '즉시', '감시 이상': '즉시' } };
 
-// ── 생성 TQL에 발송 설정이 실리지 않는다 ─────────────────────────────────
+// ── 생성 TQL에 발송 설정 미포함 ─────────────────────────────────
 const baseSpec = {
   judgeSrc: judgeTick.toString(),
   tags: [{ tbl: 'T', tag: 'A', zones: [1.12, 2.8, 7.1], fs: 1000, bl: null, bb: null }],
   cfg: { escHold: 0, recHold: 300000, reno: { 1: 0, 2: 0, 3: 0 } },
 };
 const tql = Monitor.buildMonitorTql(Object.assign({}, baseSpec, {
-  // 호출측이 실수로 cfg를 넘겨도 실제 감시(dryRun 아님)에는 굽지 않는다
+  // 호출측이 실수로 cfg를 넘겨도 실제 감시(dryRun 아님)에는 굽지 않음
   notify: { src: Notify.serverSrc(), cfgTable: DB.configTable(), defs: DEFS,
     cfg: { channels: { webhook: { on: true, to: URL } }, routes: {} } },
 }));
 chk(!tql.includes('chat.googleapis.com') && !tql.includes('token='), '감시 스크립트에 웹훅 URL이 없다');
 chk(tql.includes('var NOTIFY=null;'), '발송 설정은 비어 있고 실행 때 채운다');
 chk(tql.includes('"table":"NEO_BEARING_STORE.JOY.CONFIG"'), '읽을 곳은 그 계정의 설정 표다', DB.configTable());
-chk(/\["__lock","__hb","__err","__nferr"\]/.test(tql), '예약키 __err·__nferr도 존재 여부를 읽는다(안 읽으면 두 번째 기록부터 묻힌다)');
+chk(/\["__lock","__st:mon"\]/.test(tql), '예약 키(잠금·회차 상태)도 존재 여부를 읽는다 — 놓친 알림 누적의 직전 값');
 chk(Monitor.validateSpec(Object.assign({}, baseSpec, { notify: { src: Notify.serverSrc(), cfgTable: 'X', defs: DEFS } })) === null,
   '사전 실행 검사 통과 — 새 임베드 함수에 자유 식별자가 없다');
 const dryTql = Monitor.buildMonitorTql(Object.assign({}, baseSpec, { dryRun: true,
@@ -76,9 +72,9 @@ const holed = monRows.filter(([k]) => !/#0$/.test(k));
 chk(/누락/.test(Notify.configFromRows(holed, 'monitor').err), '조각이 빠지면 오류로 돌려준다(빈 설정으로 읽으면 미발송이 묻힌다)');
 chk(/해독/.test(Notify.configFromRows([['cfg:monitor#0', '%E0%A4%A']], 'monitor').err), '해독이 안 되면 오류');
 
-// ── 앱과 서버가 같은 함수로 해석한다 ──────────────────────────────────────
+// ── 앱·서버 동일 함수로 해석 ──────────────────────────────────────
 {
-  // 옛 _notifyCfg의 결과(기준) — 이 모양이 바뀌면 화면 체크 상태와 발송이 갈린다
+  // _notifyCfg 기준 결과 형태 — 바뀌면 화면 체크 상태와 발송이 갈림
   const old = (S) => {
     const out = {};
     DEFS.order.forEach((k) => { const r = (S.routes || {})[k]; out[k] = r ? r : { timing: DEFS.timing[k] }; });
@@ -113,7 +109,7 @@ const line = (needle) => {
   return l.trim();
 };
 const SRV = [line('var NFON='), line('var NOTIFY='), line('var NFSRC='), line('var NFERR='), 'var NQ=[];',
-  line('var GW='), line('var TYPEKO='), 'function fmtTs(ms){ return "T" + ms; }', Notify.serverSrc(),
+  line('var GW='), line('var TYPEKO='), 'function fmtTs(ms){ return "T" + ms; }', 'function fmtShow(ms){ return "T" + ms; }', Notify.serverSrc(),
   fnSrc('loadNotify'), fnSrc('notifyEvent'), fnSrc('flushNotify')].join('\n');
 
 function round(rowsOrErr, nEvents) {
@@ -160,19 +156,19 @@ function round(rowsOrErr, nEvents) {
   chk(r2.sent.length === 0 && r2.st.NFERR === null, '저장한 적이 없으면 오류 없이 보내지 않는다');
 }
 
-// ── __nferr 기록·해제 ──────────────────────────────────────────────────
+// ── 놓친 알림(nf) — 회차 상태 기록에 누적, 발송 성공 시 해제 ─────────────────
 {
-  const L = line('if(NFERR) putState(');
-  const w = (NFERR, NFOK, PREV) => {
-    const calls = [];
-    new Function('NFERR', 'NFOK', 'PREV', 'putState', L)(NFERR, NFOK, PREV, (k, o) => calls.push([k, o]));
-    return calls;
-  };
-  const e = { t: 5, m: 'x', n: 1 };
-  chk(JSON.stringify(w(e, false, {})) === JSON.stringify([['__nferr', e]]), '실패 회차는 __nferr에 남긴다');
-  chk(JSON.stringify(w(null, true, { __nferr: { t: 5 } })) === JSON.stringify([['__nferr', { t: 0 }]]), '다음에 읽기에 성공하면 기록을 지운다');
-  chk(w(null, true, {}).length === 0, '지울 것이 없으면 쓰지 않는다');
-  chk(w(null, false, { __nferr: { t: 5 } }).length === 0, '읽어 보지 않은 회차(보낼 것 없음)는 기록을 건드리지 않는다');
+  const i = tql.indexOf('function stMon(known){');
+  const src = tql.slice(i, tql.indexOf('\n}', i) + 2);
+  const w = (NFERR, NFOK, PREV, known = true) => new Function('NFERR', 'NFOK', 'PREV', 'now', 'nDone', 'nPat', 'ERRS', src + '\nreturn stMon(' + known + ');')(
+    NFERR, NFOK, PREV, 1000, 0, 0, []);
+  const e = { t: 5, m: 'x', n: 3 };
+  chk(JSON.stringify(w(e, false, {}).nf) === JSON.stringify({ t: 1000, m: 'x', n: 3 }), '실패 회차는 nf에 사유·건수를 남긴다');
+  chk(w({ t: 6, m: 'y', n: 2 }, false, { '__st:mon': { nf: { t: 5, m: 'x', n: 3 } } }).nf.n === 5, '해제 전 실패가 이어지면 건수 누적');
+  chk(w(null, true, { '__st:mon': { nf: { t: 5, m: 'x', n: 3 } } }).nf === null, '발송에 성공하면 해제');
+  chk(JSON.stringify(w(null, false, { '__st:mon': { nf: { t: 5, m: 'x', n: 3 } } }).nf) === JSON.stringify({ t: 5, m: 'x', n: 3 }),
+    '보낼 것 없던 회차는 이전 기록 유지');
+  chk(!('nf' in w(e, false, {}, false)), '직전 상태를 모르는 회차는 nf 생략(앱이 마지막 값 유지)');
 }
 
 // ── 앱 배너 ─────────────────────────────────────────────────────────────
@@ -188,14 +184,14 @@ function mkApp(patch) {
 }
 {
   const a = mkApp();
-  a._applyHealth({}, null, { t: Date.now() - 120000, m: '설정 조회 실패: ERR-2830', n: 3 });
+  a._applyHealth({}, { mon: { nf: { t: Date.now() - 120000, m: '설정 조회 실패: ERR-2830', n: 3 } }, band: null });
   const w = (a.state.health || []).find((x) => x.k === 'nferr');
   chk(!!w && /3건/.test(w.text) && /ERR-2830/.test(w.text), '서버가 알림을 못 보냈으면 배너에 건수와 사유를 올린다', w && w.text);
   const b = mkApp();
-  b._applyHealth({}, null, { t: 0 });
-  chk(!(b.state.health || []).some((x) => x.k === 'nferr'), '해제된 기록(t:0)은 배너를 만들지 않는다');
+  b._applyHealth({}, { mon: { nf: null }, band: null });
+  chk(!(b.state.health || []).some((x) => x.k === 'nferr'), '해제된 기록(nf:null)은 배너를 만들지 않는다');
   const c = mkApp({ monMode: 'app' });
-  c._applyHealth({}, null, { t: Date.now(), m: 'x', n: 1 });
+  c._applyHealth({}, { mon: { nf: { t: Date.now(), m: 'x', n: 1 } }, band: null });
   chk(!(c.state.health || []).some((x) => x.k === 'nferr'), '앱 모드는 서버 발송 기록을 보지 않는다');
 }
 

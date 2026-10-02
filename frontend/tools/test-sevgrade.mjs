@@ -1,8 +1,7 @@
-/* 기간 지표 등급 검사 — 오프라인(Neo 불필요). npm run smoke에 포함.
-
-   상세분석 화면과 리포트가 같은 4장 카드를 각자 계산하던 때, 규칙이 두 벌로 갈려
-   같은 설비가 두 등급으로 보였다(Crest 6.06 → 화면 '심각' / 리포트 '주의').
-   지금은 둘 다 VC.sevMetrics 하나를 쓴다. 이 검사가 그 단일 소스를 고정한다. */
+/* 기간 지표 등급(VC.sevMetrics) — 오프라인(Neo 불필요) · npm run smoke 포함
+   · 상세분석·리포트가 같은 4장 카드(_sevCards) 공유 — 단일 소스 고정
+   · Crest·P95·변화율·계측 게이트 규칙, 결함 패턴 게이트 + ISO 높이 판정문(_dx)
+   · 포락선 latch·축 분리·결함주파수 대조·커토그램 상한·dwell 지속 최악 */
 globalThis.window = globalThis;
 
 const VC = (await import('../../cgi-bin/calc/calc.js')).default;
@@ -16,22 +15,27 @@ const chk = (ok, msg, extra) => {
 };
 
 const ZONES = [1.12, 2.8, 7.1];   // Class II
-// 버킷 생성 — rms/crest를 직접 지정. cnt는 버킷당 샘플 수(Crest 기준 √(2·ln N)의 모수).
+// 버킷 생성 — rms/crest 직접 지정, cnt는 버킷당 샘플 수(Crest 기준 √(2·ln N)의 모수)
 const mkRoll = (n, f, cnt = 25600, stepMs = 1000) =>
   Array.from({ length: n }, (_, i) => Object.assign({ ms: 1700000000000 + i * stepMs, cnt }, f(i)));
 
-// ── Crest: 정상 기계를 심각으로 올리지 않는다 ──────────────────────────────
+// ── Crest: 정상 기계를 심각으로 올리지 않음 ──────────────────────────────
 {
   const roll = mkRoll(120, () => ({ rms: 0.8, crest: 6.06 }));
   const m = VC.sevMetrics(roll, { zones: ZONES, fs: 25600 });
-  chk(Math.abs(m.crest.thr - Math.sqrt(2 * Math.log(25600))) < 1e-9,
-    'Crest 기준은 상수가 아니라 √(2·ln N)', m.crest.thr.toFixed(2));
+  chk(Math.abs(m.crest.thr - (Math.sqrt(2 * Math.log(25600)) + 1)) < 1e-9,
+    'Crest 기준은 상수가 아니라 √(2·ln N) + 1(잡음만일 때 버킷 최댓값의 P99.9 근사)', m.crest.thr.toFixed(2));
   chk(m.crest.grade === 1, 'Crest 6.06은 심각이 아니라 주의 — 정상 기계(3~5)를 경보로 만들지 않는다', String(m.crest.grade));
   chk(m.crest.badge === '', '15 이하는 등급어 그대로', m.crest.badge);
 }
-/* 아티팩트로 단정하려면 원시 파형 게이트가 함께 걸려야 한다 — 롤업 버킷의 Crest는
-   버킷 안에 충격이 몰린 실제 결함에서도 크다(내륜 결함 확정 채널이 1시간 버킷에서 24.8).
-   게이트 없이 큰 것을 "계측 아티팩트"로 단정하면 진짜 결함을 잡음으로 몰아낸다. */
+/* 잡음 수준 Crest는 충격성 아님 — 순수 가우시안 잡음의 버킷 P95 ≈ 4.7(N=25600) */
+{
+  const m = VC.sevMetrics(mkRoll(120, () => ({ rms: 0.8, crest: 4.75 })), { zones: ZONES, fs: 25600 });
+  chk(m.crest.grade === 0, '잡음 수준(4.75)은 충격성 아님 — 종합 판정이 "정상 운전"으로', String(m.crest.grade));
+  const lng = VC.sevMetrics(mkRoll(120, () => ({ rms: 0.8, crest: 6.06 }), 25600 * 60, 60000), { zones: ZONES, fs: 25600 });
+  chk(lng.crest.grade === 0 && lng.crest.impOk === false, '버킷이 10초보다 길면 충격성 판단 안 함 — 부하 변동이 Crest를 키움', JSON.stringify({ g: lng.crest.grade, step: lng.n.stepSec }));
+}
+/* 아티팩트 단정은 원시 파형 게이트가 함께 걸릴 때만 — 롤업 버킷 Crest는 충격이 몰린 실제 결함에서도 큼 */
 {
   const roll = mkRoll(120, () => ({ rms: 0.8, crest: 22 }));
   const noGate = VC.sevMetrics(roll, { zones: ZONES, fs: 25600 });
@@ -44,14 +48,13 @@ const mkRoll = (n, f, cnt = 25600, stepMs = 1000) =>
   const cNo = app0._sevCards(noGate, 'mm/s', null, 1)[2];
   const cGa = app0._sevCards(gated, 'mm/s', { key: 'spike', label: '스파이크' }, 1)[2];
   chk(cNo.override === true && cGa.override === true, '어느 쪽도 등급어가 아니다');
-  /* 관측 사실과 "판정에 쓰지 마라"는 다른 색이어야 한다 — 회색은 "무시해도 됨"으로 읽히는데
-     충격성 강함은 정반대(실제로 강한 충격이 있으니 보라)다. */
+  /* 관측 사실(충격성 강함)과 "판정에 쓰지 마라"(아티팩트)는 다른 색 — 회색은 "무시해도 됨"으로 읽힘 */
   chk(cNo.note === true && cGa.note === false,
     '충격성 강함만 관측 사실(note) — 아티팩트는 아니다', JSON.stringify({ noGate: cNo.note, gated: cGa.note }));
 }
 
-// ── 대표값은 최댓값이 아니라 P95 ───────────────────────────────────────────
-/* 조용한 구간에 단발 스파이크 하나가 섞여도 등급이 뒤집히면 안 된다. */
+// ── 대표값은 최댓값 아닌 P95 ───────────────────────────────────────────
+/* 조용한 구간의 단발 스파이크 하나로 등급이 뒤집히지 않음 */
 {
   const roll = mkRoll(100, (i) => ({ rms: i === 50 ? 9.0 : 0.5, crest: 4 }));
   const m = VC.sevMetrics(roll, { zones: ZONES, fs: 25600 });
@@ -60,7 +63,7 @@ const mkRoll = (n, f, cnt = 25600, stepMs = 1000) =>
     JSON.stringify({ wMax: m.n.wMax, overBC: m.n.overBC }));
 }
 
-// ── 변화율: 관측 창이 짧으면 등급을 매기지 않는다 ──────────────────────────
+// ── 변화율: 관측 창이 짧으면 등급 없음 ──────────────────────────
 {
   // 마지막 1/4이 직전 1/4의 4배 — 변화율 ×4
   const ramp = (n) => (i) => ({ rms: i < n * 0.75 ? 0.5 : 2.0, crest: 4 });
@@ -68,10 +71,16 @@ const mkRoll = (n, f, cnt = 25600, stepMs = 1000) =>
   chk(short.trend.graded === false && short.trend.grade === 0 && short.trend.badge === '',
     '관측 60분 미만은 변화율 등급 없음 — 배지도 비운다', JSON.stringify({ durMin: short.n.durMin, badge: short.trend.badge }));
 
-  // 같은 모양을 1분 버킷으로 늘려 관측 창을 넘긴다
+  // 같은 모양을 1분 버킷으로 늘려 관측 창 충족 — 등급은 없고 기준(×2) 초과만 표시
   const long = VC.sevMetrics(mkRoll(120, ramp(120), 25600, 60000), { zones: ZONES, fs: 25600 });
-  chk(long.trend.graded === true && long.trend.grade === 3,
-    '관측 창이 충분하면 변화율 등급을 매긴다', JSON.stringify({ durMin: long.n.durMin, grade: long.trend.grade }));
+  chk(long.trend.graded === false && long.trend.grade === 0 && long.trend.cmp && long.trend.over && long.trend.badge === '×2 초과',
+    '변화율은 등급 없음(예전: ×2 넘으면 주의 다음 바로 심각) — 기준 초과만 표시', JSON.stringify({ durMin: long.n.durMin, badge: long.trend.badge }));
+  // 정지 → 기동: 직전 1/4이 정지 수준이면 비교 불성립
+  const start = VC.sevMetrics(mkRoll(120, (i) => ({ rms: i < 90 ? 0.02 : 1.0, crest: 4 }), 25600, 60000), { zones: ZONES, fs: 25600 });
+  chk(!start.trend.cmp && !start.trend.over && start.trend.badge === '', '정지→기동 구간은 비교 불가(예전: ×50 "심각")', 'x' + start.n.wTrend.toFixed(0));
+  const app1 = new App({ seed: 5, equipmentCount: 1 }); app1.E = CH;
+  chk(/운전 상태 변화 포함 — 비교 불가/.test(app1._sevCards(start, 'mm/s')[3].thrText) && app1._trendTag(start.trend) === ' · 비교 불가(운전 상태 변화)',
+    '카드·리포트 행에 비교 불가 사유');
 }
 
 // ── 계측 게이트: RMS 계열은 잠정 ───────────────────────────────────────────
@@ -81,20 +90,17 @@ const mkRoll = (n, f, cnt = 25600, stepMs = 1000) =>
   chk(m.avg.badge === '잠정' && m.p95.badge === '잠정',
     '게이트 중에는 RMS 등급을 확정하지 않는다(잠정)', m.avg.badge);
   const ok = VC.sevMetrics(roll, { zones: ZONES, fs: 25600, gate: false });
-  /* RMS 카드(평균·P95)는 등급을 갖지 않는다 — 카드는 광대역·원본 단위이고 등급은
-     ISO 대역제한·속도라 기준이 다르다. 등급어를 달면 "P95 양호인데 종합 심각"이 한 화면에 남는다.
-     평균은 거기에 더해 조용한 구간이 고진동을 희석한다는 이유가 하나 더 있다. */
+  /* RMS 카드(평균·P95)는 등급 없음 — 카드는 광대역·원본 단위, 등급은 ISO 대역제한·속도라 기준이 다름
+     (평균은 조용한 구간이 고진동을 희석하는 문제도 있음) */
   chk(ok.avg.graded === false && ok.p95.graded === false,
     'RMS 카드 둘 다 등급 없음 — 등급은 앵커 축(결함 패턴 게이트 + ISO 높이)이 담당한다',
     JSON.stringify({ avg: ok.avg.badge, p95: ok.p95.badge }));
-  /* 등급이 없는 카드는 평소에 배지를 아예 비운다 — "참고" 네 개가 항상 붙으면 아무 신호도
-     아니게 되고, 배지가 보이는 순간이 예외라는 규칙이 무너진다. */
+  /* 등급 없는 카드는 평소 배지 비움 — 배지가 보이는 순간이 예외라는 규칙 유지 */
   chk(ok.avg.badge === '' && ok.p95.badge === '', '게이트가 아니면 배지 없음', JSON.stringify([ok.avg.badge, ok.p95.badge]));
 }
 
-// ── 화면과 리포트가 같은 카드를 낸다 ───────────────────────────────────────
-/* _sevCards는 두 화면이 공유하는 조립기다. 라벨·배지·기준 문구가 갈리면
-   같은 태그를 상세에서 보고 리포트를 뽑을 때 숫자와 배지가 둘 다 바뀐다. */
+// ── 화면·리포트 동일 카드 ───────────────────────────────────────
+/* _sevCards는 두 화면 공유 조립기 — 라벨·배지·기준 문구 일치 */
 {
   const app = new App({ seed: 3, equipmentCount: 1 });
   app.E = CH;
@@ -103,37 +109,35 @@ const mkRoll = (n, f, cnt = 25600, stepMs = 1000) =>
   const cards = app._sevCards(m, 'mm/s');
 
   chk(cards.length === 4, '카드는 4장', String(cards.length));
-  /* Crest는 등급을 갖지 않는다 — 기준 √(2·ln N)이 가우시안 가정이라 롤업 버킷이 길어질수록
-     실측이 기대를 계속 넘는다. 같은 데이터가 분 롤업 주의 / 시간 롤업 위험으로 갈렸다. */
+  /* Crest는 등급 없음 — 기준 √(2·ln N)이 가우시안 가정이라 롤업 버킷이 길수록 실측이 기대를 넘어 등급이 롤업 길이에 좌우 */
   chk(m.crest.graded === false && cards[2].badgeKo === '' && cards[2].arrow === '',
     'Crest는 등급어도 화살표도 없다 — 롤업 길이에 등급이 뒤집혔다', JSON.stringify({ badge: cards[2].badgeKo, arrow: cards[2].arrow }));
-  chk(/√\(2·ln N\)/.test(cards[2].foot2), 'Crest 기준의 근거를 각주로 남긴다', cards[2].foot2);
+  chk(/√\(2·ln N\) \+ 1/.test(cards[2].foot2), 'Crest 기준의 근거를 각주로 남긴다', cards[2].foot2);
   chk(/등급 없음/.test(cards[1].foot2), '최댓값은 등급 없이 사실만', cards[1].foot2);
   chk(cards[1].label === 'P95 RMS · 1초 롤업(광대역)', '두 화면의 라벨이 같다', cards[1].label);
   chk(cards.every((c) => c.thrText), '모든 카드가 기준 문구를 갖는다');
   chk(cards.every((c) => c.badgeKo === '' && c.override === true),
     '평소엔 네 장 다 배지 없음 — 행 머리말이 한 번만 말한다', cards.map((c) => c.badgeKo).join('|'));
 
-  // 등급어가 아닌 배지에는 override 표식이 붙는다(색이 등급을 주장하지 않게)
+  // 등급어가 아닌 배지엔 override 표식(색이 등급을 주장하지 않게)
   const gated = app._sevCards(VC.sevMetrics(roll, { zones: ZONES, fs: 25600, gate: true }), 'mm/s');
   chk(gated[0].override === true && gated[0].badgeKo === '잠정', '잠정 배지는 등급어가 아님을 표시한다', gated[0].badgeKo);
   chk(cards[0].override === true && cards[0].badgeKo === '' && cards[0].arrow === '',
     '평균 카드는 등급어·화살표가 없다 — 빨간 ▲는 등급 없이도 알람으로 읽힌다', cards[0].badgeKo);
 }
 
-// ── 계측 사유 목록이 감시와 상세에서 같다 ─────────────────────────────────
-/* 목록이 갈리면 같은 태그가 모니터링에서는 판정 보류, 상세분석에서는 확정 등급이 된다.
-   실제로 클리핑·DC 드리프트가 그랬다 — 감시는 막고 상세는 통과시켰다. */
+// ── 계측 사유 목록 감시·상세 동일 ─────────────────────────────────
+/* 목록이 갈리면 같은 태그가 모니터링에선 판정 보류, 상세분석에선 확정 등급이 됨 */
 {
   chk(VC.GATE_BLOCK.join(',') === 'flatline,sparse,spike,kurtx,clip,dc',
     '판정을 막는 사유는 이 여섯 가지', VC.GATE_BLOCK.join(','));
 
-  // 함수 안 사본(서버 TQL 임베드용)이 모듈 상수와 갈라지지 않았는지 — 소스에서 직접 읽는다
+  // 함수 안 사본(서버 TQL 임베드용)과 모듈 상수 일치 — 소스에서 직접 읽음
   const inFn = /var BLOCK = \[([^\]]+)\]/.exec(VC.signalQuality.toString());
   chk(!!inFn && inFn[1].replace(/['\s]/g, '') === VC.GATE_BLOCK.join(','),
     'signalQuality 안 사본이 GATE_BLOCK과 같다', inFn && inFn[1]);
 
-  // 클리핑 파형 — 꼭대기를 잘라 만든다
+  // 클리핑 파형 — 꼭대기를 잘라 생성
   const n = 8192, clipped = [];
   for (let i = 0; i < n; i++) clipped.push(Math.max(-0.6, Math.min(0.6, Math.sin(i * 0.05))));
   const q = VC.signalQuality(clipped, 2048);
@@ -142,17 +146,17 @@ const mkRoll = (n, f, cnt = 25600, stepMs = 1000) =>
 
   const r = VC.gateReason(q, null);
   chk(!!r && r.key === 'clip' && r.src === 'det', '보류 사유를 하나로 집어낸다', r && r.key);
-  // 감시가 본 사유가 있으면 그쪽이 우선 — 화면 문구는 판정이 실제로 멈춘 이유여야 한다
+  // 감시가 본 사유 우선 — 화면 문구는 판정이 실제로 멈춘 이유
   const rm = VC.gateReason(q, { key: 'dc', label: 'DC 드리프트', detail: '...' });
   chk(rm.key === 'dc' && rm.src === 'mon', '감시가 본 사유가 우선한다', rm.key);
   chk(VC.gateReason({ ok: true, issues: [], gate: false }, null) === null, '멀쩡하면 사유가 없다');
 }
 
-// ── 보류 중에는 어느 카드도 등급어를 쓰지 않는다 ───────────────────────────
+// ── 보류 중엔 어느 카드도 등급어 없음 ───────────────────────────
 {
   const app = new App({ seed: 5, equipmentCount: 1 });
   app.E = CH;
-  // 클리핑 상황을 그대로: RMS는 주의 구간, Crest는 낮게(잘려서)
+  // 클리핑 상황: RMS는 주의 구간, Crest는 낮음(잘려서)
   const roll = mkRoll(120, () => ({ rms: 2.03, crest: 1.08 }));
   const held = { key: 'clip', label: '클리핑(포화)', detail: '파형 꼭대기가 잘렸습니다' };
   const cards = app._sevCards(VC.sevMetrics(roll, { zones: ZONES, fs: 2048, gate: true }), 'mm/s', held);
@@ -166,15 +170,14 @@ const mkRoll = (n, f, cnt = 25600, stepMs = 1000) =>
     { key: 'dc', label: 'DC 드리프트' });
   chk(/과대/.test(dc[0].foot2), 'DC는 과대 방향임을 밝힌다 — 사유마다 틀리는 방향이 다르다', dc[0].foot2);
 
-  // 보류가 아니면 등급어 그대로
+  // 보류가 아니면 배지 없음
   const okc = app._sevCards(VC.sevMetrics(roll, { zones: ZONES, fs: 2048, gate: false }), 'mm/s', null);
   chk(okc.every((c) => c.badgeKo === ''), '보류가 풀리면 배지가 사라진다 — 잠정은 게이트에만 붙는다',
     okc.map((c) => c.badgeKo).join('|'));
 }
 
-// ── 카드 라벨은 실제 롤업 단위를 말한다 ───────────────────────────────────
-/* 라벨에 "1초 롤업"을 박아 두면 기간이 길어져 분·시간 롤업이 되어도 계속 1초라고 말한다.
-   임계 √(2·ln N)는 N을 따라가므로 판정은 맞고 라벨만 거짓이 된다 — 제일 찾기 어려운 종류다. */
+// ── 카드 라벨은 실제 롤업 단위 표시 ───────────────────────────────────
+/* 라벨 고정("1초 롤업")이면 분·시간 롤업에서도 1초로 표기 — 판정은 맞고 라벨만 틀림 */
 {
   const app = new App({ seed: 11, equipmentCount: 1 });
   app.E = CH;
@@ -184,9 +187,8 @@ const mkRoll = (n, f, cnt = 25600, stepMs = 1000) =>
   chk(/1시간 롤업/.test(app._sevCards(m, 'mm/s', null, 3600)[1].label), '시간 롤업이면 1시간', app._sevCards(m, 'mm/s', null, 3600)[1].label);
 }
 
-// ── Crest 배지와 각주가 서로 어긋나지 않는다 ───────────────────────────────
-/* 배지는 P95로 판단하는데 각주는 최댓값을 인쇄한다. P95만 경계 아래인 구간에서
-   "위험"만 뜨고 아티팩트 경고는 안 붙어, 화면이 스스로 모순됐다. */
+// ── Crest 배지·각주 일치 ───────────────────────────────
+/* 배지는 P95 기준, 각주는 최댓값 인쇄 — P95만 경계 아래일 때 최댓값 초과 사실은 각주가 밝힘 */
 {
   const app = new App({ seed: 13, equipmentCount: 1 });
   app.E = CH;
@@ -200,16 +202,14 @@ const mkRoll = (n, f, cnt = 25600, stepMs = 1000) =>
     '그래도 최댓값이 경계를 넘었다는 사실은 각주가 밝힌다', app._sevCards(m, 'mm/s', null, 1)[2].foot2);
 }
 
-// ── 진폭 정상 + Crest 초과는 "징후 없음"으로 끝내지 않는다 ─────────────────
-/* 등급은 진폭 축(ISO 존·베이스라인·대역)만 쓰므로 Crest가 빨개도 종합은 양호로 남는다.
-   그 자체는 의도된 것이지만, 빨간 카드 옆에 "뚜렷한 결함 징후 없음 — 정상 운전"이라고
-   쓰면 화면이 스스로 모순된다. 등급은 그대로 두고 문구만 사실을 반영한다. */
+// ── 진폭 정상 + Crest 초과는 "징후 없음"으로 끝내지 않음 ─────────────────
+/* Crest는 등급 축이 아니라 빨개도 종합 등급은 그대로 — 판정문만 사실 반영("정상 운전"과 모순 방지) */
 {
   const app = new App({ seed: 7, equipmentCount: 1 });
   app.E = CH;
   const eq = { id: 'T1:T1', table: 'T1', name: 'T1', alias: 'T1', grade: 0, zones: ZONES, unit: 'mm/s',
     rpm: 1800, fs: 25600, rms: 0.12, cls: 'II', bearing: null, rollup: [] };
-  // _dxLive가 보는 최소 상세 — 스펙트럼은 비우고 계측 게이트도 없는 상태
+  // _dxLive가 보는 최소 상세 — 스펙트럼 비움, 계측 게이트 없음
   const det = { fft: { freqs: [], mags: [], markers: [] }, spectral: { notes: [], cause: null },
     envelope: { freqs: [], mags: [], markers: [], hint: '', fault: null },
     indics: [], quality: { ok: true, issues: [], gate: false }, raw: { fs: 25600, values: [] } };
@@ -217,17 +217,13 @@ const mkRoll = (n, f, cnt = 25600, stepMs = 1000) =>
   const calm = VC.sevMetrics(mkRoll(120, () => ({ rms: 0.12, crest: 3.0 })), { zones: ZONES, fs: 25600 });
   chk(calm.crest.grade === 0, '기준 이하 Crest는 양호', String(calm.crest.grade));
 
-  /* 커버리지 — 축이 비어 있으면 "징후 없음"이라고 단정하지 않는다.
-     worstGrade는 최댓값이라 축이 늘면 등급은 올라가기만 하므로, 관측 등급은 하한이다.
-     "주의 이상"은 축 하나로도 참이지만 "양호"는 축이 다 살아있을 때만 단정할 수 있다. */
-  /* 커버리지 분모는 "필수 축" 둘(ISO 존·결함 패턴)이다. 이 둘은 학습이 필요 없어 분석만으로
-     완결되고, 베이스라인·대역은 "평소 대비"라 지속 감시의 개념이라 보강으로 뺀다 —
-     넷을 한 분모로 두면 학습 안 한 설비에서 상세분석이 미완성으로 읽힌다. */
+  /* 커버리지 — 축이 비면 "징후 없음" 단정 금지(관측 등급은 하한, "양호"는 축이 다 살아있을 때만) */
+  /* 커버리지 분모 = 필수 축 둘(ISO 존·결함 패턴, 학습 불필요), 베이스라인·대역은 "평소 대비" 보강 축 */
   chk(/판정 기준 0\/2/.test(app._dx(eq, det, calm).verdict),
     '필수 축이 비면 "이상 없음"이 아니라 커버리지를 밝힌다', app._dx(eq, det, calm).verdict);
 
-  /* 네 축이 다 살아있으면 종전 문구 그대로. 축은 전부 "앵커 시점" 값이다 —
-     ISO는 det.isoRms, 베이스라인은 앵커 파형 RMS vs 학습 한계, 대역은 det.bandAt, 패턴은 스펙트럼. */
+  /* 네 축이 다 살아있으면 기본 문구 — 축은 전부 앵커 시점 값
+     (ISO=det.isoRms, 베이스라인=앵커 파형 RMS vs 학습 한계, 대역=det.bandAt, 패턴=스펙트럼) */
   app._evidence = () => ({ top: { score: 0 }, gate: false, conf: [], block: '', confLines: '' });
   app._blMap = { 'T1:T1': { mu: 1.0, sigma: 0, k: 3 } };          // 한계 = max(1.0, 1.2) = 1.2
   app._bandBaselines = () => ({ one: { mu: 1.0, sigma: 0, k: 3 } });
@@ -244,9 +240,8 @@ const mkRoll = (n, f, cnt = 25600, stepMs = 1000) =>
   chk(_cv.n === 2 && _cv.total === 2, '필수 2축이 다 살아있으면 완전', JSON.stringify(_cv));
   chk(_cv.extra.length === 2, '학습된 보강 축은 미달이 아니라 "더해진 것"으로 센다', JSON.stringify(_cv.extra));
 
-  /* 저샘플 폴백으로 얻은 "없음"은 고정 대역의 "없음"보다 약하다 — 조기 베어링 결함은 kHz대
-     공진을 때리는 충격으로만 드러나는데 그 대역이 Nyquist 밖이다. 같은 문장으로 두면 이 설비가
-     갖지 않은 근거를 주장하게 된다. 반대로 등급이 선 뒤에는 붙이지 않는다(이미 이상을 말한다). */
+  /* 저샘플 전대역 복조의 "없음"은 고정 대역보다 약한 근거(조기 결함의 kHz 공진이 Nyquist 밖)
+     → 판정문에 한계 덧붙임, 등급이 선 뒤엔 생략 */
   const detW = Object.assign({}, detF, { demodSrc: 'wideband' });
   chk(/전대역 복조/.test(app._dx(eq, detW, calm).verdict),
     '전대역 복조였으면 "정상 운전"으로 끝내지 않는다', app._dx(eq, detW, calm).verdict);
@@ -255,9 +250,8 @@ const mkRoll = (n, f, cnt = 25600, stepMs = 1000) =>
   chk(!/전대역 복조/.test(app._dx(eq, detF, calm).verdict),
     '고정 대역이면 덧붙이지 않는다', app._dx(eq, detF, calm).verdict);
 
-  /* 패턴 축이 잡히면 진폭이 양호여도 등급이 오른다.
-     게이트를 여는 것은 격자 배수(det.sideband = targetedMatch 결과)이고 — 감시와 같은 검출기다 —
-     근거 점수(_evidence)는 원인 **이름**을 정한다. 둘을 같이 준 이유가 그것이다. */
+  /* 패턴 축이 잡히면 진폭 양호여도 등급 상승 — 게이트는 격자 배수(det.sideband = targetedMatch, 감시와 같은 검출기),
+     원인 이름은 근거 점수(_evidence) */
   app._evidence = () => ({ top: { f: '베어링 외륜(BPFO)', score: 80 }, gate: false, conf: [], block: '', confLines: '' });
   const sbOn = { r: VC.TGT_ADOPT + 1, key: 'BPFO', adopted: true };
   const detP = Object.assign({}, detF, { sideband: sbOn });
@@ -265,9 +259,7 @@ const mkRoll = (n, f, cnt = 25600, stepMs = 1000) =>
   chk(dxP.patGi === 1 && dxP.gi === 1, '진폭 양호 + 결함 패턴 → 주의', JSON.stringify({ pat: dxP.patGi, gi: dxP.gi }));
   chk(/베어링/.test(dxP.verdict) && !/징후 없음/.test(dxP.verdict),
     '원인을 지목했으면 "징후 없음"이라고 쓰지 않는다', dxP.verdict);
-  /* ISO는 **등급을 켜지 않는다** — 결함 패턴이 게이트이고 ISO는 높이만 정한다.
-     이 풀에서 ISO 단독 오탐이 69%인데 그게 등급을 그대로 끌어올리기 때문이다(게이트로 바꾸면 3%).
-     대신 진동 수준이 존을 넘은 사실은 isoOnly와 판정문이 밝힌다 — 숨기지 않는다. */
+  /* ISO는 등급을 켜지 않음(결함 패턴이 게이트, ISO는 높이만) — 존 초과 사실은 isoOnly·판정문으로 표시 */
   app._evidence = () => ({ top: { score: 0 }, gate: false, conf: [], block: '', confLines: '' });
   app._gradeState = {};
   const dxIso = app._dx(eq, Object.assign({}, detF, { isoRms: 8.0 }), calm);   // Class II D존
@@ -276,18 +268,16 @@ const mkRoll = (n, f, cnt = 25600, stepMs = 1000) =>
     JSON.stringify({ gi: dxIso.gi, isoOnly: dxIso.isoOnly }));
   chk(/베어링 결함 징후 없음/.test(dxIso.verdict) && /진동 수준/.test(dxIso.verdict),
     '판정문이 "양호"로 끝내지 않고 진동 수준을 밝힌다 — 원인이 베어링 밖일 수 있다', dxIso.verdict);
-  /* 결함 패턴이 켜지면 ISO가 높이를 정한다 — 베이스라인 축과 같은 관용구(max(1, isoGi)). */
+  /* 결함 패턴이 켜지면 ISO가 높이 결정 — max(1, isoGi) */
   app._evidence = () => ({ top: { f: '베어링 외륜(BPFO)', score: 80 }, gate: false, conf: [], block: '', confLines: '' });
   const dxBoth = app._dx(eq, Object.assign({}, detF, { isoRms: 8.0, sideband: sbOn }), calm);
   chk(dxBoth.gi === 3, '패턴 채택 + ISO D존 → 심각 (ISO가 높이를 정한다)', String(dxBoth.gi));
   const dxLow = app._dx(eq, Object.assign({}, detF, { isoRms: 0.2, sideband: sbOn }), calm);
   chk(dxLow.gi === 1, '패턴 채택 + ISO 양호 → 주의 (최소 한 칸은 올린다)', String(dxLow.gi));
-  /* 근거 점수가 높아도 격자 배수가 창 임계 아래면 게이트는 안 열린다 — 감시와 같은 기준이라야
-     카드에서 상세로 넘어갈 때 등급이 안 바뀐다. 여기가 두 화면이 갈려 있던 자리다. */
+  /* 근거 점수가 높아도 격자 배수가 창 임계 아래면 게이트 닫힘 — 감시와 같은 기준이라 카드→상세 이동 시 등급 불변 */
   const dxWeak = app._dx(eq, Object.assign({}, detF, { sideband: { r: VC.TGT_ADOPT - 0.5, key: 'BPFO' } }), calm);
   chk(dxWeak.gi === 0, '근거 점수가 높아도 격자 배수가 임계 아래면 등급을 안 올린다', JSON.stringify({ gi: dxWeak.gi }));
-  /* 상세분석의 게이트는 결함 패턴 하나다 — 베이스라인·대역이 켜져도 등급을 안 올린다.
-     같은 태그가 학습 여부로 다른 등급을 내면 일회성 분석 도구로 못 쓴다(학습 전 3% → 후 15%였다). */
+  /* 상세분석 게이트는 결함 패턴 하나 — 베이스라인·대역이 켜져도 등급 불변(학습 여부로 등급이 달라지면 일회성 분석 불가) */
   app._evidence = () => ({ top: { score: 0 }, gate: false, conf: [], block: '', confLines: '' });
   app._blMap = { 'T1:T1': { mu: 0.001, sigma: 0.0001, k: 3 } };  // 평소 대비 급증하도록 아주 낮은 기준
   const dxBl = app._dx(eq, Object.assign({}, detF, { isoRms: 0.2 }), calm);
@@ -300,10 +290,10 @@ const mkRoll = (n, f, cnt = 25600, stepMs = 1000) =>
   chk(dxIso.cov.missing.every((k) => k.indexOf('·') < 0),
     '축 이름에 가운뎃점이 없다 — 이름을 가운뎃점으로 이어 붙이므로 개수가 오독된다', JSON.stringify(dxIso.cov.missing));
 
-  app._evidence = App.prototype._evidence;   // 이후 검사에 영향이 가지 않게 되돌린다
+  app._evidence = App.prototype._evidence;   // 이후 검사 영향 방지로 원복
   app._gradeState = {};
 
-  // 스크린샷 상황: 평균 0.12 mm/s(양호)인데 Crest P95 14.7(위험)
+  // 평균 0.12 mm/s(양호)인데 Crest P95 14.7(위험)인 상황
   const spiky = VC.sevMetrics(mkRoll(120, () => ({ rms: 0.12, crest: 14.7 })), { zones: ZONES, fs: 25600 });
   const dxs = app._dx(eq, det, spiky);
   chk(spiky.avg.grade === 0 && spiky.crest.grade === 2, '진폭은 양호, Crest는 위험',
@@ -313,46 +303,42 @@ const mkRoll = (n, f, cnt = 25600, stepMs = 1000) =>
   chk(dxs.gradeKo === '양호' && dxs.color === CH.STATUS[0].color,
     '문구만 바뀌고 등급·색은 양호 그대로 — Crest는 등급 축이 아니다', dxs.gradeKo);
 
-  // 계측 게이트가 걸리면 그쪽이 우선 — 이미 계측 확인을 지시하고 있다
+  // 계측 게이트 문구 우선 — 이미 계측 확인 지시
   const gated = app._dx(eq, Object.assign({}, det, {
     quality: { ok: false, gate: true, issues: [{ key: 'clip', label: '클리핑(포화)', detail: '꼭대기가 잘림' }] } }), spiky);
   chk(gated.impulse === false && /계측 검증 필요/.test(gated.verdict),
     '계측 게이트 문구가 충격성 문구를 덮는다', gated.verdict);
 
-  // 판정이 충격성을 지적하면 권고도 따라간다 — 한 화면에서 서로 다른 지시를 내면 안 된다
+  // 판정이 충격성을 지적하면 권고도 일치 — 한 화면 내 상충 지시 방지
   chk(!/정상 운전 유지/.test('포락선에서 베어링 결함 주파수 대조 · 센서·케이블·마운팅 점검'),
     '권고 문구가 "정상 운전 유지"와 겹치지 않는다');
 }
 
-// ── 결함 패턴 축 — 학습 없이 등급을 올린다 ────────────────────────────────
-/* 진폭에 안 나타나는 초기 베어링 결함이 있다: 실측에서 베어링4 롤러결함이 ISO A존
-   0.44 mm/s인데 포락선엔 BPFO가 서 있었다. 격자 배수는 스펙트럼 하나로 나오므로
-   학습이 없어도 이 축은 돌아야 한다. */
+// ── 결함 패턴 축 — 학습 없이 등급 상승 ────────────────────────────────
+/* 진폭에 안 나타나는 초기 베어링 결함 대응 — 격자 배수는 스펙트럼 하나로 산출되어 학습 불필요 */
 {
   const T = VC.TGT_ADOPT;
   chk(VC.patternGrade(T, false, T) === 1, '창의 임계에 닿으면 주의', String(VC.patternGrade(T, false, T)));
   chk(VC.patternGrade(T - 0.01, false, T) === 0, '그 아래는 등급 없음', String(VC.patternGrade(T - 0.01, false, T)));
   chk(VC.patternGrade(95, false, T) === 1, '아무리 강해도 상한은 주의 — 급한지는 진폭 축이 말한다', String(VC.patternGrade(95, false, T)));
   chk(VC.patternGrade(95, true, T) === 0, '계측 게이트 중에는 스펙트럼을 못 믿으므로 축을 비운다', String(VC.patternGrade(95, true, T)));
-  /* 임계를 안 밝히면 판정하지 않는다 — 기본값을 두면 창이 바뀔 때 조용히 틀린 임계로 간다.
-     이 축이 감시/상세로 갈라졌던 자리라, 임계 누락이 통과하면 그 사고가 그대로 재발한다. */
+  /* 임계 미지정 시 판정 안 함 — 기본값이 있으면 창 변경 시 조용히 틀린 임계 사용 */
   chk(VC.patternGrade(95, false, undefined) === 0, '창 임계 없이는 게이트를 열지 않는다', String(VC.patternGrade(95, false, undefined)));
   chk(VC.MON_ADOPT < VC.TGT_ADOPT, '짧은 창(감시)의 임계가 더 낮다 — 점수 분포가 내려가므로',
     VC.MON_ADOPT + ' < ' + VC.TGT_ADOPT);
 
-  // worstGrade 4번째 축 — 진폭 세 축이 전부 0이어도 패턴이 등급을 만든다
+  // worstGrade 4번째 축 — 진폭 세 축이 전부 0이어도 패턴이 등급 생성
   const w = VC.worstGrade(0, 0, 0, 1);
   chk(w.gi === 1 && w.src === 'pattern', '진폭 양호 + 패턴 근거 → 주의(패턴)', JSON.stringify(w));
-  // 더 나쁜 축이 있으면 그쪽이 이긴다(상한이 주의라 진폭을 덮지 않는다)
+  // 더 나쁜 축 우선(패턴 상한이 주의라 진폭을 덮지 않음)
   const w2 = VC.worstGrade(3, 0, 0, 1);
   chk(w2.gi === 3 && w2.src === 'iso', '패턴이 진폭 판정을 끌어내리지 않는다', JSON.stringify(w2));
   chk(VC.worstGrade(0, 0, 0, 0).gi === 0, '아무 축도 안 걸리면 양호');
 }
 
 // ── 포락선 계열은 latch, 주파수 대역은 그대로 ─────────────────────────────
-/* 스폴은 메워지지 않는다 — 신호만 부하·윤활·센서 각도에 따라 묻힌다. 그래서 "지금 안 보인다"를
-   "없어졌다"로 읽으면 안 된다: 포락선 계열은 한 번 넘으면 최고 배수와 최초 시각을 기억해 유지한다.
-   주파수 대역(1× 등)은 반대다 — 부하에 따라 정상적으로 오르내리므로 "지금 큰가"가 맞는 질문이다. */
+/* 스폴은 메워지지 않음(신호만 부하·윤활·센서 각도에 묻힘) → 포락선 계열은 한 번 넘으면 최고 배수·최초 시각 유지
+   주파수 대역(1× 등)은 부하에 따라 정상적으로 오르내려 현재값 기준 */
 {
   const BL = { mu: 1.0, sigma: 0, k: 3 };          // 한계 = max(1.0, 1.2) = 1.2
   const bls = { one: BL, envBPFI: BL };
@@ -364,7 +350,7 @@ const mkRoll = (n, f, cnt = 25600, stepMs = 1000) =>
     '포락선 이탈은 최고 배수와 최초 시각을 기억한다', JSON.stringify(r1.latch));
   chk(!r1.latch.one, '주파수 대역은 기억하지 않는다', JSON.stringify(Object.keys(r1.latch)));
 
-  // 2차: 둘 다 한계 아래로 내려옴 — 포락선만 유지된다
+  // 2차: 둘 다 한계 아래 — 포락선만 유지
   const r2 = VC.bandJudge({ one: 0.5, envBPFI: 0.5 }, bls, true, null, r1.latch, t1 + 60000);
   chk(r2.on, '포락선 이력이 있으면 이탈 상태가 유지된다', String(r2.on));
   const keys = r2.over.map((o) => o.k);
@@ -375,30 +361,27 @@ const mkRoll = (n, f, cnt = 25600, stepMs = 1000) =>
     '판정은 기억한 최고 배수로 하고 최초 시각을 함께 낸다', JSON.stringify({ r: ob.r, at: ob.at, latched: ob.latched }));
   chk(/이력 ×2\.50/.test(r2.detail), '이력으로 유지되는 항목은 detail에 그 사실을 적는다', r2.detail);
 
-  // 최고 배수는 갱신되고 최초 시각은 유지된다 — "언제부터"가 흔들리면 latch의 뜻이 없다
+  // 최고 배수는 갱신, 최초 시각은 유지("언제부터" 고정)
   const r3 = VC.bandJudge({ one: 0.5, envBPFI: 6.0 }, bls, true, null, r2.latch, t1 + 120000);
   chk(Math.abs(r3.latch.envBPFI.r - 5.0) < 1e-9 && r3.latch.envBPFI.at === t1,
     '최고 배수는 갱신, 최초 시각은 유지', JSON.stringify(r3.latch.envBPFI));
 
-  // 이력을 안 넘기면(재학습 후) 깨끗하게 시작한다
+  // 이력 미전달(재학습 후)이면 초기화
   const r4 = VC.bandJudge({ one: 0.5, envBPFI: 0.5 }, bls, false, null, null, t1 + 180000);
   chk(r4.on === false && !Object.keys(r4.latch).length,
     '재학습으로 이력을 지우면 이탈이 풀린다 — latch를 푸는 유일한 자리', JSON.stringify(r4.latch));
 }
 
-// ── 커토그램 탐색 상한 — 안티에일리어싱 롤오프를 반드시 뺀다 ──────────────
-/* Nyquist 바로 아래는 안티에일리어싱 필터가 신호를 죽인 구간이라 남은 것이 수치 잡음이고,
-   첨도는 에너지가 작을수록 폭발한다. 상한이 없으면 커토그램이 늘 거기를 골라 복조 대역
-   전체가 잡음이 된다 — 실측(CWRU 12 kHz 결함 18파일)에서 전부 5813~6000 Hz를 골라
-   결함 종류 적중이 0/18이었고, Nyquist의 80%로 자르니 7/18이 됐다.
-   마운팅·에일리어싱 상한과 달리 설정이 아니라 신호처리에서 오는 상한이라 조건 없이 걸어야 한다. */
+// ── 커토그램 탐색 상한 — 안티에일리어싱 롤오프 반드시 제외 ──────────────
+/* Nyquist 바로 아래는 안티에일리어싱으로 신호가 죽은 수치 잡음 구간 — 에너지가 작을수록 첨도가 폭발해
+   상한 없으면 커토그램이 늘 거기를 선택, 설정 아닌 신호처리 상한이라 조건 없이 적용 */
 {
   chk(VC.KG_NYQ_FRAC > 0 && VC.KG_NYQ_FRAC < 1, '롤오프 상한 비율이 Nyquist 안에 있다', String(VC.KG_NYQ_FRAC));
-  // 잡음만 있는 최상단 대역에서 첨도가 폭발하는 것 자체를 재현한다 — 상한이 필요한 이유
+  // 잡음뿐인 최상단 대역의 첨도 폭발 재현 — 상한 필요성
   const FS = 12000, N = 65536;
   const sig = new Array(N);
   for (let i = 0; i < N; i++) {
-    // 2.5 kHz 공진 + 1 kHz 성분. Nyquist(6 kHz) 근처는 비워 둔다(안티에일리어싱을 흉내)
+    // 2.5 kHz 공진 + 1 kHz 성분, Nyquist(6 kHz) 근처는 비움(안티에일리어싱 흉내)
     sig[i] = Math.sin(2 * Math.PI * 2500 * i / FS) * (1 + 0.5 * Math.sin(2 * Math.PI * 30 * i / FS))
       + 0.3 * Math.sin(2 * Math.PI * 1000 * i / FS) + (i % 997 === 0 ? 3 : 0);
   }
@@ -411,15 +394,13 @@ const mkRoll = (n, f, cnt = 25600, stepMs = 1000) =>
     noCap && noCap.best ? Math.round(noCap.best.loHz) + '~' + Math.round(noCap.best.hiHz) : '없음');
 }
 
-// ── 진동 축과 베어링 축은 갈라 낸다 ───────────────────────────────────────
-/* 최댓값 하나로 뭉치면 비특이적 주파수 대역이 특이적 포락선 계열을 덮는다.
-   실측(NASA IMS Set 1, 8채널): 정상 베어링이 vh2 ×3.97로 결함 베어링(×2.35)보다 높았다 —
-   말기에 옆 베어링 결함이 축을 타고 그 센서에도 실리기 때문이다.
-   포락선 결함주파수만 보면 정상 최대 1.26 / 결함 최소 1.42로 갈린다. */
+// ── 진동 축·베어링 축 분리 ───────────────────────────────────────
+/* 최댓값 하나로 뭉치면 비특이적 주파수 대역이 특이적 포락선 계열을 덮음
+   (옆 베어링 결함이 축을 타고 정상 베어링 센서에도 실림) */
 {
   const BL = { mu: 1.0, sigma: 0, k: 3 };   // 한계 1.2
   const bls = { vh2: BL, envBPFI: BL };
-  // 진동 대역이 크고 포락선은 낮은 경우 — "진동은 커졌으나 이 베어링이 상한 근거는 아니다"
+  // 진동 대역은 크고 포락선은 낮은 경우 — "진동은 커졌으나 이 베어링이 상한 근거는 아님"
   const spread = VC.bandJudge({ vh2: 4.8, envBPFI: 1.4 }, bls, false, null, null, 1000);
   chk(Math.abs(spread.freqR - 4.0) < 1e-9 && spread.freqKey === 'vh2',
     '진동 축은 주파수 대역 최대', JSON.stringify({ r: spread.freqR, k: spread.freqKey }));
@@ -427,7 +408,7 @@ const mkRoll = (n, f, cnt = 25600, stepMs = 1000) =>
     '베어링 축은 포락선 결함주파수 최대', JSON.stringify({ r: spread.envR, k: spread.envKey }));
   chk(spread.maxR === spread.freqR, '등급은 여전히 최댓값 — 갈라 내는 것은 원인 표시다');
 
-  // 포락선만 걸린 경우 — 진동 축은 비어야 한다
+  // 포락선만 걸린 경우 — 진동 축은 0
   const envOnly = VC.bandJudge({ vh2: 0.5, envBPFI: 3.6 }, bls, false, null, null, 1000);
   chk(envOnly.freqR === 0 && envOnly.envR > 0,
     '포락선만 이탈하면 진동 축은 0', JSON.stringify({ freq: envOnly.freqR, env: envOnly.envR }));
@@ -435,23 +416,21 @@ const mkRoll = (n, f, cnt = 25600, stepMs = 1000) =>
 }
 
 // ── 결함주파수 대조 — 허용오차 하한과 FTF 제외 ────────────────────────────
-/* ① 허용오차는 스펙트럼 분해능보다 좁을 수 없다. 저주파 결함주파수는 ±1%가 빈 간격보다
-      작아 참값이 어느 빈에도 안 떨어지고, 그러면 원리적으로 매칭이 불가능하다.
-   ② FTF(케이지)는 결함 후보가 아니다. 케이지는 정상 베어링에서도 항상 돌아 0.45×가 상태와
-      무관하게 관측된다 — 실측에서 정상 채널이 초기부터 0.45× 하모닉 3개를 계속 냈다.
-      ①만 넣고 FTF를 후보로 두면 정상 베어링이 곧바로 베어링 결함으로 잡힌다. */
+/* ① 허용오차 하한 = 스펙트럼 분해능 — 저주파 결함주파수는 ±1%가 빈 간격보다 작아 원리적으로 매칭 불가
+   ② FTF(케이지)는 결함 후보 아님 — 정상 베어링에서도 0.45×가 상태와 무관하게 관측
+      (①만 넣고 FTF를 후보로 두면 정상 베어링이 곧바로 결함으로 잡힘) */
 {
   const bf = VC.bearingFreqs(2000, { n: 16, Bd: 8.407, Pd: 71.501, phi: 15.17 });
   const res = 20480 / 32768;   // 0.625 Hz
 
-  // FTF 14.78 Hz — 가장 가까운 빈은 15.0(1.5% 벗어남). 허용오차 ±1%로는 절대 못 맞춘다
+  // FTF 14.78 Hz — 가장 가까운 빈은 15.0(1.5% 벗어남), ±1%로는 매칭 불가
   const atFtf = VC.bearingMatch({ f0: 15.0, harm: 4 }, bf, 33.33, res);
   chk(atFtf.hit === null, 'FTF는 결함 후보가 아니다 — 케이지는 정상 베어링에서도 돈다',
     atFtf.hit ? atFtf.hit.key : '(hit 없음)');
   chk(!!atFtf.cage && atFtf.cage.harm === 4,
     '다만 관측 사실로는 남긴다(cage)', JSON.stringify(atFtf.cage));
 
-  // 저주파 BSF — 저속 설비에서는 ±1%가 분해능보다 작아진다. 하한이 없으면 매칭 불가
+  // 저주파 BSF — 저속 설비에선 ±1%가 분해능보다 작아 하한 없으면 매칭 불가
   const slow = VC.bearingFreqs(300, { n: 16, Bd: 8.407, Pd: 71.501, phi: 15.17 });
   const f0 = Math.round(slow.BSF / res) * res;      // 참값에 가장 가까운 빈
   chk(Math.abs(f0 - slow.BSF) / slow.BSF > 0.01,
@@ -462,46 +441,40 @@ const mkRoll = (n, f, cnt = 25600, stepMs = 1000) =>
   chk(withRes.hit && withRes.hit.key === 'BSF', '분해능 하한을 주면 검출된다',
     withRes.hit ? withRes.hit.key : '없음');
 
-  /* 구름체 결함은 자전 1회에 두 궤도를 각각 때리므로 2×BSF가 지배하는 것이 관례다
-     (CWRU 공식 결함주파수표도 구름체를 4.7135× = 2×BSF로 적는다).
-     ⚠실측 기록: CWRU 볼 결함 6파일에서 이 후보 추가의 이득은 0이었다 — 그 파일들의 지배 피크는
-     BSF 배수가 아니라 1.00×·0.40× 같은 축 관련 차수였다. 물리적으로 옳고 오탐도 없어서
-     (정상 4파일 전부 미검출 유지) 남기지만, 볼 결함을 잡아 주는 장치는 아니다. */
+  /* 구름체 결함은 자전 1회에 두 궤도를 각각 때려 2×BSF 지배 — 2×BSF도 BSF로 매칭 */
   const b2 = VC.bearingMatch({ f0: 2 * bf.BSF, harm: 3 }, bf, 33.33, res);
   chk(b2.hit && b2.hit.key === 'BSF' && b2.hit.ord === 2, '2×BSF도 BSF로 잡는다',
     b2.hit ? b2.hit.key + ' ord' + b2.hit.ord : '없음');
   chk(b2.negatives.indexOf('BSF') < 0,
     '한 배수가 맞았으면 그 계열은 음성 소견이 아니다', JSON.stringify(b2.negatives));
 
-  /* 하한이 무한정 넓히지는 않는다. 하한이 실제로 구속하는 저주파에서 확인해야 한다 —
-     BPFO처럼 ±2%가 분해능보다 큰 곳은 상대오차가 이기므로 이 검사가 무력해진다. */
+  /* 하한이 허용오차를 무한정 넓히지 않음 — 하한이 실제로 구속하는 저주파에서 확인(BPFO처럼 ±2%가 분해능보다 크면 검사 무력) */
   chk(VC.bearingMatch({ f0: slow.BSF + 2 * res, harm: 3 }, slow, 5, res).hit === null,
     '분해능 1.5배 밖은 여전히 미검출 — 하한이 허용오차를 무너뜨리지 않는다',
     'BSF ' + slow.BSF.toFixed(2) + ' + ' + (2 * res).toFixed(2) + 'Hz');
 }
 
-// ── 기간 내 "지속된 최악" — 백분위가 아니라 시간 기준 ─────────────────────
-/* P95는 기간 길이에 따라 허용 시간이 달라진다(1시간=3분, 34일=41시간) — 같은 배지가 기간마다
-   다른 물리를 뜻하게 된다. dwell은 시간 단위라 기간과 무관하게 같은 뜻을 유지한다.
-   그리고 수집이 끊긴 갭을 건너뛴 연속은 연속이 아니다 — 안 끊으면 34일 중 흩어진 3개로도 만족된다. */
+// ── 기간 내 "지속된 최악" — 백분위 아닌 시간 기준 ─────────────────────
+/* P95는 기간 길이에 따라 허용 시간이 달라짐(1시간=3분, 34일=41시간) — dwell은 시간 단위라 기간 무관
+   수집 갭을 건너뛴 연속은 연속 아님 */
 {
   const mk2 = (arr, stepMs = 60000) => arr.map((v, i) => ({ ms: 1700000000000 + i * stepMs, rms: v }));
 
-  // 단발 스파이크 하나는 지속이 아니다
+  // 단발 스파이크는 지속 아님
   const spike = VC.dwellWorst(mk2([0.5, 0.5, 9.0, 0.5, 0.5, 0.5]), 180000, 3);
   chk(spike && spike.v < 1, '단발 스파이크는 지속 최악이 되지 않는다', JSON.stringify(spike));
 
-  // 연속 3개가 높으면 그 수준이 잡힌다(창 안 최솟값 = 그 창 내내 유지된 수준)
+  // 연속 3개가 높으면 그 수준 채택(창 안 최솟값 = 창 내내 유지된 수준)
   const sust = VC.dwellWorst(mk2([0.5, 0.5, 3.0, 3.2, 3.1, 0.5]), 180000, 3);
   chk(sust && Math.abs(sust.v - 3.0) < 1e-9, '연속 유지된 수준을 잡는다', JSON.stringify(sust));
   chk(sust.durMs >= 180000, '요구한 지속 시간을 만족한다', String(sust.durMs));
 
-  // 갭을 건너뛴 연속은 연속이 아니다 — 앞 2개 + (긴 공백) + 뒤 1개
+  // 갭 건너뛴 연속은 연속 아님 — 앞 2개 + (긴 공백) + 뒤 1개
   const gapped = [{ ms: 0, rms: 5 }, { ms: 60000, rms: 5 }, { ms: 60000 * 999, rms: 5 }];
   const g2 = VC.dwellWorst(gapped, 180000, 3);
   chk(g2 === null, '수집 갭을 건너뛴 연속은 지속으로 세지 않는다', JSON.stringify(g2));
 
-  // 기간 길이가 달라도 같은 기준 — 같은 모양을 길게 늘여도 결과가 같다
+  // 기간 길이 무관 — 같은 모양을 길게 늘여도 결과 동일
   const shortP = VC.dwellWorst(mk2([0.5, 3.0, 3.0, 3.0, 0.5]), 180000, 3);
   const longP = VC.dwellWorst(mk2(Array(200).fill(0.5).concat([3.0, 3.0, 3.0]).concat(Array(200).fill(0.5))), 180000, 3);
   chk(shortP && longP && Math.abs(shortP.v - longP.v) < 1e-9,
@@ -509,7 +482,7 @@ const mkRoll = (n, f, cnt = 25600, stepMs = 1000) =>
     JSON.stringify({ short: shortP.v, long: longP.v }));
 }
 
-// ── 빈 입력에서 죽지 않는다 ────────────────────────────────────────────────
+// ── 빈 입력 처리 ────────────────────────────────────────────────
 {
   const m = VC.sevMetrics([], { zones: ZONES, fs: 0 });
   chk(m.avg.value === 0 && m.n.buckets === 0 && isFinite(m.crest.thr),

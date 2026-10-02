@@ -1,5 +1,5 @@
-// Claude 단발 completion 클라이언트 — llm-chat llm/claude.js의 요청 형태 이식(도구호출·스트리밍 제거).
-// 브라우저 직접 호출: anthropic-dangerous-direct-browser-access 헤더로 CORS 허용됨.
+// Claude 단발 completion 클라이언트(도구 호출·스트리밍 없음)
+// 브라우저 직접 호출 — anthropic-dangerous-direct-browser-access 헤더로 CORS 허용
 (function (root, factory) {
   if (typeof module === 'object' && module.exports) module.exports = factory();
   else (root.VibeLLM = root.VibeLLM || {}).claude = factory();
@@ -10,7 +10,7 @@
   var DEFAULT_MODEL = 'claude-sonnet-4-5';
 
   function complete(cfg, prompt, opts) {
-    opts = opts || {}; // signal: 호출자가 중단할 수 있게 (리포트 생성 중단)
+    opts = opts || {}; // opts.signal — 호출자 중단용(리포트 생성 중단)
     var body = JSON.stringify({
       model: cfg.model || DEFAULT_MODEL,
       max_tokens: 2048,

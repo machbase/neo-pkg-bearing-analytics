@@ -1,8 +1,6 @@
-// 무알림 병행운전 — 새 감시 규칙을 전 수명 시계열에 그대로 돌려 이벤트를 센다.
-//
-// 실기 설비가 없으므로 NASA IMS(끝까지 건전한 베어링이 같은 시험대에 함께 돎)로 대신한다.
-// 알림을 켜지 않고 이벤트만 세는 것이 "섀도 모드"이고, 여기서는 그 계산을 오프라인으로 재현한다.
-// 나오는 숫자: 자산·월당 오경보 · 결함 첫 경보 리드타임.
+// 무알림 병행운전(섀도 모드) 재현 — 감시 규칙(패턴 게이트 + judgeTick)을 NASA IMS 전 수명 시계열에 돌려 이벤트 집계
+// · 출력: 건전 베어링 자산·월당 오경보, 결함 베어링 검출·첫 경보 리드타임
+// · 라이브(Neo 필요, NASA_BEARING 테이블) · 인자로 태그(s1-c1 …) 지정 시 분할 실행
 globalThis.window = globalThis;
 const _f = globalThis.fetch;
 globalThis.fetch = (u, o) => _f(typeof u === 'string' && u.startsWith('/') ? 'http://127.0.0.1:5654' + u : u, o);
@@ -11,8 +9,7 @@ const { judgeTick } = await import('../src/app.js');
 const q = async (s) => (await (await fetch('/db/query?q=' + encodeURIComponent(s) + '&format=csv&timeformat=ms')).text()).trim().split('\n').slice(1);
 
 const GEO = { n: 16, Bd: 8.4, Pd: 71.5, phi: 15.17 }, FS = 20480, RPM = 2000, ZONES = [0.71, 1.8, 4.5];
-/* 인자로 태그를 골라 나눠 돌릴 수 있게 — 전 수명 14태그를 한 번에 돌면 조회가 수천 건이라
-   한 번에 안 끝난다. 나눠 돌리고 합계는 사람이 더한다. */
+/* 인자로 태그 분할 실행 — 전 태그 일괄은 조회가 수천 건, 분할 시 합계는 수동 합산 */
 const ONLY = process.argv.slice(2).filter(function (a) { return /^s[0-9]+-c[0-9]+$/.test(a); });
 const ALL_TAGS = [
   ['s1-c1', '정상'], ['s1-c2', '정상'], ['s1-c3', '정상'], ['s1-c4', '정상'],
@@ -21,11 +18,8 @@ const ALL_TAGS = [
   ['s3-c1', '정상'], ['s3-c2', '정상'], ['s3-c3', '외륜'], ['s3-c4', '정상'],
 ];
 const TAGS = ONLY.length ? ALL_TAGS.filter((t) => ONLY.includes(t[0])) : ALL_TAGS;
-/* 판정 시각은 **실제 수집 시각**에서 뽑는다 — NASA는 10~23분 간격이라 10분 격자로 훑으면
-   대부분이 수집 공백에 떨어져 조회만 낭비된다(감시의 되짚기가 하는 일을 여기서는 미리 한다).
-   그리고 시간 단위로 성글게 잡는다: 14태그 전 수명을 10분마다 돌면 조회가 7만 건이다.
-   베어링 열화는 며칠 단위라 시간 단위로도 에피소드 수는 같게 세어진다 —
-   다만 escHold(2회 연속)가 20분이 아니라 2시간이 되므로 단발성 경보는 덜 잡힌다(보수적). */
+/* 판정 시각은 실제 수집 시각에서 추출(NASA는 10~23분 간격이라 10분 격자면 대부분 수집 공백)
+   조회 과다 방지로 3시간 간격 — 열화는 며칠 단위라 에피소드 수는 유지, 연속 판정 간격이 길어 단발성 경보는 덜 잡힘(보수적) */
 const HOUR = 3600000;
 const CFG = { escHold: 60000, recHold: 300000, reno: {} };
 const bf = VC.bearingFreqs(RPM, GEO), fr = RPM / 60;
@@ -41,7 +35,7 @@ for (const [tag, truth] of TAGS) {
   const t0 = +st[0], t1 = +st[1], days = (t1 - t0) / 864e5;
   let prev = null, ticks = 0, alarms = 0, firstAt = null;
   const kinds = {};
-  // 수집이 실제로 있는 분 버킷만 — 그중 1시간에 하나씩
+  // 수집이 실제로 있는 분 버킷만 — 그중 3시간에 하나씩
   const snapRows = await q(`select ROLLUP('min',1,TIME) rt from NASA_BEARING where NAME='${tag}' group by rt order by rt`);
   const snaps = [];
   let lastTaken = -Infinity;
@@ -49,8 +43,7 @@ for (const [tag, truth] of TAGS) {
     const ms = +l.split(',')[0];
     if (ms - lastTaken >= 3 * HOUR) { snaps.push(ms + 60000); lastTaken = ms; }
   }
-  /* 필요한 표본 수로 잡는다 — NASA는 적재 시 타임스탬프가 1분에 퍼져 있어(20,480/60초 = 341/초)
-     0.75초 창엔 256개뿐이다. 제품 코드(monPattern)도 같은 이유로 창을 넓혀 다시 읽는다. */
+  /* 필요 표본 수 기준 — NASA는 타임스탬프가 1분에 퍼져(341/초) 짧은 창엔 표본 부족 → 제품(monPattern)처럼 창을 넓혀 재조회 */
   const need = Math.max(4096, Math.round(FS * VC.MON_REV / fr));
   for (const at of snaps) {
     let v = [];
@@ -60,7 +53,7 @@ for (const [tag, truth] of TAGS) {
       v = rows.map(Number).filter(isFinite);
       if (v.length >= need) break;
     }
-    if (v.length < 4096) continue;         // 수집 공백 — 감시도 되짚기 실패 시 이 틱을 건너뛴다
+    if (v.length < 4096) continue;         // 수집 공백 — 감시도 되짚기 실패 시 이 틱 건너뜀
     if (v.length > need) v = v.slice(v.length - need);
     ticks++;
     const env = VC.envelopeSpectrum(v, FS, eMax, band);

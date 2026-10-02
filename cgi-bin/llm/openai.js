@@ -1,5 +1,5 @@
-// OpenAI 단발 completion 클라이언트 — llm-chat llm/chatgpt.js의 요청 형태 이식.
-// 주의: OpenAI API는 브라우저 직접 호출(CORS)이 차단될 수 있음 — 실패 시 안내 메시지로 표면화.
+// OpenAI 단발 completion 클라이언트
+// ⚠ 브라우저 직접 호출(CORS)이 차단될 수 있음 — 실패 시 안내 메시지
 (function (root, factory) {
   if (typeof module === 'object' && module.exports) module.exports = factory();
   else (root.VibeLLM = root.VibeLLM || {}).openai = factory();
@@ -10,7 +10,7 @@
   var DEFAULT_MODEL = 'gpt-4o';
 
   function complete(cfg, prompt, opts) {
-    opts = opts || {}; // signal: 호출자가 중단할 수 있게 (리포트 생성 중단)
+    opts = opts || {}; // opts.signal — 호출자 중단용(리포트 생성 중단)
     var body = JSON.stringify({
       model: cfg.model || DEFAULT_MODEL,
       messages: [{ role: 'user', content: prompt }],

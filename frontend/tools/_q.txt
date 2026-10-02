@@ -1,1 +1,0 @@
-select NAME, TIME from NEO_VIBE_BAND where NAME in ( + esc(k) + ) and TIME between to_date('2026-07-28 17:10:00 000') and to_date('2026-07-29 17:10:00 000') order by TIME

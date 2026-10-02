@@ -1,4 +1,4 @@
-// Gemini 단발 completion 클라이언트 — llm-chat llm/gemini.js의 요청 형태 이식.
+// Gemini 단발 completion 클라이언트
 (function (root, factory) {
   if (typeof module === 'object' && module.exports) module.exports = factory();
   else (root.VibeLLM = root.VibeLLM || {}).gemini = factory();
@@ -9,7 +9,7 @@
   var DEFAULT_MODEL = 'gemini-2.5-flash';
 
   function complete(cfg, prompt, opts) {
-    opts = opts || {}; // signal: 호출자가 중단할 수 있게 (리포트 생성 중단)
+    opts = opts || {}; // opts.signal — 호출자 중단용(리포트 생성 중단)
     var model = cfg.model || DEFAULT_MODEL;
     var body = JSON.stringify({ contents: [{ role: 'user', parts: [{ text: prompt }] }] });
     return fetch(BASE_URL + '/v1beta/models/' + encodeURIComponent(model) + ':generateContent?key=' + encodeURIComponent(cfg.apiKey || ''), {
