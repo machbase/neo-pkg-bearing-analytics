@@ -121,9 +121,12 @@ const day = (y, m, d) => new Date(y, m - 1, d).getTime();
 }
 { // 하루 경계가 아닌 구간(프리셋·이벤트 클릭)은 버튼에 시각까지 표시
   const dayPick = render(html`<${DateRange} from="2026-08-10T00:00" to="2026-08-12T23:59" showTime=${false} />`);
-  chk(dayPick.includes('08-10 ~ 08-12'), '달력으로 고른 구간은 날짜만 적는다', (dayPick.match(/<span>[^<]*~[^<]*<\/span>/) || [])[0]);
+  chk(dayPick.includes('<span>2026-08-10 ~ 2026-08-12</span>'), '달력으로 고른 구간은 날짜만 적는다', (dayPick.match(/<span>[^<]*~[^<]*<\/span>/) || [])[0]);
   const evPick = render(html`<${DateRange} from="2026-08-13T08:30" to="2026-08-13T09:30" showTime=${false} />`);
-  chk(evPick.includes('08-13 08:30 ~ 08-13 09:30'), '하루 안의 창은 시각까지 적는다', (evPick.match(/<span>[^<]*~[^<]*<\/span>/) || [])[0]);
+  chk(evPick.includes('<span>2026-08-13 08:30 ~ 2026-08-13 09:30</span>'), '하루 안의 창은 시각까지 적는다', (evPick.match(/<span>[^<]*~[^<]*<\/span>/) || [])[0]);
+  const Y = new Date().getFullYear();
+  const nowPick = render(html`<${DateRange} from=${Y + '-01-02T00:00'} to=${Y + '-01-03T23:59'} showTime=${false} />`);
+  chk(nowPick.includes('<span>' + Y + '-01-02 ~ ' + Y + '-01-03</span>'), '올해 구간도 연도를 적는다', (nowPick.match(/<span>[^<]*~[^<]*<\/span>/) || [])[0]);
 }
 { // 상세분석·리포트 달력은 시각 입력 없음
   const a = mk();

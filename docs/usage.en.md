@@ -5,7 +5,7 @@ weight: 30
 
 # Usage
 
-[한국어](./usage.kr.md) | **English**
+[English](./usage.en.md) | [한국어](./usage.kr.md) | [日本語](./usage.ja.md)
 
 Once setup is done, you work across three main tabs — Monitoring · Detail Analysis · Report. The app's screens are in Korean; Korean labels are given in parentheses where they help.
 
@@ -32,7 +32,7 @@ Each selected tag gets one card. Click a card to open **Detail Analysis** for th
 | :--- | :--- |
 | Alias · tag name | With two or more data sources, the table name follows the tag name |
 | Grade badge | Good · Warning · Danger · Critical. The suffix `N시간째` is the time since confirmation, `1회차`·`2회차` is an unconfirmed candidate cycle, and `복귀 N회차` means recovery is being confirmed |
-| Large number | The ISO vibration value that sets the grade height (10–1000 Hz band RMS, marked `10~1000 Hz`). Acceleration and displacement sensors show the same band in their original unit. Until it is available, the window RMS is shown with its measurement band |
+| Large number | The ISO vibration value that sets the grade height (10–1000 Hz band RMS, marked `10~1000 Hz` next to the unit). Acceleration and displacement sensors show the same band in their original unit. Until it is available, the window RMS is shown with its measurement band |
 | Hover on the number | Whether a fault pattern was detected (grid score), multiples of the baseline and band limits, and the gap between the ISO and full-band values |
 | Sparkline | Vibration over the last minute |
 | Bottom line | Last-seen time · class |
@@ -68,7 +68,7 @@ With two or more data sources, a **table filter** (테이블 필터) appears nex
 
 If monitoring is not running properly, a warning appears at the very top of the screen — the timer stopped, it is running but has nothing to evaluate, or app-side evaluation stalled. Most of these offer a **Re-register** button that fixes them on the spot.
 
-This exists so that "no events" can be told apart: equipment is fine, versus monitoring is dead. Each message and its fix is listed in [Alarms & events › Checking that monitoring is alive](./alarms.en.md#checking-that-monitoring-is-alive).
+This exists so you can tell whether "no events" means the equipment is fine or monitoring is dead. Each message and its fix is listed in [Alarms & events › Checking that monitoring is alive](./alarms.en.md#checking-that-monitoring-is-alive).
 
 ### Event list
 
@@ -110,7 +110,7 @@ Detail analysis is a **snapshot** — it is frozen at the data as of when you en
 - Use the dropdown at the top to switch the tag being analyzed.
 - Choose the query period from presets — 1 hour · 6 hours · 24 hours · All — or set it in the calendar next to them. Presets are anchored to that tag's latest data.
 - If the tag has less data than a preset's length, that preset is disabled. Clicking it shows "not enough data"; use **All** instead.
-- A custom range can be set down to the minute. Switching from a preset pre-fills the range that preset covered.
+- A custom range is set in whole days (start date 00:00 to end date 23:59). Switching from a preset pre-selects the dates of the range that preset covered.
 
 Chart time axes span the whole selected period. Gaps with no data are left empty, so you can see exactly where data actually exists.
 
@@ -124,7 +124,7 @@ A single grey **DC component** (DC 성분) line without the warning box is not a
 
 ### Severity assessment
 
-The top card shows the overall grade and a zone-boundary bar, with the **judgment time** next to the grade ("worst of N points in the period", and so on). Without RPM or a bearing, "criteria n/N (… not applied)" is shown as well.
+The top card shows the overall grade and a zone-boundary bar, with the **judgment time** next to the grade ("worst of 8 points in the period", and so on). Without RPM or a bearing, "criteria n/N (… not applied)" is shown as well.
 
 **That grade is not set by the vibration magnitude (ISO) shown next to it.** Exactly one axis raises it: the **fault pattern** — whether evidence stands at a bearing defect frequency (BPFO / BPFI / BSF / FTF) in the [envelope](./glossary.en.md#envelope-demodulation). Only then does the grade rise, and the ISO zone decides **how high** it rises.
 
@@ -144,7 +144,7 @@ The same vibration signal reveals different faults depending on whether you view
 | Velocity `mm/s` | Mid band — the basis for ISO grading |
 | Displacement `μm` | Low frequency — imbalance and misalignment |
 
-If you suspect a bearing fault but the velocity waveform shows little, switch to acceleration. The conversion affects only the waveform, FFT, envelope, and spectrogram display; trends and grading are unaffected.
+If you suspect a bearing fault but the velocity waveform shows little, switch to acceleration. The conversion applies to the waveform, FFT, spectrogram, cepstrum, and diagnostic indicator (time-domain) display, and the unit currently selected is also used when you generate a report. The envelope is a judgment input, so it is always computed in the sensor's original unit; trends and grading are unaffected.
 
 ### Kurtosis saturation warning
 
@@ -194,7 +194,7 @@ Where you turn analysis into a document.
 
 **One report file is created for each selected tag.** The file name looks like `tagname_timestamp.html`.
 
-Generation runs in four steps — query data → compute indicators → generate opinion → save — with progress shown. If it takes too long, **Cancel generation** stops it. Finished reports are saved under the signed-in account's folder (`<account>/vibration-reports/`).
+Generation runs in four steps — query data → compute indicators → generate opinion → save — with progress shown. If it takes too long, **Cancel generation** stops it. Finished reports are saved under the signed-in account's folder (`<account>/vibration-reports/`, with the account name in lowercase).
 
 ### Report structure
 
@@ -207,13 +207,13 @@ Generation runs in four steps — query data → compute indicators → generate
 | In-depth analysis | LLM opinion (when connected) |
 | Conclusions and recommendations | Verdict and actions |
 
-A switch at the top of the report toggles between **Summary** and **Full**. Summary is built for a 30-second read; Full expands every chart and all evidence. Printing includes the full content.
+The **Summary** (요약) · **Full** (전체) buttons at the top of the report switch the view (the **Full view** (전체 보기) link inside the summary box does the same). Summary is built for a 30-second read; Full expands every chart and all evidence. Printing includes the full content.
 
 > **Print with the print button at the top of the report** (Print · Save as PDF). A report opened from the app sits in a frame isolated from the console (so the report file cannot reach your login), and the browser's Ctrl+P prints only that outer frame.
 
 Saved reports are **self-contained HTML** with no external references, and their charts are live rather than baked images — wheel zoom, drag, and tooltips work, and they redraw to match the theme. Handing over the single file is enough for someone else to explore it the same way.
 
-Each report carries a **ruleset fingerprint**. If the fingerprint matches but the numbers differ, the data changed; if the fingerprint differs, the evaluation criteria changed.
+Each report carries a **judgment fingerprint**, computed from the judgment engine's rules. If the fingerprint and the Thresholds cell match but the numbers differ, the data changed; if the fingerprint differs, the package (judgment engine) changed.
 
 ### Archive
 

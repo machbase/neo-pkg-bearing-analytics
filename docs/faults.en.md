@@ -5,7 +5,7 @@ weight: 53
 
 # Fault types and signatures
 
-[한국어](./faults.kr.md) | **English**
+[English](./faults.en.md) | [한국어](./faults.kr.md) | [日本語](./faults.ja.md)
 
 This document sets out **which faults the app distinguishes, on what evidence**, and **what each distinction requires**.
 
@@ -28,10 +28,10 @@ A one-off analysis has no "normal" to compare against. Detail analysis and repor
 
 | | Asks | Series | Action |
 | :--- | :--- | :--- | :--- |
-| **Vibration axis** | Has vibration at this point risen | sub · 1× · fault band · high · 1–2 · 2–4 · 4–8 · 8 kHz+ | Balancing · alignment · fastening (hours) |
-| **Bearing axis** | Has this bearing degraded | envelope BPFO · BPFI · BSF | Parts procurement · teardown (weeks) |
+| **Vibration axis** | Has vibration at this point risen | sub-synchronous · 1× band · fault band · high · 1–2 · 2–4 · 4–8 · 8 kHz+ | Balancing · alignment · fastening (hours) |
+| **Bearing axis** | Has this bearing degraded | envelope periodicity · BPFO · BPFI · BSF | Parts procurement · teardown (weeks) |
 
-**They must not be collapsed into one.** When a neighbouring bearing's damage travels through the shaft, the sensor on a *healthy* bearing can read higher in the high-frequency bands than the one on the *faulty* bearing. "Vibration is high" is true; "this bearing is damaged" is not. Looking at the envelope fault frequencies separates the two.
+**They must not be collapsed into one.** When a neighboring bearing's damage travels through the shaft, the sensor on a *healthy* bearing can read higher in the high-frequency bands than the one on the *faulty* bearing. "Vibration is high" is true; "this bearing is damaged" is not. Looking at the envelope fault frequencies separates the two.
 
 ---
 
@@ -45,7 +45,7 @@ Eccentric mass on the rotating assembly.
 - **Action** — field dynamic balancing
 
 ### Misalignment
-Coupled shafts whose centres do not line up.
+Coupled shafts whose centers do not line up.
 
 - **Signature** — 2× component prominent, axial vibration present
 - **To confirm** — same as imbalance (phase + axial)
@@ -76,9 +76,9 @@ Each impact against a defect rings the housing's **multi-kHz resonance**. The ra
 ### The demodulation band is fixed at 1–5 kHz
 Picking the most impulsive band automatically (a kurtogram) is not used for judgment. That method latches easily onto signals that are not faults — filter noise at the top of the range, electrical components from inverters — and tends to avoid the band precisely when a fault is clear, so detection dropped sharply in verification on public data.
 
-The demodulation band is therefore **fixed at 1–5 kHz**. The kurtogram is still computed and shown in detail analysis as **per-band impulsiveness** — which band is most impulsive is diagnostic information in itself. It is **not used for judgment**, however.
+For the fault pattern that sets the grade and the envelope in detail analysis, the demodulation band is therefore **fixed at 1–5 kHz**. (The envelope trend accumulated by band extraction uses the highest octave below the mounting limit and the sampling limit.) The kurtogram is still computed and shown in detail analysis as **per-band impulsiveness** — which band is most impulsive is diagnostic information in itself. It is **not used for judgment**, however.
 
-When the sampling rate is too low for 1–5 kHz to be valid (the highest measurable frequency cannot reach 5 kHz), demodulation falls back to the **full band**. The evidence is weak then, and early bearing faults are not detected.
+When the sampling rate is too low for 1–5 kHz to be valid (5 kHz does not fall within 95% of the highest measurable frequency — a sample rate below about 10.5 kHz), demodulation falls back to the **full band**. The evidence is weak then, and early bearing faults are not detected.
 
 > **Whether this band fits large machines is unknown.** The verification data contains no large machines.
 > What actually tends to sit in 1–5 kHz is the **accelerometer mounting resonance** (a few kHz depending
@@ -125,7 +125,7 @@ The shaft riding on the oil film in a journal bearing.
 
 ### Electrical
 - **Signature** — components tied to line frequency (120 Hz on a 60 Hz grid) that do not move when speed changes
-- **To confirm** — check whether it disappears when power is cut
+- **To confirm** — check whether it disappears when power is cut (a stop test)
 
 ---
 
@@ -151,8 +151,8 @@ A summary of verification on 383 cases from four public datasets (CWRU, MFPT, Pa
 | | Result |
 | :--- | :--- |
 | False positives on healthy | 3 of 100 (3%) |
-| Faults detected | 188 of 283 (66%) |
-| Faults located correctly, out of all faults | 157 of 283 (about 55%) |
+| Faults detected | 183 of 283 (65%) |
+| Faults located correctly, out of all faults | 153 of 283 (about 54%) |
 
 Counting only detected faults makes site accuracy look much higher, but that figure improves as judgment gets more conservative, so it must not be read on its own. What actually reaches the user is **a correct site for a little over one fault in two**. The full tables are in [What this tool does and does not do](./scope.en.md).
 
@@ -171,7 +171,7 @@ Rolling-element faults are detected but **the site is not asserted**. In verific
 Measuring "how long before failure did it first alarm" on run-to-failure data shows that **the outer race buys planning time; the inner race is closer to a notice that it is about to stop.** The figures are in [What this tool does and does not do › Time-axis performance](./scope.en.md#time-axis-performance--run-to-failure-tests).
 
 ### When the type is left undecided
-If the evidence for the top two fault frequencies is close, the app **lists both candidates and says "insufficient separation"**.
+If the envelope fault-frequency series accumulated by band extraction (BPFO · BPFI · BSF) rise together and the top two are close, the app **lists both candidates and says "insufficient separation"**. The fault pattern that sets the grade picks the single strongest candidate.
 
 **Either way the bearing gets replaced, so the maintenance plan stands on detection alone.** The type matters for **root-cause analysis**: an inner race defect points to overload or misalignment, an outer race defect to the housing or current passage — which is what changes the prevention measure.
 

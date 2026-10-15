@@ -1,9 +1,10 @@
 'use strict';
 
-/* 업데이트가 남긴 고아 파일 정리 — scripts/obsolete.json의 remove 경로 삭제(목록 누적, 삭제는 멱등).
-   레포에서 파일을 지우면 그 경로를 목록에 추가.
-   install.js가 설치·업데이트 때 호출. 단독 실행: machbase-neo jsh scripts/cleanup.js
-   거부 경로: 빈 경로·절대경로·'..'·패키지 밖·보호 경로와 그 상위 폴더. 실패해도 throw 안 함 */
+/* 업데이트가 남긴 고아 파일 정리 — scripts/obsolete.json의 remove 경로 삭제(목록 누적, 삭제는 멱등)
+   · 레포에서 파일을 지우면 그 경로를 목록에 추가
+   · install.js가 설치·업데이트 때 호출, 단독 실행: machbase-neo jsh scripts/cleanup.js
+   · 거부 경로: 빈 경로·절대경로·'..'·패키지 밖·보호 경로와 그 상위 폴더
+   · 실패해도 throw 안 함 */
 
 var path = require('path');
 var fs = require('fs');

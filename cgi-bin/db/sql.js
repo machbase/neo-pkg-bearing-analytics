@@ -103,9 +103,9 @@
     return 'SELECT count(*) FROM M$SYS_TABLES st WHERE st.FLAG = 0 AND st.TYPE = 6';
   }
 
-  /* TAG table의 앞 세 컬럼 이름 — TAG 컬럼은 역할 키워드로 정해져 이름이 자유.
-     앱 조회는 NAME·TIME·VALUE 고정이라 다른 이름의 table을 선택 목록에서 거르는 용도.
-     ⚠ 명시적 JOIN 3단은 'TK_ID is not resolved' → 콤마 조인 */
+  /* TAG table의 앞 세 컬럼 이름 — TAG 컬럼은 역할 키워드로 정해져 이름이 자유
+     · 앱 조회는 NAME·TIME·VALUE 고정이라 다른 이름의 table을 선택 목록에서 거르는 용도
+     · ⚠ 명시적 JOIN 3단은 'TK_ID is not resolved' → 콤마 조인 */
   function tagSchemas() {
     return 'SELECT st.NAME TBL, c.NAME COL FROM M$SYS_TABLES st, M$SYS_COLUMNS c'
       + ' WHERE st.ID = c.TABLE_ID'
@@ -224,6 +224,47 @@
       .concat(['BASELINE', 'MONSTATE'].map(function (t) {
         return 'GRANT SELECT, INSERT, UPDATE, DELETE ON ' + _shared + t + ' TO ' + u;
       }));
+  }
+  /* 한 계정 권한 회수 — 부여의 역순(공용 표 → CREATE → CONNECT)
+     없는 권한 회수도 오류 없음(재실행 무해), 표 회수 시 딸린 _META 권한도 함께 사라짐 */
+  function revokeStatements(user) {
+    var u = ident(user);
+    if (!u) return [];
+    var d = _shared ? _shared.split('.')[0] : '';
+    if (!d) return [];
+    return ['MONSTATE', 'BASELINE'].map(function (t) {
+      return 'REVOKE SELECT, INSERT, UPDATE, DELETE ON ' + _shared + t + ' FROM ' + u;
+    })
+      .concat(['BAND', 'EVENTS'].map(function (t) {
+        return 'REVOKE SELECT, INSERT, DELETE ON ' + _shared + t + ' FROM ' + u;
+      }))
+      .concat(['REVOKE CREATE ON DATABASE ' + d + ' FROM ' + u,
+        'REVOKE CONNECT ON DATABASE ' + d + ' FROM ' + u]);
+  }
+  // 전용 DB 권한 기록 — 계정별 상태 판정용(TABLE_NAME NULL = DB 범위)
+  function storeAccess() {
+    var d = _shared ? _shared.split('.')[0] : '';
+    return "SELECT USER_NAME, TABLE_NAME FROM M$SYS_USER_ACCESS WHERE DB_NAME = '" + esc(d) + "'";
+  }
+  // 이 패키지 타이머 — 계정별 개수(회수 전 경고용)
+  function pkgTimers() { return "SELECT USER_NAME, NAME FROM _NEO_TIMER_DEF WHERE NAME LIKE 'NEO_BEARING_%'"; }
+  /* 계정별 권한 상태 — 대상 5곳(DB 범위·공용 표 4) 중 기록 있는 곳 수 + 패키지 타이머 수
+     PRIV는 비트 조합이라 숫자 해석 대신 기록 유무로 판정 → { 계정: { n, total, timers } } */
+  function accessSummary(accRows, timerRows) {
+    var need = { '': 1, EVENTS: 1, BAND: 1, BASELINE: 1, MONSTATE: 1 }, out = {};
+    function at(u) { return out[u] || (out[u] = { n: 0, total: 5, timers: 0, seen: {} }); }
+    (accRows || []).forEach(function (r) {
+      var u = String(r[0] || '').toUpperCase(), t = r[1] == null ? '' : String(r[1]).toUpperCase(), o;
+      if (!u || !need[t]) return;
+      o = at(u);
+      if (!o.seen[t]) { o.seen[t] = 1; o.n++; }
+    });
+    (timerRows || []).forEach(function (r) {
+      var u = String(r[0] || '').toUpperCase();
+      if (u) at(u).timers++;
+    });
+    Object.keys(out).forEach(function (u) { delete out[u].seen; });
+    return out;
   }
   /* 전용 DB 사용 가능 여부 — CAN_USE는 계정별로 걸러져 0건이면 DB 없음 또는 CONNECT 권한 없음(구분 불가) */
   function dbUsable(db) {
@@ -368,6 +409,26 @@
     return 'select count(*) from ' + appTable('BAND') + ' where TIME between ' + sqlDate(fromMs) + ' and '
       + sqlDate(toMs) + andMine('NAME');
   }
+  /* 공용 TAG 표의 부속 객체(V$_STAT·_meta) — 표와 같은 접두
+     · V$_STAT = 이름별 요약이라 행 수와 무관하게 즉시 응답, 삭제 반영은 수 초 늦음 */
+  function appSub(table, build) {
+    var t = appTable(table), i = t.lastIndexOf('.');
+    return t.slice(0, i + 1) + build(t.slice(i + 1));
+  }
+  function statOf(table) { return appSub(table, function (n) { return 'V$' + n + '_STAT'; }); }
+  // 내 현황 한 줄 — [이름 수, 행 수, 최초 시각, 최종 시각]
+  function statSummary(table) {
+    return 'select count(*), sum(ROW_COUNT), min(MIN_TIME), max(MAX_TIME) from ' + statOf(table)
+      + ' where ROW_COUNT > 0' + andMine('NAME');
+  }
+  // 내 이름별 행 수
+  function statNameCounts(table) {
+    return 'select NAME, ROW_COUNT from ' + statOf(table) + ' where ROW_COUNT > 0' + andMine('NAME');
+  }
+  // 내 이름 목록 — 데이터 없는 이름 포함(삭제 대상 열거엔 무해)
+  function metaNames(table) {
+    return 'select NAME from ' + appSub(table, function (n) { return '_' + n.toLowerCase() + '_meta'; }) + whereMine('NAME');
+  }
 
   function kvKey(table, key) { return sharedKv(table) ? ukey(key) : String(key); }
   function kvSelect(table) {
@@ -381,7 +442,7 @@
   return {
     esc: esc, ident: ident, sqlDate: sqlDate, sessionUser: sessionUser, SHARED_OWNER: SHARED_OWNER,
     setScope: setScope, scope: scope, sharedScope: sharedScope, appTable: appTable,
-    userList: userList, grantStatements: grantStatements, isAppOwned: isAppOwned, appTablesPresent: appTablesPresent,
+    userList: userList, grantStatements: grantStatements, revokeStatements: revokeStatements, storeAccess: storeAccess, pkgTimers: pkgTimers, accessSummary: accessSummary, isAppOwned: isAppOwned, appTablesPresent: appTablesPresent,
     userPrefix: userPrefix, ukey: ukey, unkey: unkey,
     sharedCreateTables: sharedCreateTables, configCreateTable: configCreateTable,
     setOwners: setOwners, ownerOf: ownerOf, dataTable: dataTable, bandRollups: bandRollups, dbUsable: dbUsable,
@@ -396,6 +457,7 @@
     eventsLegacySelect: eventsLegacySelect, tableTypeOf: tableTypeOf, dropTable: dropTable, colLength: colLength,
     kvSelect: kvSelect, kvExists: kvExists, kvInsert: kvInsert, kvUpdate: kvUpdate, kvDelete: kvDelete,
     usageCount: usageCount, eventsSpan: eventsSpan, bandSpan: bandSpan, bandKeyCount: bandKeyCount, bandNameCounts: bandNameCounts, eventNameCounts: eventNameCounts,
-    eventsCountRange: eventsCountRange, bandCountRange: bandCountRange
+    eventsCountRange: eventsCountRange, bandCountRange: bandCountRange,
+    statSummary: statSummary, statNameCounts: statNameCounts, metaNames: metaNames
   };
 });

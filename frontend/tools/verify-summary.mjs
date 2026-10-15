@@ -1,28 +1,21 @@
 // 요약 모드 리포트 렌더 검증 — 라이브 데이터 + 실제 설비 설정으로 _genOne과 같은 data를 조립해 문구·구조·블록 순서 검사
 // · data 조립은 app.js _reportMeta()/_reportBuild() 단일 소스(앱 필드 추가 시 자동 반영)
-// · 라이브(Neo 127.0.0.1:5654 + BEARING 테이블 데이터 필요) · npm run verify:live 포함
-//   node tools/verify-summary.mjs [TAG]
-globalThis.window = globalThis;
-const NEO = 'http://127.0.0.1:5654'; const _f = globalThis.fetch;
-globalThis.fetch = (u, o) => _f(typeof u === 'string' && u.startsWith('/') ? NEO + u : u, o);
-
-try { await _f(NEO + '/db/query?q=' + encodeURIComponent('SELECT 1 as X'), { signal: AbortSignal.timeout(3000) }); }
-catch (e) { console.error('SKIP — Neo(' + NEO + ') 미기동. 서버를 띄운 뒤 다시 실행하세요.'); process.exit(2); }
+// · 라이브(Neo + 로그인 계정의 BEARING 테이블 데이터 필요) · npm run verify:live 포함
+//   NEO_USER=… NEO_PASSWORD=… node tools/verify-summary.mjs [테이블]
+await import('./_liveauth.mjs');   // 로그인(NEO_USER·NEO_PASSWORD) — 없으면 건너뜀
 
 const E = (await import('../../cgi-bin/chart/chart.js')).default;
 const VC = (await import('../../cgi-bin/calc/calc.js')).default;
 const Report = (await import('../../cgi-bin/report/report.js')).default;
 const L = await import('../src/data/live.js');
-const { App } = await import('../src/app.js');
-const { readFileSync } = await import('node:fs');
+const { App, normCfg } = await import('../src/app.js');
 
-// ⚠ 설비 설정(베어링 품번·Class·RPM·단위) 필수 — 빈 cfg면 전부 폴백이라 실제와 다른 것을 검증
-const CFG = (() => {
-  try { return JSON.parse(readFileSync(new URL('../../cgi-bin/config/equipment.json', import.meta.url), 'utf8')); }
-  catch (e) { console.warn('[harness] equipment.json 로드 실패 — 폴백으로 진행:', e.message); return {}; }
-})();
+// 설비 설정 = 로그인 계정의 저장 설정(앱 부팅과 같은 경로) — 빈 cfg면 전부 폴백이라 실제 앱과 다른 것을 검증
+const CFG = normCfg(await L.loadConfig());
+const TBL = process.argv[2] || 'BEARING';
+if (!(await L.listTagTables()).includes(TBL)) { console.log('건너뜀 — 이 계정에 ' + TBL + ' 테이블 없음(테이블 이름을 인자로)'); process.exit(0); }
 
-const data0 = await L.buildLiveData(Object.assign({}, E), [process.argv[2] || 'BEARING'], CFG);
+const data0 = await L.buildLiveData(Object.assign({}, E), [TBL], CFG);
 const app = new App({}); app.E = Object.assign({}, E); app.live = true; app.data = data0;
 const eq = data0.equipment[0]; app.state.selTag = eq.id;
 const anchor = app._detailAnchorMs(eq), vu = app.state.viewUnit || null;
@@ -72,7 +65,7 @@ const checks = [
   ['[1] 헤드라인(판정 or 보류)', /계측 검증 필요 — 결함 진단 보류|이상 진동|주의 관찰|정상 범위/],
   ['[1] 조치 카드 1장', /계측 검증 후 재측정 — 기계 상태 미판정|계속 운전|다음 정기 점검 시 확인|계획 정지 시 점검|긴급 점검/],
   ['[1] 조치 근거는 값·대역(등급 순환 금지)', /근거 · .*(Crest P95|10–1000 Hz)/],
-  ['[2] 판정 기준값 못박기', /판정에 쓰는 값은 ISO 대역제한 속도 RMS/],
+  ['[2] 판정 기준 — 패턴이 켜고 ISO(대역제한)가 높이', /등급은 결함 패턴이 켜질 때만 오르고, 그 높이를 ISO 존 ?\(10–1000 Hz 대역제한/],
   ['[2] 감시는 참고로 격하', /알람 기준|감시 참고|규격 판정 아님/],
   ['[3] 지금 할 일', /지금 할 일/],
   ['[4] 잠정 후보', /잠정 후보/],
@@ -105,7 +98,7 @@ let unbal = 0;
 });
 console.log('  태그 균형:', unbal ? '✗ ' + unbal + '종' : '✓');
 
-const ORDER = ['판정에 쓰는 값은', '지금 할 일', '잠정 후보', '이 측정으론 볼 수 없음', '확인했으나 미검출', '아직 설명 못 한 성분'];
+const ORDER = ['등급은 결함 패턴이 켜질 때만','지금 할 일', '잠정 후보', '이 측정으론 볼 수 없음', '확인했으나 미검출', '아직 설명 못 한 성분'];
 const pos = ORDER.map(k => txt.indexOf(k));
 const ord = pos.map((v, i) => (v < 0 ? ORDER[i] + '(없음)' : (i && v < pos[i - 1] ? ORDER[i] + '(순서역전)' : null))).filter(Boolean);
 console.log('\n요약 블록 순서:', ord.length ? '✗ ' + ord.join(', ') : '✓ 사양 순서대로');

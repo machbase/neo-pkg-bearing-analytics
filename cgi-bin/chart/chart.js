@@ -27,8 +27,8 @@
   function z2(n) { return n < 10 ? '0' + n : '' + n; }
 
   /* ---------------- 표시 시간대 ----------------
-     계산·조회는 전부 에포크 ms, 표시·날짜 경계(하루 시작·달력)만 이 시간대로 변환
-     ''이면 브라우저 시간 */
+     · 계산·조회는 전부 에포크 ms, 표시·날짜 경계(하루 시작·달력)만 이 시간대로 변환
+     · ''이면 브라우저 시간 */
   var _tz = '', _tzFmt = {};
   var WD_IDX = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 };
   function zoneOk(z) { try { new Intl.DateTimeFormat('en-US', { timeZone: z }); return true; } catch (e) { return false; } }

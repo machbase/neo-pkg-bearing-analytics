@@ -213,6 +213,10 @@ const run = (vals) => Band.bandEnergy(vals, FS, FR, FS / 2).vals;
   app._activeEqs = () => [{ id: 'T:A', table: 'T', name: 'A', fs: 25600, rpm: 1500, meta: {} }];
   const bt = app._bandTags().tags[0];
   chk(bt && bt.lineHz === 50, '서버 타이머 스펙에 설정의 계통주파수(50 Hz)', JSON.stringify(bt && bt.lineHz));
+  // 스펙 → 생성 TQL의 태그 목록까지 — 호출문만 보면 TAGS에서 빠져도 통과(서버에선 undefined로 거부 미적용)
+  const tq = Band.buildBandTql({ tags: [bt], nowMs: 1, dryRun: true });
+  const tagsJs = (/var TAGS=(\[.*?\]);/.exec(tq) || [])[1];
+  chk(tagsJs && JSON.parse(tagsJs)[0].lineHz === 50, '생성 TQL의 태그 목록에도 계통주파수(50 Hz)', tagsJs && tagsJs.slice(0, 120));
   const DB = (await import('../../cgi-bin/db/db.js')).default;
   const { loadTrendChunks } = await import('../src/data/live.js');
   const keep = { rawWindow: DB.rawWindow, bandTrend: DB.bandTrend, be: Band.bandEnergy };

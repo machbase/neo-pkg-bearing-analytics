@@ -1,4 +1,5 @@
 // 공개 데이터셋 교차검증 — 베어링 축(포락선 → 결함주파수 대조)의 정상 오탐·결함 검출·종류 적중 측정
+// · 두 기준 함께 집계: 근거(bearingMatch hit — 상세분석 근거표) · 등급(격자 점수 ≥ TGT_ADOPT — 상세분석 등급·문서 성적표)
 // · 계산 정확성은 합성 신호 검사(test-dsp), 여기는 실제 결함 검출 여부
 // · 로컬 데이터셋 필요(변환된 .f64 + index.json, 기본 D:/vibe-datasets/conv, 없으면 건너뜀) · smoke 미포함
 //   node tools/verify-datasets.mjs [데이터루트] [데이터셋…] [--band=lo:hi] [--rev=N]
@@ -82,6 +83,8 @@ for (const ds of datasets) {
   const meta = JSON.parse(fs.readFileSync(path.join(dir, 'index.json'), 'utf8'));
   const names = Object.keys(meta.cases);
   let healthyHit = 0, healthyN = 0, faultHit = 0, faultN = 0, typeOk = 0, typeN = 0;
+  // 등급 기준 — 부위는 BPFO·BPFI만 주장, BSF는 부위 미상(앱 표기와 같음)
+  let gHealthy = 0, gFault = 0, gTypeN = 0, gSiteOk = 0, gSiteUnk = 0;
 
   for (const name of names) {
     const c = meta.cases[name];
@@ -93,8 +96,18 @@ for (const ds of datasets) {
     if (v.length < 4096) continue;
     const r = analyze(v, c.fs, c.rpm, c.geo, meta.mount);
     const hit = r.bm && r.bm.hit;
+    const gOn = !!(r.sb && r.sb.r >= VC.TGT_ADOPT);
     const healthy = c.label === 'none';
-    if (healthy) { healthyN++; if (hit) healthyHit++; }
+    if (healthy) { healthyN++; if (hit) healthyHit++; if (gOn) gHealthy++; }
+    else if (gOn) {
+      gFault++;
+      if (c.label === 'OR' || c.label === 'IR' || c.label === 'BALL') {
+        gTypeN++;
+        if (r.sb.key === 'BSF') gSiteUnk++;
+        else if (KEYMAP[r.sb.key] === c.label) gSiteOk++;
+      }
+    }
+    if (healthy) { /* 근거 기준 집계는 위에서 끝남 */ }
     else {
       faultN++;
       if (hit) {
@@ -116,24 +129,29 @@ for (const ds of datasets) {
       capped: !!(r.kg && r.kg.capped),
     });
   }
-  rows.push({ ds, healthyN, healthyHit, faultN, faultHit, typeN, typeOk });
+  rows.push({ ds, healthyN, healthyHit, faultN, faultHit, typeN, typeOk, gHealthy, gFault, gTypeN, gSiteOk, gSiteUnk });
   const pc = (a, b) => (b ? ((a / b) * 100).toFixed(0) + '%' : '-');
   console.log(
     `${ds.padEnd(10)} 정상 ${String(healthyN).padStart(3)}건 중 오탐 ${String(healthyHit).padStart(3)} (${pc(healthyHit, healthyN)})`
     + ` · 결함 ${String(faultN).padStart(3)}건 중 검출 ${String(faultHit).padStart(3)} (${pc(faultHit, faultN)})`
-    + ` · 종류 ${typeOk}/${typeN} (${pc(typeOk, typeN)})`);
+    + ` · 종류 ${typeOk}/${typeN} (${pc(typeOk, typeN)})`
+    + `  | 등급 기준 오탐 ${gHealthy} · 검출 ${gFault} · 부위 적중 ${gSiteOk}/${gTypeN}(미상 ${gSiteUnk})`);
 }
 
 const sum = rows.reduce((a, r) => ({
   healthyN: a.healthyN + r.healthyN, healthyHit: a.healthyHit + r.healthyHit,
   faultN: a.faultN + r.faultN, faultHit: a.faultHit + r.faultHit,
   typeN: a.typeN + r.typeN, typeOk: a.typeOk + r.typeOk,
-}), { healthyN: 0, healthyHit: 0, faultN: 0, faultHit: 0, typeN: 0, typeOk: 0 });
+  gHealthy: a.gHealthy + r.gHealthy, gFault: a.gFault + r.gFault, gTypeN: a.gTypeN + r.gTypeN, gSiteOk: a.gSiteOk + r.gSiteOk, gSiteUnk: a.gSiteUnk + r.gSiteUnk,
+}), { healthyN: 0, healthyHit: 0, faultN: 0, faultHit: 0, typeN: 0, typeOk: 0, gHealthy: 0, gFault: 0, gTypeN: 0, gSiteOk: 0, gSiteUnk: 0 });
 
 console.log('');
 console.log(`합계  정상 오탐 ${sum.healthyHit}/${sum.healthyN}`
   + ` · 결함 검출 ${sum.faultHit}/${sum.faultN}`
-  + ` · 종류 적중 ${sum.typeOk}/${sum.typeN}`);
+  + ` · 종류 적중 ${sum.typeOk}/${sum.typeN}  (근거 기준)`);
+console.log(`합계  정상 오탐 ${sum.gHealthy}/${sum.healthyN}`
+  + ` · 결함 검출 ${sum.gFault}/${sum.faultN}`
+  + ` · 부위 적중 ${sum.gSiteOk}/${sum.gTypeN} · 부위 미상 ${sum.gSiteUnk}  (등급 기준 — 단일 결함만, 복합 결함 제외)`);
 
 const outPath = path.join(ROOT, 'verify-cases.json');
 fs.writeFileSync(outPath, JSON.stringify(perCase, null, 1));

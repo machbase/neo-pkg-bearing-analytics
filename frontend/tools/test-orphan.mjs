@@ -30,29 +30,85 @@ const chk = (ok, msg, extra) => {
 };
 
 // ── 태그별 보유량 집계 ─────────────────────────────────────────────────────
-/* BAND NAME은 '테이블:태그:계열' — 태그 단위로 묶어 목록이 계열 수만큼 부풀지 않게 함 */
-{
+/* BAND NAME은 '테이블:태그:계열' — 태그 단위로 묶어 목록이 계열 수만큼 부풀지 않게 함
+   · 평소엔 V$_STAT(행 스캔 없음), 삭제 직후(exact)는 원본 집계 — 두 경로 같은 결과 */
+const BAND_ROWS = [['T:A:sub', 100], ['T:A:one', 100], ['T:A:envBPFO', 50], ['T:B:sub', 7]];
+const EV_ROWS = [['T:A', 12], ['T:C', 3]];
+const FAIL_RES = () => Promise.resolve({ ok: false, status: 500, json: () => Promise.resolve({ success: false, reason: 'boom' }) });
+const scansOf = (list) => list.filter((s) => /from (EVENTS|BAND)\b/.test(s));   // 원본 표 직접 조회(V$_STAT·메타 제외)
+for (const exact of [false, true]) {
   SQLS = [];
-  ROWS = {
-    'from BAND': [['T:A:sub', 100], ['T:A:one', 100], ['T:A:envBPFO', 50], ['T:B:sub', 7]],
-    'from EVENTS': [['T:A', 12], ['T:C', 3]],
-  };
+  ROWS = { 'V$BAND_STAT': BAND_ROWS, 'V$EVENTS_STAT': EV_ROWS, 'from BAND': BAND_ROWS, 'from EVENTS': EV_ROWS };
+  const u = await DB.tagUsage(exact);
+  const via = exact ? ' (원본 집계)' : ' (V$_STAT)';
+  chk(u['T:A'].band === 250, '한 태그의 계열을 합쳐 센다' + via, String(u['T:A'].band));
+  chk(u['T:A'].events === 12, '이벤트도 같은 키로 묶인다' + via, String(u['T:A'].events));
+  chk(u['T:C'].band === 0 && u['T:C'].events === 3, '이벤트만 있는 태그도 나온다' + via);
+  chk(Object.keys(u).sort().join(',') === 'T:A,T:B,T:C', '태그 단위로 묶인다' + via, Object.keys(u).sort().join(','));
+  chk(exact ? scansOf(SQLS).length === 2 : scansOf(SQLS).length === 0,
+    exact ? '삭제 직후 갱신은 원본을 센다' : '평소엔 원본 행을 훑지 않는다', SQLS.join(' | '));
+}
+
+// V$_STAT 조회 실패 → 원본 집계로 대체
+{
+  const okFetch = globalThis.fetch;
+  globalThis.fetch = (url) => (String(url).includes('_STAT') ? FAIL_RES() : okFetch(url));
   const u = await DB.tagUsage();
-  chk(u['T:A'].band === 250, '한 태그의 계열을 합쳐 센다', String(u['T:A'].band));
-  chk(u['T:A'].events === 12, '이벤트도 같은 키로 묶인다', String(u['T:A'].events));
-  chk(u['T:C'].band === 0 && u['T:C'].events === 3, '이벤트만 있는 태그도 나온다');
-  chk(Object.keys(u).sort().join(',') === 'T:A,T:B,T:C', '태그 단위로 묶인다', Object.keys(u).sort().join(','));
+  chk(u['T:A'] && u['T:A'].band === 250 && u['T:A'].events === 12, 'V$_STAT이 실패하면 원본 집계로 센다', JSON.stringify(u['T:A'] || null));
+  globalThis.fetch = okFetch;
 }
 
 // 한쪽 조회가 실패해도 다른 쪽 유지 — 정리 화면 전체 실패 방지
 {
   const okFetch = globalThis.fetch;
-  globalThis.fetch = (url) => (String(url).includes('BAND')
-    ? Promise.resolve({ ok: false, status: 500, json: () => Promise.resolve({ success: false, reason: 'boom' }) })
-    : okFetch(url));
+  globalThis.fetch = (url) => (String(url).includes('BAND') ? FAIL_RES() : okFetch(url));
   const u = await DB.tagUsage();
   chk(u['T:A'] && u['T:A'].events === 12, '대역 조회가 실패해도 이벤트는 나온다', JSON.stringify(u['T:A'] || null));
   globalThis.fetch = okFetch;
+}
+
+// ── 데이터 관리 현황 ───────────────────────────────────────────────────────
+/* 평소엔 V$_STAT 한 줄(행 수와 무관), 삭제 직후는 원본 집계(V$_STAT 반영 지연) — 화면 값 형태는 같음 */
+{
+  ROWS = {
+    'from V$EVENTS_STAT': [[2, 15, 1000, 2000]],
+    'from V$BAND_STAT': [[4, 257, 1500, 2500]],
+    'from (select NAME from BAND': [[4]],
+    'select count(*) from EVENTS': [[15]],
+    'select min(TIME), max(TIME) from EVENTS': [[1000, 2000]],
+    'select count(*) from BAND': [[257]],
+    'select min(TIME), max(TIME) from BAND': [[1500, 2500]],
+    'from MONSTATE': [[3]], 'from BASELINE': [[5]],
+  };
+  SQLS = []; const fast = await DB.usageStats(); const fastSql = SQLS.slice();
+  SQLS = []; const slow = await DB.usageStats(true); const slowSql = SQLS.slice();
+  chk(fast.band.rows === 257 && fast.band.keys === 4 && fast.band.span.from === 1500 && fast.band.span.to === 2500
+    && fast.events.rows === 15 && fast.events.span.to === 2000 && fast.monstate.rows === 3 && fast.baseline.rows === 5,
+    'V$_STAT 한 줄을 화면 값으로 옮긴다', JSON.stringify(fast));
+  chk(JSON.stringify(fast) === JSON.stringify(slow), '두 경로의 값·형태가 같다', JSON.stringify(slow));
+  chk(scansOf(fastSql).length === 0, '평소 현황은 원본 행을 훑지 않는다', fastSql.join(' | '));
+  chk(scansOf(slowSql).length === 5, '삭제 직후 현황은 원본을 센다', String(scansOf(slowSql).length));
+  const okFetch = globalThis.fetch;
+  globalThis.fetch = (url) => (String(url).includes('_STAT') ? FAIL_RES() : okFetch(url));
+  const fb = await DB.usageStats();
+  globalThis.fetch = okFetch;
+  chk(JSON.stringify(fb) === JSON.stringify(slow), 'V$_STAT이 실패하면 원본 집계로 센다', JSON.stringify(fb));
+  ROWS = { 'from V$BAND_STAT': [[0, null, null, null]], 'from V$EVENTS_STAT': [[0, null, null, null]] };
+  const empty = await DB.usageStats();
+  chk(empty.band.rows === 0 && empty.band.keys === 0 && empty.events.rows === 0 && empty.band.span.from === 0,
+    '데이터가 없으면 0건(빈 집계의 null을 0으로)', JSON.stringify(empty.band));
+}
+
+// ── 기간 삭제의 이름 목록 ─────────────────────────────────────────────────
+/* TAG 표 DELETE는 이름 정확일치만 받음 — 이름은 메타 표에서(행 스캔 없음) */
+{
+  SQLS = [];
+  ROWS = { '_band_meta': [['T:A:fault'], ['T:B:fault']] };
+  await DB.deleteBandRange(1000, 2000);
+  chk(/_band_meta/.test(SQLS[0] || ''), '지울 이름은 메타 표에서 읽는다', SQLS[0]);
+  const dels = SQLS.filter((s) => /^delete from BAND where NAME=/.test(s));
+  chk(dels.length === 2 && /T:A:fault/.test(dels[0]) && /T:B:fault/.test(dels[1]), '메타의 이름마다 한 문장', String(dels.length));
+  chk(!SQLS.some((s) => /^select NAME, count\(\*\) from BAND/.test(s)), '이름을 모으려고 행을 묶지 않는다');
 }
 
 // ── 지울 계열 목록 최신성 ──────────────────────────────────────────────

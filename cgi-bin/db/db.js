@@ -10,9 +10,9 @@
   'use strict';
 
   /* ---------------- REST ----------------
-     인증 헤더는 여기서만 붙임 — 하나라도 빠지면 서버가 기본 신원(SYS)으로 조용히 통과(권한 확대).
-     신원 = Neo 콘솔 로그인 세션(JWT).
-     auth: 'jwt'(기본) 콘솔 세션 / 'service' 호출측 Bearer 그대로(타이머용) / 'none' 없음 */
+     · 인증 헤더는 여기서만 붙임 — 하나라도 빠지면 서버가 기본 신원(SYS)으로 조용히 통과(권한 확대)
+     · 신원 = Neo 콘솔 로그인 세션(JWT)
+     · auth: 'jwt'(기본) 콘솔 세션 / 'service' 호출측 Bearer 그대로(타이머용) / 'none' 없음 */
   var JWT_STORE_KEY = 'accessToken';       // Neo 콘솔이 쓰는 localStorage 키
   var REFRESH_STORE_KEY = 'refreshToken';  // 갱신용 토큰(로그인 때 함께 발급)
   // 캐시 안 함 — 토큰 수명 5분, 매 요청마다 저장소에서 읽음
@@ -326,8 +326,8 @@
   }
 
   /* ---------------- 설정 영속화 ----------------
-     전용 DB NEO_BEARING_STORE.<계정>.CONFIG 표에 영역별 조각 KV(cfg:<영역>#N)로 저장.
-     옛 cgi-bin/config/*.json 파일은 migrateConfigToDb의 1회 이관 원본으로 읽기만 함 */
+     · 전용 DB NEO_BEARING_STORE.<계정>.CONFIG 표에 영역별 조각 KV(cfg:<영역>#N)로 저장
+     · 옛 cgi-bin/config/*.json 파일은 migrateConfigToDb의 1회 이관 원본으로 읽기만 함 */
 
   // 영역(옛 파일 이름) → state 키 목록. 영역 이름(.json 뗀 것)이 조각 키 cfg:<영역>#N의 <영역>
   var CONFIG_FILES = {
@@ -365,10 +365,8 @@
       return rows.map(function (r) { return String(r[0]); }).filter(function (u) { return u !== SHARED_OWNER; });
     });
   }
-  /* 한 계정에 필요한 권한 일괄 부여 — DB 단위 DML 권한 구문·ROLE이 없어 표마다 한 문장.
-     개별 실패는 사유만 수집(재부여는 무해), 전부 실패면 throw */
-  function grantTo(user) {
-    var list = SQL.grantStatements(user);
+  /* 권한 구문 일괄 실행 — 개별 실패는 사유만 수집(재실행 무해), 전부 실패면 throw */
+  function runGrantList(list) {
     if (!list.length) return Promise.reject(new Error('계정명이 올바르지 않습니다'));
     var errs = [];
     return list.reduce(function (p2, sql) {
@@ -378,6 +376,21 @@
     }, Promise.resolve()).then(function () {
       if (errs.length === list.length) throw new Error(errs[0]);
       return { total: list.length, failed: errs.length, reasons: errs };
+    });
+  }
+  // 한 계정에 필요한 권한 일괄 부여 — DB 단위 DML 권한 구문·ROLE이 없어 표마다 한 문장
+  function grantTo(user) { return runGrantList(SQL.grantStatements(user)); }
+  // 한 계정 권한 일괄 회수 — 부여의 역순, 데이터(설정·이벤트·학습값)는 그대로
+  function revokeFrom(user) { return runGrantList(SQL.revokeStatements(user)); }
+  /* 계정별 권한 상태(SYS 화면 전용) — 타이머 목록을 못 읽어도 권한 상태는 표시 */
+  function accessStatus() {
+    return Promise.all([
+      q(SQL.storeAccess()),
+      q(SQL.pkgTimers()).catch(function () { return null; }),
+    ]).then(function (r) {
+      var m = SQL.accessSummary(r[0], r[1] || []);
+      if (!r[1]) Object.keys(m).forEach(function (u) { m[u].timers = null; });
+      return m;
     });
   }
 
@@ -396,6 +409,15 @@
         'GRANT SELECT, INSERT, DELETE ON ' + sh + 'BAND TO <계정>;',
         'GRANT SELECT, INSERT, UPDATE, DELETE ON ' + sh + 'BASELINE TO <계정>;',
         'GRANT SELECT, INSERT, UPDATE, DELETE ON ' + sh + 'MONSTATE TO <계정>;'].join('\n'),
+      // 회수 — 부여의 역순, 데이터는 그대로
+      revoke: ['REVOKE SELECT, INSERT, UPDATE, DELETE ON ' + sh + 'MONSTATE FROM <계정>;',
+        'REVOKE SELECT, INSERT, UPDATE, DELETE ON ' + sh + 'BASELINE FROM <계정>;',
+        'REVOKE SELECT, INSERT, DELETE ON ' + sh + 'BAND FROM <계정>;',
+        'REVOKE SELECT, INSERT, DELETE ON ' + sh + 'EVENTS FROM <계정>;',
+        'REVOKE CREATE  ON DATABASE ' + d + ' FROM <계정>;',
+        'REVOKE CONNECT ON DATABASE ' + d + ' FROM <계정>;'].join('\n'),
+      // 확인 — TABLE_NAME 비어 있는 행 = DB 범위 권한
+      check: "SELECT USER_NAME, TABLE_NAME FROM M$SYS_USER_ACCESS WHERE DB_NAME = '" + d + "' ORDER BY USER_NAME, TABLE_NAME;",
     };
   }
 
@@ -444,8 +466,8 @@
   }
 
   /* ---- 설정 저장소 (전용 DB, 계정 스키마) ----
-     표 소유자가 본인이라 남은 조회 불가(API 키·웹훅 URL 보관).
-     영역(=옛 파일) 단위 JSON을 조각내 저장 — 한 행(VAL 4000자)을 넘으면 잘린 채 저장돼 영역 전체가 조용히 소실 */
+     · 표 소유자가 본인이라 남은 조회 불가(API 키·웹훅 URL 보관)
+     · 영역(=옛 파일) 단위 JSON을 조각내 저장 — 한 행(VAL 4000자)을 넘으면 잘린 채 저장돼 영역 전체가 조용히 소실 */
   // 인코딩 값은 전부 ASCII(%XX)라 VAL 한도를 문자 수로 적용. INSERT는 단일 행이라 조각 수 = 왕복 수
   var CFG_CHUNK = 3800;
   function cfgKey(domain, i) { return 'cfg:' + domain.replace(/\.json$/, '') + '#' + i; }
@@ -691,9 +713,10 @@
       .then(function () { return q(SQL.kvSelect('CONFIG')); })
       .then(function () { return q(SQL.usageCount('MONSTATE')); });
   }
-  /* MONSTATE.VAL 폭이 MONSTATE_VAL_MIN보다 좁은 기존 설치면 표 재생성(CREATE는 이미 있으면 무시돼 폭 불변).
-     판정 상태는 다음 회차에 다시 쌓이는 값이라 버림 가능(BASELINE은 학습값이라 불가).
-     ⚠ 재생성 시 확정 등급·에피소드를 처음부터 다시 셈. 폭을 못 읽으면 아무것도 안 함 */
+  /* MONSTATE.VAL 폭이 MONSTATE_VAL_MIN보다 좁은 기존 설치면 표 재생성(CREATE는 이미 있으면 무시돼 폭 불변)
+     · 판정 상태는 다음 회차에 다시 쌓이는 값이라 버림 가능(BASELINE은 학습값이라 불가)
+     · ⚠ 재생성 시 확정 등급·에피소드를 처음부터 다시 셈
+     · 폭을 못 읽으면 아무것도 안 함 */
   var MONSTATE_VAL_MIN = 4000;
   function widenMonState() {
     return q(SQL.colLength('MONSTATE', 'VAL')).then(function (rows) {
@@ -743,9 +766,11 @@
   function deleteEventsOfTag(tbl, tag) {
     return q(SQL.eventsDeleteTag(tbl, tag)).then(function (r) { return purgeNames('EVENTS').then(function () { return r; }); });
   }
-  // 내 이름 목록(접두 뗀 키) — TAG 표 DELETE는 NAME 정확일치만 받아 이름 열거 필요
+  /* 내 이름 목록(접두 뗀 키) — TAG 표 DELETE는 NAME 정확일치만 받아 이름 열거 필요
+     · 메타 표에서 읽음(행 스캔 없음), 실패 시 원본 집계 */
   function ownKeys(kind) {
-    return q(kind === 'band' ? SQL.bandNameCounts() : SQL.eventNameCounts())
+    return q(SQL.metaNames(kind === 'band' ? 'BAND' : 'EVENTS'))
+      .catch(function () { return q(kind === 'band' ? SQL.bandNameCounts() : SQL.eventNameCounts()); })
       .then(function (rows) { return rows.map(function (r) { return SQL.unkey(r[0]); }); })
       .catch(function () { return []; });
   }
@@ -773,9 +798,14 @@
       return p.then(function () { return q(SQL.bandDeleteKey(tbl + ':' + tag + ':' + b)).catch(function () { }); });
     }, Promise.resolve()).then(function () { return purgeNames('BAND'); });
   }
+  /* EVENTS·BAND 이름별 집계 — 기본 V$_STAT(행 스캔 없음)
+     · exact(삭제 직후 — V$_STAT 반영 지연)·V$_STAT 실패면 원본 집계 */
+  function tagRows(exact, scanSql, statSql) {
+    return exact ? q(scanSql) : q(statSql).catch(function () { return q(scanSql); });
+  }
   /* 태그별 보유량 { '테이블:태그': { band, events } } — BAND는 앞 두 마디로 묶음.
      한쪽 조회가 실패해도 나머지 반환 */
-  function tagUsage() {
+  function tagUsage(exact) {
     var acc = {};
     var add = function (kind) {
       return function (rows) {
@@ -788,33 +818,47 @@
       };
     };
     return Promise.all([
-      q(SQL.bandNameCounts()).then(add('band')).catch(function () { return null; }),
-      q(SQL.eventNameCounts()).then(add('events')).catch(function () { return null; }),
+      tagRows(exact, SQL.bandNameCounts(), SQL.statNameCounts('BAND')).then(add('band')).catch(function () { return null; }),
+      tagRows(exact, SQL.eventNameCounts(), SQL.statNameCounts('EVENTS')).then(add('events')).catch(function () { return null; }),
     ]).then(function () { return acc; });
   }
   // 판정 상태 삭제 — LOOKUP이라 키 단위
   function deleteMonState(key) { return q(SQL.kvDelete('MONSTATE', key)); }
-  // 데이터 관리 현황(설정 화면) — 개별 조회 실패는 null, 나머지는 유지
-  function usageStats() {
+  /* 데이터 관리 현황(설정 화면) — 개별 조회 실패는 null, 나머지는 유지
+     · EVENTS·BAND는 기본 V$_STAT 한 줄, exact(삭제 직후)·V$_STAT 실패면 원본 집계 */
+  function usageStats(exact) {
     var one = function (sql, pick) {
       return q(sql).then(function (rows) { return rows.length ? pick(rows[0]) : null; }).catch(function () { return null; });
     };
     var num = function (r) { return Number(r[0]); };
+    // TIME은 timeformat=ms라 밀리초 숫자(Date.parse 금지 — NaN)
+    var span = function (r) { return { from: Number(r[0]), to: Number(r[1]) }; };
+    var scan = function (table) {
+      var band = table === 'BAND';
+      return Promise.all([
+        one(SQL.usageCount(table), num),
+        one(band ? SQL.bandSpan() : SQL.eventsSpan(), span),
+        band ? one(SQL.bandKeyCount(), num) : null,
+      ]).then(function (r) { return { rows: r[0], span: r[1], keys: r[2] }; });
+    };
+    var tagTable = function (table) {
+      if (exact) return scan(table);
+      return q(SQL.statSummary(table)).then(function (rows) {
+        var r = rows[0] || [];
+        return { rows: Number(r[1]) || 0, span: span([r[2], r[3]]), keys: Number(r[0]) || 0 };
+      }, function () { return scan(table); });
+    };
     return Promise.all([
-      one(SQL.usageCount('EVENTS'), num),
-      one(SQL.eventsSpan(), function (r) { return { from: Number(r[0]), to: Number(r[1]) }; }),
-      one(SQL.usageCount('BAND'), num),
-      // TIME은 timeformat=ms라 밀리초 숫자(Date.parse 금지 — NaN)
-      one(SQL.bandSpan(), function (r) { return { from: Number(r[0]), to: Number(r[1]) }; }),
-      one(SQL.bandKeyCount(), num),
+      tagTable('EVENTS'),
+      tagTable('BAND'),
       one(SQL.usageCount('MONSTATE'), num),
       one(SQL.usageCount('BASELINE'), num),
     ]).then(function (r) {
       return {
-        events: { rows: r[0], span: r[1] },
-        band: { rows: r[2], span: r[3], keys: r[4] },
-        monstate: { rows: r[5] },
-        baseline: { rows: r[6] },
+        events: { rows: r[0].rows, span: r[0].span },
+        band: r[1],
+        monstate: { rows: r[2] },
+        baseline: { rows: r[3] },
       };
     });
   }
@@ -866,9 +910,9 @@
   }
 
   /* ---------------- 서버 상시감시 타이머 (Neo JSON-RPC) ----------------
-     앱이 판정 TQL을 패키지 파일로 저장, Neo 타이머가 주기 실행(앱 없이도 감시).
-     타이머 command 경로 = 파일 API 경로(pkgBase/cgi-bin/tql/<계정>/<이름>.tql).
-     타이머는 등록 계정 권한으로 실행 */
+     · 앱이 판정 TQL을 패키지 파일로 저장, Neo 타이머가 주기 실행(앱 없이도 감시)
+     · 타이머 command 경로 = 파일 API 경로(pkgBase/cgi-bin/tql/<계정>/<이름>.tql)
+     · 타이머는 등록 계정 권한으로 실행 */
   var MON_TIMER = 'NEO_BEARING_MONITOR';
   function monTimer() { return timerName(MON_TIMER); }
   function monTqlPath() { return userTqlPath('monitor'); }
@@ -946,7 +990,7 @@
       .then(function () { return true; });
   }
   function deleteMonitorTimer() { return deleteTimer(monTimer()); }
-  // 감시자(WD) 타이머 — 폐지, 옛 설치에 남은 타이머 삭제용 이름만 유지
+  // 감시자(WD) 타이머 이름 — 옛 설치에 남은 타이머 삭제용
   var WD_TIMER = 'NEO_BEARING_WD';
   function wdTimer() { return timerName(WD_TIMER); }
   function deleteWdTimer() { return deleteTimer(wdTimer()); }
@@ -1012,7 +1056,7 @@
     rollupTrend: rollupTrend, rollupBatch: rollupBatch, rawWindow: rawWindow, lastSampleMs: lastSampleMs, sampleTimes: sampleTimes, fftSpectrum: fftSpectrum,
     loadConfig: loadConfig, saveConfig: saveConfig, saveConfigPartial: saveConfigPartial,
     migrateConfigToDb: migrateConfigToDb, checkAppDb: checkAppDb, setupSql: setupSql, createAppDb: createAppDb, appDb: appDb,
-    storePrefix: storePrefix, userKeyPrefix: userKeyPrefix, configTable: configTable, srcMapOf: srcMapOf, listUsers: listUsers, grantTo: grantTo,
+    storePrefix: storePrefix, userKeyPrefix: userKeyPrefix, configTable: configTable, srcMapOf: srcMapOf, listUsers: listUsers, grantTo: grantTo, revokeFrom: revokeFrom, accessStatus: accessStatus,
     ensureMonTables: ensureMonTables, loadEvents: loadEvents, loadEventsRange: loadEventsRange, countEvents: countEvents,
     loadBaselines: loadBaselines, saveBaseline: saveBaseline, deleteBaseline: deleteBaseline,
     insertEvent: insertEvent,

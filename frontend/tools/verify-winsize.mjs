@@ -75,6 +75,14 @@ for (const w of WINS) {
     + `${ok}/${fired.length}`.padEnd(10) + Math.round(ms) + ' ms');
 }
 console.log('');
+// 제품 임계 그대로 — 상세분석 100회전·TGT_ADOPT, 감시 25회전·MON_ADOPT(문서 성적표 기준)
+console.log('제품 임계                 임계    오탐      검출');
+for (const [k, ko, T] of [['rev100', '상세분석 100회전', VC.TGT_ADOPT], ['rev25', '감시 25회전', VC.MON_ADOPT]]) {
+  const det = F.filter((r) => r[k].r >= T).length;
+  console.log(ko.padEnd(22) + T.toFixed(2).padStart(8) + `${H.filter((r) => r[k].r >= T).length}/${H.length}`.padEnd(9) + '  '
+    + `${det}/${F.length}`.padEnd(9) + String(Math.round(det / F.length * 100)).padStart(4) + '%');
+}
+console.log('');
 console.log('(goja 추정 = 16,384 표본 실측 855 ms를 N log N으로 환산 · 91태그 10분 주기 점유율)');
 for (const w of WINS) {
   const ns = rows.map((r) => r[w.k].n).filter((x)=>x>0).sort((a,b)=>a-b);

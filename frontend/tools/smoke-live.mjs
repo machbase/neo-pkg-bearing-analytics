@@ -1,7 +1,8 @@
-/* 라이브 경로 스모크 — 실제 Neo에 붙여 buildLiveData/liveDetail/렌더/저장소 왕복 검증
-   라이브 — Neo 필요 · npm run smoke:live 포함
-   로그인: NEO_USER·NEO_PASSWORD 환경변수(_liveauth.mjs), 없으면 건너뜀
-   저장소 왕복은 그 계정에 시험 행·파일을 쓰고 지움 — 설정은 끝나면(실패해도) 원래 값으로 복구 */
+/* 라이브 경로 스모크 — 라이브(Neo 필요) · npm run smoke:live 포함
+   · 실제 Neo에 붙여 buildLiveData/liveDetail/렌더/저장소 왕복 검증
+   · 로그인: NEO_USER·NEO_PASSWORD 환경변수(_liveauth.mjs), 없으면 건너뜀
+   · 계정마다 테이블 구성이 다름 — 기준 데이터 BEARING(C1)은 필수(없으면 건너뜀), VIBE_DATA는 있으면 함께 조립
+   · 저장소 왕복은 그 계정에 시험 행·파일을 쓰고 지움 — 설정은 끝나면(실패해도) 원래 값으로 복구 */
 import renderToString from 'preact-render-to-string';
 
 const { DB: AuthDB } = await import('./_liveauth.mjs');
@@ -20,16 +21,18 @@ const ok = (cond, label, extra) => {
   else { fail++; console.error('FAIL', label, extra || ''); }
 };
 
-// 1. 테이블 목록
+// 1. 테이블 목록 — 검사 대상 = BEARING + (있으면) VIBE_DATA
 const tables = await L.listTagTables();
-ok(tables.includes('BEARING') && tables.includes('VIBE_DATA'), '테이블 목록', tables.join(','));
+if (!tables.includes('BEARING')) { console.log('건너뜀 — 이 계정에 기준 테이블 BEARING 없음 (' + tables.join(',') + ')'); process.exit(0); }
+const SRC = ['BEARING'].concat(tables.includes('VIBE_DATA') ? ['VIBE_DATA'] : []);
+ok(tables.length > 0, '테이블 목록', tables.join(',') + ' → 검사 대상 ' + SRC.join(','));
 
-// 2. 데이터 조립 (진동 테이블 2개)
-const data = await L.buildLiveData(E, ['BEARING', 'VIBE_DATA'], {});
+// 2. 데이터 조립 (검사 대상 테이블)
+const data = await L.buildLiveData(E, SRC, {});
 /* 설비 = 데이터가 있는 태그 — 메타에 이름만 남은(데이터 삭제된) 태그는 제외(DB 상태에 따라 수가 바뀌므로 통계로 기대값 산정) */
 {
   const withData = [], nameOnly = [];
-  for (const t of ['BEARING', 'VIBE_DATA']) {
+  for (const t of SRC) {
     const st = await L.tagStats(t).catch(() => ({}));
     const names = await L.listTags(t, 1000).catch(() => []);
     names.forEach((n) => (st[n] && st[n].count > 0 ? withData : nameOnly).push(t + ':' + n));
@@ -87,7 +90,7 @@ app._detailCache['BEARING:C1'] = { state: 'ready', det };
 const sorted = data.equipment.slice().sort((a, b) => b.grade - a.grade);
 sorted.forEach((e, i) => { e.order = i; });
 Object.assign(app.state, {
-  ready: true, srcSel: ['BEARING', 'VIBE_DATA'], selTag: 'BEARING:C1', diagTag: sorted[0].id,
+  ready: true, srcSel: SRC, selTag: 'BEARING:C1', diagTag: sorted[0].id,
   events: [], reports: [], genTags: sorted.slice(0, 3).map(e => e.id),
   from: E.fmtDT(data.now - 7 * 86400000).slice(0, 10), to: E.fmtDT(data.now).slice(0, 10),
 });
@@ -101,7 +104,7 @@ for (const tab of ['monitor', 'detail', 'report']) {
 }
 app.state.tab = 'settings'; app.state.setSection = 'source';
 const so = renderToString(view(app.renderVals()));
-ok(so.includes('BEARING') && so.includes('VIBE_DATA'), '설정탭 실제 테이블 목록');
+ok(SRC.every((t) => so.includes(t)), '설정탭 실제 테이블 목록', SRC.join(','));
 
 // 4b. 리포트: HTML 조립(XSS 이스케이프) + 저장/목록/읽기/삭제 왕복
 {

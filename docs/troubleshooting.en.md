@@ -5,14 +5,14 @@ weight: 60
 
 # Troubleshooting
 
-[한국어](./troubleshooting.kr.md) | **English**
+[English](./troubleshooting.en.md) | [한국어](./troubleshooting.kr.md) | [日本語](./troubleshooting.ja.md)
 
 The app's screens are in Korean; messages are quoted here in English with the Korean label where it helps.
 
 ## Only a "cannot reach the database" notice appears
 
 The signed-in account has not been granted the store (`NEO_BEARING_STORE`). An administrator (SYS) can fix
-this from Settings → Data Source → **Grant an account** (패키지 사용 계정에 권한 주기): pick the account and press the button. Afterwards,
+this from Settings → Data Source → **Package account permissions** (패키지 사용 계정 권한): press **Grant** (권한 주기) on that account's row; the row's status (권한 있음) confirms it. Afterwards,
 press `Check status` (상태 확인) and the app resumes without a reload.
 
 If you see this notice *as* SYS, the database does not exist yet — press `Create` (만들기) on the same card.
@@ -38,7 +38,7 @@ deleted without stopping can keep running.
 The app could not read your saved settings at startup. It does not open any tab in this state — showing defaults and letting you save would overwrite the real settings.
 
 - **Could not load settings** — usually a transient connection problem. The settings are still in the DB; press **Retry**.
-- **Cannot read <area> settings** — a save was interrupted and part of that area (for example, Equipment) is damaged. If Retry gives the same result, press **Open <area> with defaults**. Everything else loads as saved and you are taken to that area's settings. Pressing the button saves nothing by itself, so set that area up again and save.
+- **Cannot read \<area\> settings** — a save was interrupted and part of that area (for example, Equipment) is damaged. If Retry gives the same result, press **Open \<area\> with defaults**. Everything else loads as saved and you are taken to that area's settings. Pressing the button saves nothing by itself, so set that area up again and save.
 
 ## No equipment cards at all
 
@@ -158,7 +158,7 @@ If there is no warning, check the following.
 - **Intermediate steps while still bad** (Critical → Danger, for instance) are not recorded separately; one "improved" event represents them.
 - **A grade needs two consecutive cycles to confirm.** A single-cycle hit is recorded only as `observation`.
 - **With RPM or bearing model empty, no grade events fire at all.** The axis that switches the grade on is the fault-frequency grid, and without shaft speed or geometry that grid cannot be built. The card reads **On hold** (cannot judge).
-- **High vibration on its own produces no event.** Bearing-fault evidence must stand for the grade to rise. Imbalance, misalignment and looseness are only reported as "amplitude high but no bearing-fault evidence".
+- **High vibration on its own produces no event.** Bearing-fault evidence must stand for the grade to rise. Imbalance, misalignment and looseness are only reported in detail analysis as "no bearing-fault signs · vibration level … range — checking non-bearing causes such as imbalance, misalignment and looseness is recommended" (베어링 결함 징후 없음 · 진동 수준 … 구간 — 불평형·정렬불량·풀림 등 베어링 외 원인 점검 권장).
 - **Baseline and band produce no events.** A breach appears only in the evidence table.
 - **Grades are judged once per extraction interval (10 minutes by default).** A machine that just deteriorated has to wait for the next cycle.
 
@@ -227,7 +227,7 @@ Both server monitoring and in-app judgment **run on the saved settings.** After 
 ## Notifications don't arrive
 
 1. In **Settings → Alarms → Notifications**, confirm the channel is on and a target (webhook URL) is entered.
-2. Press **Send test** (테스트 발송) to verify the send path in isolation. A failure here is a URL or network problem. For a Teams workflow URL, also check that the workflow accepts plain text messages.
+2. Press **Send test** (테스트 발송) to verify the send path in isolation. A failure here is a URL or network problem.
 3. In **per-severity delivery**, confirm that severity is set to **Immediate**. The default is **Immediate on all four rows** (Warning · Danger · Critical · Monitoring fault) — check whether someone changed one to No notification.
 4. If delivery is **No notification**, the event is recorded but nothing is sent.
 5. Webhook is the only delivery channel. For email or SMS, relay through an automation tool such as n8n — see [Alarms and events](./alarms.en.md).
@@ -264,14 +264,14 @@ The cause depends on the message.
 - **"steady-state samples N (minimum 30 required)"** — too few samples remain after stopped and ramping intervals are excluded. Samples are counted in RMS-window units, so lengthen the learning window, shorten the RMS window in alarm settings, or retry once more data has accumulated.
 - **"the learning window splits into stopped and running levels"** — most of the window is downtime. Learning it would make the stopped state the normal reference, so merely running the machine would show as a breach; learning is refused. Pick a period that is mostly continuous operation and retrain.
 
-Even a successful run may report exclusions such as `excluded 12 (idle 8 · transient 4)`. That is normal — it means the baseline was built from what remained after filtering.
+Even a successful run may report exclusions such as `excluded 12 (idle 8 · transient 4)` (`제외 12개(정지 8·과도 4)`). That is normal — it means the baseline was built from what remained after filtering.
 
 ## Two reports show different numbers
 
-Compare the **ruleset fingerprint** printed in each report.
+Compare the **judgment fingerprint** printed in each report.
 
-- If the fingerprints **match**, the criteria were identical and **the data changed**.
-- If the fingerprints **differ**, threshold or criteria settings changed in between.
+- If the fingerprints **match**, the judgment engine was identical. If the reproducibility section's Thresholds also match, **the data changed**.
+- If the fingerprints **differ**, the package (judgment engine) changed in between. Thresholds you changed show up in the Thresholds section, not in the fingerprint.
 
 ## LLM opinions aren't generated
 

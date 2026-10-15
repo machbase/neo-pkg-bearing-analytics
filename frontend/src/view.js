@@ -11,7 +11,7 @@ export function view(v) {
     orphanOpen, orphanRows, orphanTotalText, orphanBusy, onOrphanClose, onOrphanAll,
     purgePickShow, purgePickTitle, purgeRange, purgeHaveText, purgePickReady, onPurgePickCancel, onPurgePickNext,
     purgeShow, purgeTitle, purgeSub, purgeWhen, purgeCounting, purgeN, purgeKeep, purgeNone,
-    userName, userAuthMsg, needsDb, dbExists, dbReady, dbAdmin, dbName, dbGrantSql, grantUsers, grantPick, grantBusy, grantMsg, onGrantOpen, onGrantPick, onGrantRun, dbWhy, dbBusy, onMakeDb, onCheckDb, appDbName, purgeAsk, purgeBullets, purgeTable, purgeTyped, purgeTypeOk, onPurgeType, purgeReady, purgeBtnLabel, purgeRunning, onPurgeCancel, onPurgeConfirm, serverMon, setNav, settingsActiveStyle, settingsDirty, sevCards, sevColor, sevGradeKo, sevHold, sevHoldDetail, sevHoldNote, sevHoldWhy, sevLabel, sevMachine, sevReco, sevZones,showAdvanced, specIndics, srcNotice, srcSelAllLabel, srcSelCount, srcTables, srcTotal, statSummary, statRows, stopClick, sumTotal, tagOptions, themeIcon, threshRows, toast, toastIcon, toastMsg, toastStyle, toggleTheme, totalStyle, unitChips, unitOptions,
+    userName, userAuthMsg, needsDb, dbExists, dbReady, dbAdmin, dbName, dbGrantSql, grantRows, grantLoading, grantBusy, grantMsg, onGrantRefresh, dbWhy, dbBusy, onMakeDb, onCheckDb, appDbName, purgeAsk, purgeBullets, purgeTable, purgeTyped, purgeTypeOk, onPurgeType, purgeReady, purgeBtnLabel, purgeRunning, onPurgeCancel, onPurgeConfirm, serverMon, setNav, settingsActiveStyle, settingsDirty, sevCards, sevColor, sevGradeKo, sevHold, sevHoldDetail, sevHoldNote, sevHoldWhy, sevLabel, sevMachine, sevReco, sevZones,showAdvanced, specIndics, srcNotice, srcSelAllLabel, srcSelCount, srcTables, srcTotal, statSummary, statRows, stopClick, sumTotal, tagOptions, themeIcon, threshRows, toast, toastIcon, toastMsg, toastStyle, toggleTheme, totalStyle, unitChips, unitOptions,
     cfgFailShow, cfgFailTitle, cfgFailText, cfgFailWhy, cfgRepairShow, cfgRepairLabel, onCfgRetry, onCfgRepair, monEmptyFresh, monEmptyFail,
     tzValue, tzOptions, tzNow, onTzChange,
   } = v;
@@ -452,7 +452,7 @@ export function view(v) {
           <span style="font-size: 11px; color: var(--text-muted);">주파수 성분 분해 · 결함 가설 탐색</span>
           <div style="flex: 1 1 0; min-width: 20px; height: 1px; background: var(--border-light);"></div>
           <span style="font-size: 11px; color: var(--text-muted);">표시 물리량</span>
-          <div style="display: flex; background: var(--bg-elevated); border: 1px solid var(--border-default); border-radius: 6px; overflow: hidden;" title="아래 파형·FFT·포락선·스펙트로그램의 표시 물리량 — 가속도↔속도↔변위 변환. 변위=저주파(불균형)·가속도=고주파(베어링) 강조. 추세·등급 판정에는 영향 없음">
+          <div style="display: flex; background: var(--bg-elevated); border: 1px solid var(--border-default); border-radius: 6px; overflow: hidden;" title="아래 파형·FFT·스펙트로그램·켑스트럼·진단 지표의 표시 물리량 — 가속도↔속도↔변위 변환. 변위=저주파(불균형)·가속도=고주파(베어링) 강조. 포락선은 판정용이라 센서 원래 단위로 계산. 추세·등급 판정에는 영향 없음">
             ${(unitChips || []).map((uc) => html`<button onClick=${uc.onClick} title=${uc.title} style=${uc.style}>${uc.label}</button>`)}
           </div>
         </div>
@@ -736,18 +736,35 @@ export function view(v) {
 
               ${(dbAdmin) ? html`
                 <div style="margin-top: 10px; padding: 12px 14px; border-radius: 8px; background: var(--bg-elevated); border: 1px solid var(--border-light);">
-                  <div style="font-size: 11.5px; font-weight: 600; color: var(--text-tertiary); margin-bottom: 8px;">패키지 사용 계정에 권한 주기 <span style="font-weight: 400; color: var(--text-muted);">— 계정마다 한 번</span></div>
-                  <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
-                    <select onChange=${onGrantPick} onFocus=${onGrantOpen} value=${grantPick} disabled=${grantBusy}
-                      style="height: 30px; min-width: 150px; padding: 0 8px; border-radius: 6px; border: 1px solid var(--border-medium); background: var(--bg-secondary); color: var(--text-primary); font-family: var(--font-mono); font-size: 12.5px;">
-                      ${(grantUsers && grantUsers.length)
-                        ? grantUsers.map((u) => html`<option value=${u}>${u}</option>`)
-                        : html`<option value="">${grantUsers ? '다른 계정이 없습니다' : '불러오는 중…'}</option>`}
-                    </select>
-                    <button onClick=${onGrantRun} disabled=${grantBusy || !grantPick}
-                      style="height: 30px; padding: 0 15px; border-radius: 6px; border: none; background: var(--primary-base); color: #fff; font-size: 12.5px; font-weight: 600; cursor: ${(grantBusy || !grantPick) ? 'not-allowed' : 'pointer'}; opacity: ${(grantBusy || !grantPick) ? '.6' : '1'};">${grantBusy ? '주는 중…' : '권한 주기'}</button>
-                    ${(grantMsg) ? html`<span style="font-size: 11.5px; color: var(--text-muted);">${grantMsg}</span>` : null}
+                  <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px;">
+                    <span style="font-size: 11.5px; font-weight: 600; color: var(--text-tertiary);">패키지 사용 계정 권한 <span style="font-weight: 400; color: var(--text-muted);">— 계정마다 한 번 주면 됩니다</span></span>
+                    <button onClick=${onGrantRefresh} disabled=${grantBusy || grantLoading}
+                      style="margin-left: auto; height: 24px; padding: 0 9px; border-radius: 5px; border: 1px solid var(--border-medium); background: transparent; color: var(--text-secondary); font-size: 11.5px; cursor: pointer;">새로고침</button>
                   </div>
+                  ${/* 계정마다 한 줄 — 상태·이 패키지 타이머 수·버튼, 회수는 줄 안에서 한 번 더 확인 */ ''}
+                  ${(grantLoading) ? html`<div style="font-size: 12px; color: var(--text-muted);">불러오는 중…</div>`
+                    : (!grantRows.length) ? html`<div style="font-size: 12px; color: var(--text-muted);">다른 계정이 없습니다</div>`
+                    : grantRows.map((r) => html`
+                      <div style="padding: 7px 0; border-top: 1px solid var(--border-light);">
+                        <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
+                          <span style="min-width: 120px; font-family: var(--font-mono); font-size: 12.5px; color: var(--text-primary);">${r.user}</span>
+                          <span style="min-width: 110px; font-size: 12px; font-weight: 600; color: ${r.statusColor};">${r.statusText}</span>
+                          <span style="font-size: 11.5px; color: #d99a2b;">${r.timersText}</span>
+                          <span style="margin-left: auto; display: inline-flex; gap: 6px;">
+                            ${(r.canGrant) ? html`<button onClick=${r.onGrant} disabled=${grantBusy}
+                              style="height: 26px; padding: 0 12px; border-radius: 5px; border: none; background: var(--primary-base); color: #fff; font-size: 12px; font-weight: 600; cursor: ${grantBusy ? 'not-allowed' : 'pointer'}; opacity: ${grantBusy ? '.6' : '1'};">${r.busy ? '처리 중…' : '권한 주기'}</button>` : null}
+                            ${(r.canRevoke && !r.ask) ? html`<button onClick=${r.onRevoke} disabled=${grantBusy}
+                              style="height: 26px; padding: 0 12px; border-radius: 5px; border: 1px solid var(--border-medium); background: transparent; color: var(--text-secondary); font-size: 12px; cursor: ${grantBusy ? 'not-allowed' : 'pointer'}; opacity: ${grantBusy ? '.6' : '1'};">${r.busy ? '처리 중…' : '권한 회수'}</button>` : null}
+                          </span>
+                        </div>
+                        ${(r.ask) ? html`
+                          <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 7px; padding: 8px 10px; border-radius: 6px; background: rgba(229,72,77,0.08); border: 1px solid rgba(229,72,77,0.3);">
+                            <span style="flex: 1; min-width: 220px; font-size: 12px; color: var(--text-secondary); line-height: 1.5;"><b style="color: var(--text-primary);">${r.user}</b> 의 권한을 회수할까요? ${r.askText}</span>
+                            <button onClick=${r.onRevokeYes} style="height: 26px; padding: 0 12px; border-radius: 5px; border: none; background: #e5484d; color: #fff; font-size: 12px; font-weight: 600; cursor: pointer;">회수</button>
+                            <button onClick=${r.onRevokeNo} style="height: 26px; padding: 0 12px; border-radius: 5px; border: 1px solid var(--border-medium); background: transparent; color: var(--text-secondary); font-size: 12px; cursor: pointer;">취소</button>
+                          </div>` : null}
+                      </div>`)}
+                  ${(grantMsg) ? html`<div style="margin-top: 6px; font-size: 11.5px; color: var(--text-muted);">${grantMsg}</div>` : null}
                   <details style="margin-top: 10px;">
                     <summary style="font-size: 11.5px; color: var(--text-muted); cursor: pointer; user-select: none;">SQL 로 직접 하기</summary>
                     <pre style="margin: 7px 0 0; font-family: var(--font-mono); font-size: 12px; line-height: 1.7; color: var(--text-secondary); white-space: pre-wrap; user-select: all;">${dbGrantSql}</pre>

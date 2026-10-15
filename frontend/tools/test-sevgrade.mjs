@@ -207,8 +207,9 @@ const mkRoll = (n, f, cnt = 25600, stepMs = 1000) =>
 {
   const app = new App({ seed: 7, equipmentCount: 1 });
   app.E = CH;
+  // 결함 패턴 축은 회전수·구름체 기하가 둘 다 있어야 성립(감시 _patCapable과 같은 조건) — 품번 지정 설비
   const eq = { id: 'T1:T1', table: 'T1', name: 'T1', alias: 'T1', grade: 0, zones: ZONES, unit: 'mm/s',
-    rpm: 1800, fs: 25600, rms: 0.12, cls: 'II', bearing: null, rollup: [] };
+    rpm: 1800, fs: 25600, rms: 0.12, cls: 'II', bearing: { model: '6205', n: 9, Bd: 7.94, Pd: 39, phi: 0 }, rollup: [] };
   // _dxLive가 보는 최소 상세 — 스펙트럼 비움, 계측 게이트 없음
   const det = { fft: { freqs: [], mags: [], markers: [] }, spectral: { notes: [], cause: null },
     envelope: { freqs: [], mags: [], markers: [], hint: '', fault: null },

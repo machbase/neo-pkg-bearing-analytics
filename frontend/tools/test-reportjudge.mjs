@@ -1,4 +1,4 @@
-/* 리포트 헤드라인 등급 = 화면 카드 등급 — 오프라인(Neo 불필요)
+/* 리포트 헤드라인 등급 = 화면 카드 등급 — 오프라인(Neo 불필요) · npm run smoke 포함
  * · ISO 존과 갈리면 불일치 사실과 확인 사항 기재(패턴×ISO 조합 A~D)
  * · 게이지는 등급이 아닌 ISO 존 눈금임을 명시
  */
@@ -62,6 +62,17 @@ function build(gi, judge, isoIdx) {
   chk(h.includes('결함 패턴 미측정'), 'D 배지가 미측정을 말한다');
   chk(h.includes('명판 회전수'), 'D 무엇을 채워야 하는지 적는다');
   chk(h.includes('이 값만으로는 베어링 상태를 말할 수 없습니다'), 'D ISO 값의 한계를 못 박는다');
+}
+
+// ── D'. 결함 패턴을 못 잰 사유별 문구 — 계측 이상을 "회전수·베어링 없음"으로 적지 않음 ─────────
+{
+  const g = build(0, { patOn: false, patNa: true, patWhy: 'gate', isoGi: 2, isoOnly: 0, site: '' }, 2);
+  chk(g.includes('판정 보류') && g.includes('계측 이상으로 결함 패턴을 판정하지 않았습니다'), "D' 계측 이상이면 판정 보류 · 계측 이상 사유");
+  chk(!g.includes('명판 회전수'), "D' 계측 이상인데 회전수·베어링을 채우라고 하지 않는다");
+  const d = build(0, { patOn: false, patNa: true, patWhy: 'data', isoGi: 2, isoOnly: 0, site: '' }, 2);
+  chk(d.includes('이 구간의 파형으로 결함 패턴을 계산하지 못했습니다') && !d.includes('명판 회전수'), "D' 스펙트럼이 없으면 기간을 바꾸라고 한다");
+  const sl = build(0, { patOn: false, patNa: true, patWhy: 'sleeve', isoGi: 1, isoOnly: 1, site: '' }, 1);
+  chk(sl.includes('판정 대상 아님') && sl.includes('저널(sleeve) 베어링은 결함 패턴 판정 대상이 아닙니다') && !sl.includes('명판 회전수'), "D' 저널 베어링은 품번을 넣으라고 하지 않는다");
 }
 
 // ── 게이지는 등급 아닌 ISO 존 눈금 ──────────────────────────────

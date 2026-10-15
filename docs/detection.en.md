@@ -5,7 +5,7 @@ weight: 50
 
 # How detection works
 
-[한국어](./detection.kr.md) | **English**
+[English](./detection.en.md) | [한국어](./detection.kr.md) | [日本語](./detection.ja.md)
 
 This document explains **what the app measures, how it assigns a grade, and when it records an event**.
 
@@ -69,7 +69,7 @@ Baseline and band emit no events, for two reasons.
 
 **② Adding axes multiplies false alarms.** The band axis compares many series against their limits and fires if any one exceeds, so it produces many false positives on its own.
 
-Both axes **remain as evidence.** They still appear on the card and in the evidence table, and are used to narrow down which series moved. Only the alert is gone.
+Both axes **remain as evidence.** They still appear on the card and in the evidence table, and are used to narrow down which band moved. Only the alert is gone.
 
 > **The cost is explicit.** The baseline is the axis with the fewest false positives, and it has been removed from alerting. Amplitude rises from non-bearing causes (imbalance, misalignment, looseness) must be **seen by a person on screen**. See [Limits and alternatives](#limits-and-alternatives).
 
@@ -129,12 +129,12 @@ Energy at the grid positions is scored against the surrounding noise level (the 
 
 | | Window | Adoption threshold |
 | :--- | :--- | :--- |
-| **Detail analysis** | 100 revolutions | 4.0 |
+| **Detail analysis** | 100 revolutions or more (up to 22 s) | 4.0 |
 | **Continuous monitoring** | **25 revolutions** | **3.0** |
 
-Monitoring uses a shorter window because of server cost. A shorter window lowers scores overall, so the threshold drops with it. The price is that monitoring catches slightly less than detail analysis (detection 66% → 59% on public data).
+Monitoring uses a shorter window because of server cost. A shorter window lowers scores overall, so the threshold drops with it. The price is that monitoring catches slightly less than detail analysis (detection 65% → 60% on public data).
 
-Monitoring is a **trigger**; confirmation is done by detail analysis at 100 revolutions — a short window is acceptable as long as it does not miss.
+Monitoring is a **trigger**; confirmation is done by detail analysis with a long window of 100 revolutions or more — a short window is acceptable as long as it does not miss.
 
 ### When it cannot judge
 
@@ -157,7 +157,7 @@ The vibration severity zones defined by ISO 10816 (A Good → D Critical). The b
 
 Values are mm/s (velocity RMS), the ISO 10816 figures, editable on the Criteria screen. An empty class is judged as Class II.
 
-**Acceleration (g) and displacement (μm) sensors are converted to velocity and judged against the same class boundaries.** The g and μm rows on the Criteria screen (defaults 0.5/1.0/2.0 g, 12/25/50 μm) are general reference values, not quantities the standard defines, and are used only for the RMS-trend reference lines and period statistics of sensors in that unit. That is why leaving the unit empty (treated as velocity) throws off the grade height for acceleration and displacement sensors.
+**Acceleration (g) and displacement (μm) sensors are converted to velocity and judged against the same class boundaries.** The g and μm rows on the Criteria screen (defaults 0.5/1.0/2.0 g, 12/25/50 μm) are general reference values, not quantities the standard defines, and are used only for the RMS-trend reference lines and period-statistics display of sensors in that unit, and to decide how often server monitoring re-measures the ISO value — never for the grade. That is why leaving the unit empty (treated as velocity) throws off the grade height for acceleration and displacement sensors.
 
 > **Band limiting** — the ISO zone is measured on the 10–1000 Hz band only, because the zone boundaries in the standard are numbers derived from measurements over that band. On sensors with strong high-frequency content the full-band value and the ISO value can differ considerably (hover the card's number to see both); the band-limited one is the value that matches the standard.
 
@@ -195,7 +195,7 @@ Catches changes invisible in the overall RMS. A growing bearing fault barely mov
 
 Bands are divided into five ranges relative to the shaft frequency (1×). The very-high range is subdivided into 1–2 · 2–4 · 4–8 · 8 kHz+, so eight frequency bands actually accumulate.
 
-1× is measured from the waveform at every extraction. Only a peak **within ±5% of the entered RPM** counts as 1×, a peak at the line frequency (the 50/60 Hz setting) is excluded, and if none is found the entered RPM is used — the same rule as the measured 1× in detail analysis. A wider window catches peaks from other rotating parts, such as a belt-coupled motor, and shifts every band edge. So if the entered RPM is more than 5% off, the band edges are off too — enter the rated speed accurately.
+1× is measured from the waveform at every extraction. Only a peak **within ±5% of the entered RPM** counts as 1×, a peak at the line frequency (the 50/60 Hz setting) is excluded, and if none is found the entered RPM is used — the same rule as the measured 1× in detail analysis. A wider range catches peaks from other rotating parts, such as a belt-coupled motor, and shifts every band edge. So if the entered RPM is more than 5% off, the band edges are off too — enter the rated speed accurately.
 
 | Band | Range | Typically shows |
 | :--- | :--- | :--- |
@@ -221,7 +221,7 @@ Crest factor (peak over RMS) is also excluded from the grade. At low amplitude t
 
 It is reflected in the **verdict wording** instead. If amplitude is normal but crest exceeds its reference, the verdict does not assert "normal operation". The reference is set where noise alone almost never crosses it, and impulsiveness is not judged when a long period is viewed through minute- or hour-level summaries (load changes alone inflate the maximum there).
 
-Low RMS with high crest is **both the signature of an early localised fault and the signature of an instrumentation spike** (ESD, cabling, contact). That one number cannot separate them, so it does not move the grade — only states the fact. What separates them is whether the impacts **repeat**: aligned with the fault frequencies in the envelope means a fault, scattered means instrumentation. The recommendation text directs that check.
+Low RMS with high crest is **both the signature of an early localized fault and the signature of an instrumentation spike** (ESD, cabling, contact). That one number cannot separate them, so it does not move the grade — only states the fact. What separates them is whether the impacts **repeat**: aligned with the fault frequencies in the envelope means a fault, scattered means instrumentation. The recommendation text directs that check.
 
 When an instrumentation fault (clipping, DC drift) is active, that warning's wording takes precedence — it already directs an instrumentation check.
 
@@ -236,13 +236,13 @@ If the pattern fires but ISO is in zone A the grade is **Warning**. Naming a cau
 
 Axes that did not raise the grade **are still reported.** A screen that only says "Good" would be lying.
 
-| Situation | Grade | Screen text |
+| Situation | Grade | What the screen conveys (gist) |
 | :--- | :--- | :--- |
 | Pattern ○ · ISO Danger | Danger | outer-race evidence · amplitude in the danger zone |
 | Pattern ○ · ISO Good | **Warning** | outer-race evidence · amplitude still low |
-| Pattern ✕ · ISO Danger | **Good** | **amplitude high but no bearing-fault evidence** — check imbalance/alignment/looseness |
-| Pattern ✕ · baseline breach | Good | sharp rise versus normal |
-| Pattern ✕ · band breach | Good | high-band breach |
+| Pattern ✕ · ISO Danger | **Good** | **no bearing-fault signs · vibration level in the danger range** — checking non-bearing causes such as imbalance, misalignment and looseness is recommended |
+| Pattern ✕ · baseline breach | Good | no bearing-fault signs · sharp rise versus normal |
+| Pattern ✕ · band breach | Good | no bearing-fault signs · band breach |
 | Speed/geometry missing | not graded | **On hold (cannot judge)** |
 
 The third row is the central trade-off of this design. **Non-bearing failures do not raise the grade** — this is a bearing diagnosis tool, and imbalance and misalignment cannot be identified in principle without phase (a tachometer) and an axial channel. It is stated in words rather than hidden.
@@ -288,12 +288,12 @@ Each stage is recorded **once per episode**. Even stepping down Critical → Dan
 
 ### Reading event values
 
-A grade event's value is **the ISO value that set the grade height** (measured on the very waveform the fault pattern was measured on). But ISO is not the axis that switched the grade on (the gate is the fault pattern), so the number alone can mislead. "Why this grade" is answered by the fault-pattern evidence.
+For velocity (mm/s) sensors, a grade event's value is **the ISO value that set the grade height** (measured on the very waveform the fault pattern was measured on). Acceleration and displacement sensors record the RMS of the judgment window in the original unit, and the grade basis (ISO zone, fault pattern) is left as text in the detail cell. But ISO is not the axis that switched the grade on (the gate is the fault pattern), so the number alone can mislead. "Why this grade" is answered by the fault-pattern evidence.
 
 | Where | What you see |
 | :--- | :--- |
 | The "detail" cell of the monitoring event list | velocity sensors: `ISO value · limit (zone boundary crossed)` / acceleration and displacement sensors: `value in the original unit · ISO <zone> 구간 · 결함 패턴 <site>` / signal lost: `N분 무수신` / instrumentation fault · recovery: the reason (e.g. `플랫라인`; hover for the explanation) |
-| The "detail" column of exports (CSV/JSON) and notification text | the fault pattern's grid score · site · cycle, and the reason for an instrumentation fault |
+| The "detail" column of exports (CSV/JSON) | the fault pattern's grid score · site · cycle, and the reason for an instrumentation fault (notification text carries only the value and limit, plus the ISO zone and site for acceleration and displacement sensors) |
 
 Examples from the export's "detail" column:
 
@@ -306,7 +306,7 @@ recovered     격자 2.2 · 4시간 20분 만에 복귀                 (cleared
 
 ## Confirmation — two consecutive cycles
 
-An alarm does not go out the moment the grade changes. **The same judgment must hold for two consecutive cycles** — going up and coming down alike.
+An alarm does not go out the moment the grade changes. **The same judgment must hold for two consecutive cycles** — going up and coming down alike. When improving, however, cycles that step down keep counting — going Danger → Warning → Good, recovery is confirmed on the Good cycle.
 
 ```
 cycle 1   grid 3.2 → Warning   observation event · no alert
@@ -349,7 +349,7 @@ A sudden drop in value does not mean things got better.
 
 The fault pattern sizes its window by **sample count relative to shaft speed**, not by time.
 
-Tags whose stored timestamps are spread out (replayed data, intermittent collection) have fewer samples in the same span. In that case the window is widened and re-read (up to twice); if it still falls short, the pattern judgment is skipped for that cycle. If it overshoots, only the most recent portion is used — a longer window mixes operating states.
+Tags whose stored timestamps are spread out (replayed data, intermittent collection) have fewer samples in the same span. In that case the window is widened and re-read (up to twice); if it still falls short of 4,096 samples, the pattern judgment is skipped for that cycle. Above that, it judges on the shorter window it has. If it overshoots, only the most recent portion is used — a longer window mixes operating states.
 
 A skipped cycle shows on the card as **On hold** (fault pattern measurement failed), with the previous grade held — so it never quietly reads as "Good".
 
@@ -382,7 +382,7 @@ Same rule; different **window, cadence and moment**.
 | | Detail analysis | Continuous monitoring |
 | :--- | :--- | :--- |
 | Grade formula | pattern gates, ISO sets height | **identical** |
-| Pattern window | 100 revolutions | 25 revolutions |
+| Pattern window | 100 revolutions or more (up to 22 s) | 25 revolutions |
 | Adoption threshold | 4.0 | 3.0 |
 | When | when a person picks a period | automatically every extraction interval |
 | Which moment | the **worst** of several points (up to 8) across the period | now |
@@ -407,12 +407,12 @@ Picking "1 hour" gives **the worst moment within that hour** — not the worst o
 
 ## The judgment fingerprint
 
-Generated reports carry a **judgment fingerprint** — a short string computed from the thresholds and criteria used.
+Generated reports carry a **judgment fingerprint** — a short string computed from the judgment engine's rules and fixed constants. Thresholds you changed are not part of the fingerprint; they are recorded separately in the report's reproducibility section (Thresholds).
 
 It settles why two reports differ.
 
-- Same fingerprint → the criteria were identical and **the data changed**
-- Different fingerprint → **the judgment settings changed** in between
+- Same fingerprint → the judgment engine was identical — if the Thresholds section also matches, **the data changed**
+- Different fingerprint → **the package (judgment engine) changed** in between
 
 ## Navigation
 

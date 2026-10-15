@@ -6,7 +6,7 @@ import { listTagTables, tagSchemas, listTags, tagStats, rollupTrend, loadConfig,
 import { ensureMonTables, loadEventsRange, countEvents, loadBaselines, saveBaseline, deleteBaseline, insertEvent, insertBandPoint, loadMonState, saveMonState, createMonitorTimer, deleteMonitorTimer, createBandTimer, deleteBandTimer, bandRaw, bandLatest, bandTrend, bandBackfill, bandTimes } from './data/live.js';
 import { usageStats, countRange, tagUsage, deleteEventsRange, deleteEventsOfTag, deleteBandRange, deleteBandOfTag, deleteMonState } from './data/live.js';
 import { runTql } from './data/live.js';
-import { jwtUser, sessionJwt, whoami, onAuthFail, setUser, checkAppDb, setupSql, createAppDb, appDb, storePrefix, userKeyPrefix, configTable, srcMapOf, listUsers, grantTo, migrateConfigToDb } from './data/live.js';
+import { jwtUser, sessionJwt, whoami, onAuthFail, setUser, checkAppDb, setupSql, createAppDb, appDb, storePrefix, userKeyPrefix, configTable, srcMapOf, listUsers, grantTo, revokeFrom, accessStatus, migrateConfigToDb } from './data/live.js';
 import Monitor from '../../cgi-bin/monitor/monitor.js';
 import Band from '../../cgi-bin/monitor/band.js';
 import Notify from '../../cgi-bin/notify/notify.js';
@@ -185,8 +185,8 @@ var EVT_POLL_MS = 30000;
 // 저장된 설정 정리 — 옛 값 이관·기본값(부팅·다른 곳 저장분 다시 읽기 공용)
 function normCfg(cfg0) {
   var cfg = cfg0 || {};
-  // 옛 설정 이관 — evalWindow는 RMS 구간 길이. 목록 외·과도하게 긴 값은 기본 구간으로
-  if (!DUR_MS[cfg.evalWindow] || cfg.evalWindow === '0') cfg.evalWindow = '10s';
+  // 옛 설정 이관 — evalWindow는 RMS 구간 길이. 해석 불가·0·과도하게 긴 값은 기본 구간으로(직접 입력 '900s' 등은 유지)
+  if (!(durMs(cfg.evalWindow) > 0)) cfg.evalWindow = '10s';
   if (durMs(cfg.evalWindow) > 3600000) cfg.evalWindow = '10s';
   if (!DUR_MS[cfg.monitorInterval]) cfg.monitorInterval = '3s';
   // 목록에서 빠진 1분·5분 주기 → 10분(IV_KO 하한)
@@ -231,6 +231,17 @@ function loadError(tables) {
 }
 // RMS 구간 끝 여유 — 마지막 버킷 적재 중(미완성 버킷은 windowRms가 cnt로 거름)
 var WIN_LAG_MS = 4000;
+// 카드 스파크라인 길이 — 틱 조회는 RMS 구간뿐이라 받은 1초 버킷을 누적해 유지
+var SPARK_MS = 60000;
+/* 스파크라인 버퍼 병합 — 같은 시각은 새 버킷으로 교체(적재 중이던 미완성 버킷 갱신), 최신 기준 spanMs만 남김 */
+function mergeSpark(buf, buckets, spanMs) {
+  var m = {}, out = [];
+  (buf || []).concat(buckets || []).forEach(function (b) { if (b && isFinite(b.rms)) m[b.ms] = b; });
+  Object.keys(m).forEach(function (k) { out.push(m[k]); });
+  out.sort(function (a, b) { return a.ms - b.ms; });
+  var cut = out.length ? out[out.length - 1].ms - spanMs : 0;
+  return out.filter(function (b) { return b.ms > cut; });
+}
 // 계측 이상 확정·복귀 — 10초 축 판정이라 시간 기준(스파이크 한 번에 센서 고장 판정 방지)
 var SENSOR_HOLD_MS = 60000;    // 계측 이상 확정
 var SENSOR_CLEAR_MS = 300000;  // 계측 복귀
@@ -238,7 +249,10 @@ var SENSOR_CLEAR_MS = 300000;  // 계측 복귀
 function judgeDetail(ev, pat, imp) {
   var p = [];
   if (pat && pat.r != null) p.push('격자 ' + Number(pat.r).toFixed(1));
-  if (pat && pat.key) p.push(pat.key);
+  /* 부위 표기 — 구름체(BSF)는 레이스 손상이 동반돼 부위 단정 안 함(calc siteUnknown과 같은 규칙)
+     ⚠ 서버 TQL 임베드 — 표는 함수 안에 */
+  var SITE = { BPFO: '외륜(BPFO)', BPFI: '내륜(BPFI)', BSF: '부위 미상(구름체 후보)' };
+  if (pat && pat.key) p.push(SITE[pat.key] || pat.key);
   if (ev.etype === 'observe') p.push('1회차 — 확정 전');
   else if (ev.etype === 'threshold') p.push('2회 연속 확정');
   else if (ev.etype === 'sustained') p.push('지속 재알림');
@@ -368,13 +382,13 @@ function judgeTick(prev, rg, breach, now, cfg, bandState, run, cyc) {
    toString 단독 전달 시 압축이 durKo 이름을 바꿔 서버에서만 ReferenceError */
 function detailSrc() { return VC.embedSrc([durKo, judgeDetail], { judgeDetail: judgeDetail }); }
 
-export { judgeTick, durMs, detailSrc, normCfg }; // 테스트·서버 타이머 재사용
+export { judgeTick, durMs, detailSrc, normCfg, mergeSpark }; // 테스트·서버 타이머 재사용
 import VC from '../../cgi-bin/calc/calc.js';
 import LLM from '../../cgi-bin/llm/llm.js';
 import Report from '../../cgi-bin/report/report.js';
 import { REPORT_ROOT, reportDir, ensureDir, saveFile, listDir, deleteFile, readFileBlob, chartLibSrc } from './data/live.js';
 import CH from '../../cgi-bin/chart/chart.js';
-// E = 차트 모듈
+// 차트 모듈 — 부팅 시 this.E로 사용
 var ENGINE = CH;
 
 export class App extends Component {
@@ -391,7 +405,7 @@ export class App extends Component {
       ready: false, tab: (props && props.defaultTab) || 'monitor', theme: theme,
       user: '', authMsg: '', cfgFail: null,
       needsDb: false, dbExists: false, dbSetup: null, dbWhy: '', dbAdmin: false, dbBusy: false,
-      grantUsers: null, grantPick: '', grantBusy: false, grantMsg: '',
+      grantUsers: null, grantStatus: null, grantBusy: '', grantAsk: '', grantMsg: '',
       configured: true, monitorOn: true,
       selTag: null, period: '1h', from: '', to: '', // 기본 1시간 — 짧은 창이라야 초 단위 해상도
       diagTag: null, evtTag: 'all', evtType: 'all', evtScope: 'today', // 이벤트 목록 기간: today | 7d | all
@@ -618,26 +632,43 @@ export class App extends Component {
       self._toast('확인 실패: ' + ((e && e.message) || e), 'err');
     });
   }
-  // 권한 부여 — 계정 목록은 처음 펼칠 때 1회 조회, 실패는 문장별 사유 표시(재부여 무해)
-  _loadGrantUsers() {
+  /* 계정 권한 — 계정 목록·권한 상태는 데이터 소스 화면을 처음 열 때 조회(force = 다시 읽기)
+     상태 조회 실패는 null(목록은 표시, 상태 칸만 비움) */
+  _loadGrantUsers(force) {
     var self = this;
-    if (this.state.grantUsers) return;
-    listUsers()
-      .then(function (us) { self.setState({ grantUsers: us, grantPick: self.state.grantPick || us[0] || '' }); })
-      .catch(function (e) { self.setState({ grantUsers: [], grantMsg: '계정 목록을 읽지 못했습니다 — ' + ((e && e.message) || e) }); });
+    // 조회 중 다시 읽기 요청은 끝난 뒤 한 번 더(부여·회수 직후 갱신 누락 방지)
+    if (this._grantLoading) { if (force) this._grantReload = true; return; }
+    if (this.state.grantUsers && !force) return;
+    this._grantLoading = true;
+    var done = function () {
+      self._grantLoading = false;
+      if (self._grantReload) { self._grantReload = false; self._loadGrantUsers(true); }
+    };
+    Promise.all([listUsers(), accessStatus().catch(function () { return null; })])
+      .then(function (r) { self.setState({ grantUsers: r[0], grantStatus: r[1] }); done(); })
+      .catch(function (e) {
+        var why = (e && e.message) || e, S0 = self.state;
+        // 다시 읽기 실패 — 기존 목록·직전 결과 문구 유지
+        if (S0.grantUsers && S0.grantUsers.length) self.setState({ grantMsg: (S0.grantMsg ? S0.grantMsg + ' · ' : '') + '상태를 다시 읽지 못했습니다 — ' + why });
+        else self.setState({ grantUsers: [], grantStatus: null, grantMsg: '계정 목록을 읽지 못했습니다 — ' + why });
+        done();
+      });
   }
-  _grantTo() {
-    var self = this, u = this.state.grantPick;
+  // 권한 부여·회수 공용 — 실패는 문장별 사유 표시(재실행 무해), 끝나면 상태 다시 읽기
+  _grantRun(u, revoke) {
+    var self = this, ko = revoke ? '회수' : '부여';
     if (!u || this.state.grantBusy) return;
-    this.setState({ grantBusy: true, grantMsg: '' });
-    grantTo(u).then(function (r) {
-      self.setState({ grantBusy: false,
+    this.setState({ grantBusy: u, grantAsk: '', grantMsg: '' });
+    (revoke ? revokeFrom : grantTo)(u).then(function (r) {
+      self.setState({ grantBusy: '',
         grantMsg: r.failed ? u + ' — ' + (r.total - r.failed) + '/' + r.total + ' 적용, 실패: ' + r.reasons[0]
-          : u + ' 에 권한을 부여했습니다 (' + r.total + '건)' });
-      self._toast(u + ' 권한 부여 완료', r.failed ? 'warn' : 'ok');
+          : u + (revoke ? ' 의 권한을 회수했습니다' : ' 에 권한을 부여했습니다') + ' (' + r.total + '건)' });
+      self._toast(u + ' 권한 ' + ko + ' 완료', r.failed ? 'warn' : 'ok');
+      self._loadGrantUsers(true);
     }).catch(function (e) {
-      self.setState({ grantBusy: false, grantMsg: '실패 — ' + ((e && e.message) || e) });
-      self._toast('권한 부여 실패', 'err');
+      self.setState({ grantBusy: '', grantMsg: '실패 — ' + ((e && e.message) || e) });
+      self._toast('권한 ' + ko + ' 실패', 'err');
+      self._loadGrantUsers(true);
     });
   }
   // 저장소 생성 뒤 — 테이블 생성·설정 이관 위해 부팅 처음부터 재실행
@@ -872,7 +903,8 @@ export class App extends Component {
             var last = buckets[buckets.length - 1];
             eq.lastSeen = last.ms;
             eq.rms = last.rms;                            // 최신 1초(표시 보조·폴백용)
-            eq.sparkVals = buckets.map(function (b) { return b.rms; }).slice(-36);
+            eq.sparkBuf = mergeSpark(eq.sparkBuf, buckets, SPARK_MS);
+            eq.sparkVals = eq.sparkBuf.map(function (b) { return b.rms; });
             eq.spark = E.sparkPath(eq.sparkVals.length ? eq.sparkVals : [0, 0], 132, 40, 3);
             eq.grade = self._severityOf(eq);               // 화면 등급도 판정값 기준 — 표시·이벤트 일치
             if (last.ms > self.data.now) self.data.now = last.ms;
@@ -1074,7 +1106,8 @@ export class App extends Component {
       rec: function (ago, why) { return '대역 추출이 ' + ago + ' 전 멈췄다가 자동으로 복구됐습니다 — ' + why
         + '. 그 사이 대역 값이 쌓이지 않아 대역 기준이 판정에서 빠져 있었습니다'; } };
     var dead = null, dband = null;   // 사망 판정 사유 — 자동 복구 입력
-    if (C.monMode === 'server') {
+    // 감시 타이머 점검은 알람이 켜져 있을 때만 — 알람 OFF면 타이머가 내려가 있는 게 정상(대역 추출만 켠 경우)
+    if (C.monMode === 'server' && C.monitorOn) {
       if (!timers) {
         warns.push({ k: 'unknown', lv: 'warn', text: '감시 타이머 상태를 확인할 수 없습니다 — Neo 연결을 확인하세요' });
       } else {
@@ -1141,7 +1174,7 @@ export class App extends Component {
         if (_rw) warns.push(_rw);
       }
     }
-    if (C.monMode !== 'server' && this._lastJudgeAt
+    if (C.monMode !== 'server' && C.monitorOn && this._lastJudgeAt
       && (typeof document === 'undefined' || document.visibilityState !== 'hidden')) {
       var lag = now - this._lastJudgeAt;
       if (lag > Math.max(60000, iv * 20)) {
@@ -1607,7 +1640,7 @@ export class App extends Component {
     };
     var jobs = [], nEv = 0;
     var zoneLim = function (zs, g) { return g > 0 ? zs[g - 1] : zs[0]; };
-    // 최신 대역값·결함 패턴 — 추출 주기 캐시 사용, 주기 절반 경과 시에만 갱신
+    // 최신 대역값(주기 절반마다 다시 읽기)·결함 패턴(추출 주기마다 측정) — 캐시 사용
     this._refreshBandNow();
     this._refreshPatNow();
     this._activeEqs().forEach(function (eq) {
@@ -2060,17 +2093,17 @@ export class App extends Component {
       self._bandNowBusy = false;
     }).catch(function () { self._bandNowBusy = false; });
   }
-  // 최신 결함 패턴 캐시 — 대역과 같은 주기. 원시 파형 조회라 10초 판정마다 불가, 급변은 10초 축 담당
+  // 최신 결함 패턴 캐시 — 추출 주기마다 측정(서버 patTtlMs와 같은 간격 = 같은 회차 길이). 원시 파형 조회라 10초 판정마다 불가, 급변은 10초 축 담당
   _refreshPatNow() {
     var C = this._ac();   // 적용된 설정 — 폼의 미저장 편집 배제
     var self = this, S = this.state;
     /* 알람 꺼져도 동작 — 카드 등급은 알람과 무관하게 게이트 규칙(막으면 게이트 없는 ISO 폴백 등급 노출)
        감시 화면도 안 보고 알람도 꺼져 있으면 중단(원시 파형 조회 비용)
-       비울 때 측정 시각도 초기화 — 재가동 시 주기 절반 대기로 '첫 측정 대기' 보류 방지 */
+       비울 때 측정 시각도 초기화 — 재가동 시 한 주기 대기로 '첫 측정 대기' 보류 방지 */
     if (!C.monitorOn && S.tab !== 'monitor') { this._patNow = null; this._patNowAt = 0; return; }
     var iv = durMs(C.bandInterval || '10m') || 600000;   // 대역과 같은 주기(둘 다 원시 파형)
     var now = Date.now();
-    if (this._patNowAt && now - this._patNowAt < iv / 2) return;
+    if (this._patNowAt && now - this._patNowAt < iv) return;
     if (this._patNowBusy) return;
     this._patNowBusy = true;
     this._patNowAt = now;
@@ -2432,6 +2465,9 @@ export class App extends Component {
   }
   componentDidUpdate() {
     this._scheduleDraw();
+    // 계정 권한 표 — SYS가 데이터 소스 화면을 처음 열 때 1회 조회
+    var S = this.state;
+    if (S.tab === 'settings' && S.setSection === 'source' && S.user === 'SYS' && !S.needsDb && !S.grantUsers) this._loadGrantUsers();
     // 직접 입력 선택 직후 — 패널이 그려진 뒤 품번 칸에 커서
     if (this._focusGeoName && typeof document !== 'undefined') {
       var id = this._focusGeoName; this._focusGeoName = null;
@@ -2467,10 +2503,11 @@ export class App extends Component {
     var zones = this._isoZones(eq);
     var self = this;
     var rank = function (a) {
+      var iso = VC.gradeFor(a.isoRms, zones), hit = a.patScore >= VC.TGT_ADOPT ? 1 : 0;
       return {
         stopped: med > 0 && a.acRms < 0.05 * med,
-        iso: VC.gradeFor(a.isoRms, zones),
-        hit: a.patScore >= VC.TGT_ADOPT ? 1 : 0,
+        g: VC.patternGate(!!hit, iso),   // 그 지점의 판정 등급(패턴이 켜고 ISO가 높이)
+        iso: iso, hit: hit,
         score: a.patScore, rms: a.isoRms, a: a,
       };
     };
@@ -2478,12 +2515,13 @@ export class App extends Component {
     // 정지 의심 제외 — 전부 정지면 그중에서 선택
     var pool = rs.filter(function (r) { return !r.stopped; });
     if (!pool.length) pool = rs;
+    // 판정 등급 → ISO 등급 → 결함 채택 → 점수 순 — 패턴이 어디에도 없으면 진동이 큰 지점
     pool.sort(function (x, y) {
-      return (y.iso - x.iso) || (y.hit - x.hit) || (y.score - x.score) || (y.rms - x.rms);
+      return (y.g - x.g) || (y.iso - x.iso) || (y.hit - x.hit) || (y.score - x.score) || (y.rms - x.rms);
     });
     var win = pool[0];
-    // 같은 수준 지점 수 동반 반환 — 단발·지속 구분용(판정 기준엔 미반영, 단발 진짜 결함 보존)
-    var lvl = function (r) { return Math.max(r.iso, r.hit); };
+    // 같은 수준 지점 수 동반 반환 — 단발·지속 구분용(판정 기준엔 미반영, 단발 진짜 결함 보존), 수준 = 선택을 가른 축
+    var lvl = win.g > 0 ? function (r) { return r.g; } : function (r) { return r.iso; };
     var wl = lvl(win);
     return { at: win.a.at, sweep: sw, worst: win, live: live.length,
       atLevel: pool.filter(function (r) { return lvl(r) >= wl; }).length, poolN: pool.length, level: wl,
@@ -2692,10 +2730,16 @@ export class App extends Component {
        - 회전수 없으면 결함 패턴·대역은 0점 아닌 측정 불가(1× 상대 정의)
        - 축 이름에 가운뎃점 금지(이름 연결 구분자와 혼동) */
     var _rpmOk = eq.rpm > 0;
+    // 결함 패턴 = 회전수·구름체 기하 둘 다 필요(감시 _patCapable과 같은 조건 — 품번 미지정·저널 베어링은 판정 못 함)
+    var _patMeta = this._patCapable(eq);
     var coreAx = [
       { ko: 'ISO 존', ok: isoGi != null },
-      { ko: '결함 패턴', ok: _rpmOk && !!(evx && !evx.gate) },
+      { ko: '결함 패턴', ok: _patMeta && !!(evx && !evx.gate) },
     ];
+    /* 결함 패턴 못 잰 사유 — meta(회전수·품번 없음) · sleeve(저널 베어링, 판정 대상 아님) · gate(계측 이상) · data(스펙트럼 없음)
+       판정문·리포트 머리·조치 카드·LLM 근거가 같은 사유를 씀 */
+    var _sleeve = _rpmOk && !!(eq.bearing && eq.bearing.model === 'sleeve');
+    var patWhy = coreAx[1].ok ? '' : !_patMeta ? (_sleeve ? 'sleeve' : 'meta') : (evx && evx.gate) ? 'gate' : 'data';
     var extraAx = [
       { ko: '베이스라인', ok: blGi != null },
       { ko: '대역', ok: _rpmOk && !!_bandJ },
@@ -2727,7 +2771,15 @@ export class App extends Component {
     var _gr = VC.gateReason(det.quality, null);
     if (_gr) { verdict = '계측 검증 필요(' + _gr.label + ') — 결함 진단 보류 · 센서·케이블·마운팅 점검'; impulse = false; }
     // 회전수 미상은 계측 게이트 다음 우선순위
-    else if (!_rpmOk && gi === 0) verdict = '회전수 미상 — 주파수 판정 불가(결함 패턴·대역 축 제외) · 설정에서 RPM을 입력하십시오';
+    /* 결함 패턴을 못 세우는 설정(회전수·구름체 기하 없음) — 다른 축 소견이 없을 때만 판정문 대체, 있으면 사유만 덧붙임
+       (진동 수준·평소 대비 급증 같은 소견을 지우지 않음) */
+    else if (gi === 0 && !_patMeta) {
+      var _noPat = !_rpmOk ? '회전수 미상' : _sleeve ? '저널 베어링' : '베어링 품번 미지정';
+      if (isoOnly > 0 || blOnly || bandOnly || impulse) verdict += ' · 결함 패턴 판정 불가(' + _noPat + ')';
+      else verdict = !_rpmOk ? '회전수 미상 — 주파수 판정 불가(결함 패턴·대역 축 제외) · 설정에서 RPM을 입력하십시오'
+        : _sleeve ? '저널(sleeve) 베어링 — 구름베어링 결함주파수가 없어 결함 패턴 판정 대상이 아닙니다'
+          : '구름베어링 형상 없음(품번 미지정) — 결함 패턴 판정 불가 · 설정에서 베어링 품번을 입력하십시오';
+    }
     var acts = this._buildActions(eq, det, dom, cause, evx);
     return {
       // gi: 패턴 축 반영 등급 — 화면·리포트 공통 사용(판정문·등급 칩 일치)
@@ -2735,7 +2787,7 @@ export class App extends Component {
       isoOnly: isoOnly, isoGi: isoGi, blOnly: blOnly, bandOnly: bandOnly,
       // 진동(주파수 대역)·베어링(포락선 결함주파수) 분리 반환 — 조치가 다르고 대역 배수는 인접 결함 전파로 오염 가능
       bandAx: _bandJ ? { envR: _bandJ.envR, envKey: _bandJ.envKey, envAlt: _bandJ.envAlt, freqR: _bandJ.freqR, freqKey: _bandJ.freqKey } : null,
-      cov: { n: covN, total: coreAx.length, missing: covMiss, extra: extraOn },
+      cov: { n: covN, total: coreAx.length, missing: covMiss, extra: extraOn, patWhy: patWhy },
       sub: (eq.alias || eq.name) + ' · ' + (eq.bearing && eq.bearing.n ? '베어링 ' + this._bearingLabel(eq) : '베어링 미지정') + ' · ' + this._rpmText(eq)
         + (det.frMeas ? '(실측 ' + Math.round(det.frMeas.rpm) + ')' : '')
         + (det.isoRms != null ? ' · ISO Zone ' + ['A', 'B', 'C', 'D'][VC.gradeFor(det.isoRms, this._isoZones(eq))] : ''),
@@ -3761,7 +3813,7 @@ export class App extends Component {
     if (gs.patOk === false) return { kind: 'nojudge', label: '판정 못 함' };
     return null;
   }
-  /* 원본 단위 존 — 사용자 임계값은 입력 문자열 그대로 저장(THRESH_RAW), 여기서 숫자화(빈 값·비숫자면 규격 기본값)
+  /* 원본 단위 존 — 사용자 임계값은 입력 문자열 그대로 저장(_setThreshRaw), 여기서 숫자화(빈 값·비숫자면 규격 기본값)
      cfg 생략 = 적용 설정, 설정 화면 미리보기만 편집본(state) 전달 */
   _effZones(eq, cfg) {
     var S = cfg || this._ac();
@@ -3954,13 +4006,14 @@ export class App extends Component {
      패키지 표 현황·사용자 실행 삭제(삭제 전 건수 확인)
       · EVENTS·BAND(TAG) — 기간·태그 단위
       · LOOKUP 둘        — 키 단위
-     불가 동작은 흐리게 표시(이유 명시) */
-  _refreshUsage() {
+     불가 동작은 흐리게 표시(이유 명시)
+     exact = 삭제 직후 갱신 — V$_STAT 반영 지연으로 옛 건수가 보이지 않게 원본 집계 */
+  _refreshUsage(exact) {
     var self = this;
     if (!this.live) return Promise.resolve();
     this.setState({ usageBusy: true });
     // 태그별 보유량도 함께 조회 — '감시 대상 밖 N건' 표시용
-    return Promise.all([usageStats(), tagUsage().catch(function () { return null; })])
+    return Promise.all([usageStats(exact), tagUsage(exact).catch(function () { return null; })])
       .then(function (r) { self.setState({ usage: r[0], tagUsage: r[1], usageBusy: false }); })
       .catch(function (e) { self.setState({ usageBusy: false }); self._toast('현황 조회 실패: ' + (e.message || e), 'err'); });
   }
@@ -3986,7 +4039,7 @@ export class App extends Component {
       rows.forEach(function (r) { if (self._monState) delete self._monState[r.key]; });
       self._toast(one ? rows[0].key + ' 데이터를 지웠습니다' : rows.length + '개 태그의 데이터를 지웠습니다', 'ok');
       self.setState({ orphanBusy: null });
-      return self._refreshUsage();
+      return self._refreshUsage(true);
     }).catch(function (e) {
       self.setState({ orphanBusy: null });
       self._toast('정리 실패: ' + (e.message || e), 'err');
@@ -4019,7 +4072,7 @@ export class App extends Component {
         self.setState({ purge: null, purgeTyped: null });
         self._toast(self._num(n) + (isBand ? '행' : '건') + ' 삭제했습니다', 'ok');
         if (!isBand) self._loadEventsLive();          // 목록도 삭제 후 상태로 갱신
-        return new Promise(function (r) { setTimeout(r, 1200); }).then(function () { return self._refreshUsage(); });
+        return new Promise(function (r) { setTimeout(r, 1200); }).then(function () { return self._refreshUsage(true); });
       })
       .catch(function (e) {
         self.setState({ purge: null, purgeTyped: null });
@@ -4055,14 +4108,32 @@ export class App extends Component {
     base.dbReady = !S.needsDb && !!S.user;
     base.dbAdmin = (S.user === 'SYS');
     base.dbName = setup.db;
-    base.dbGrantSql = setup.grant;
-    base.grantUsers = S.grantUsers;
-    base.grantPick = S.grantPick || '';
-    base.grantBusy = !!S.grantBusy;
+    base.dbGrantSql = '-- 권한 주기\n' + setup.grant + '\n\n-- 권한 회수\n' + setup.revoke + '\n\n-- 권한 확인\n' + setup.check;
+    /* 계정별 권한 표 — 상태 = 대상 5곳(DB·공용 표 4) 중 권한 있는 곳 수, 다 있으면 회수만·하나도 없으면 부여만
+       상태를 못 읽었으면 두 버튼 모두(재실행 무해) */
+    var gst = S.grantStatus;
+    base.grantLoading = !S.grantUsers;
     base.grantMsg = S.grantMsg || '';
-    base.onGrantOpen = function () { self._loadGrantUsers(); };
-    base.onGrantPick = function (e) { self.setState({ grantPick: e.target.value, grantMsg: '' }); };
-    base.onGrantRun = function () { self._grantTo(); };
+    base.grantBusy = !!S.grantBusy;
+    base.onGrantRefresh = function () { self.setState({ grantMsg: '' }); self._loadGrantUsers(true); };
+    base.grantRows = (S.grantUsers || []).map(function (u) {
+      var st = gst ? (gst[u] || { n: 0, total: 5, timers: 0 }) : null;
+      var full = !!st && st.n >= st.total, none = !!st && st.n === 0;
+      var tm = st && st.timers > 0 ? st.timers : 0;
+      return {
+        user: u, busy: S.grantBusy === u, ask: S.grantAsk === u,
+        statusText: !st ? '확인 불가' : full ? '권한 있음' : none ? '권한 없음' : '일부만 있음 (' + st.n + '/' + st.total + ')',
+        statusColor: !st ? 'var(--text-muted)' : full ? '#3aa76d' : none ? 'var(--text-muted)' : '#d99a2b',
+        timersText: tm ? '타이머 ' + tm + '개' : '',
+        canGrant: !full, canRevoke: !none,
+        askText: (tm ? '이 계정의 이 패키지 타이머 ' + tm + '개는 회수 뒤 매 회차 실패합니다 — 먼저 그 계정으로 알람과 대역 추출을 끄십시오. ' : '')
+          + '설정·이벤트·학습값은 지우지 않으며, 다시 권한을 주면 그대로 이어집니다.',
+        onGrant: function () { self._grantRun(u, false); },
+        onRevoke: function () { self.setState({ grantAsk: u, grantMsg: '' }); },
+        onRevokeYes: function () { self._grantRun(u, true); },
+        onRevokeNo: function () { self.setState({ grantAsk: '' }); },
+      };
+    });
     base.dbBusy = !!S.dbBusy;
     base.onMakeDb = function () { self._makeDb(); };
     base.onCheckDb = function () { self._checkDb(); };
@@ -4237,7 +4308,8 @@ export class App extends Component {
       : '표본 부족(연속 ' + VC.DWELL_MIN_N + '개 이상 필요)';
     return [
       '등급을 올린 축 ' + (g > 0 ? (srcKo[dx.gradeSrc] || dx.gradeSrc)
-        : (dx.cov && (dx.cov.missing || []).indexOf('결함 패턴') >= 0) ? '없음(결함 패턴 미측정 — 회전수·기하 확인)'
+        : (dx.cov && (dx.cov.missing || []).indexOf('결함 패턴') >= 0)
+          ? '없음(결함 패턴 미측정 — ' + ({ gate: '계측 이상', data: '이 구간 스펙트럼 없음', sleeve: '저널 베어링, 판정 대상 아님' }[dx.cov.patWhy] || '회전수·기하 확인') + ')'
           : '없음(결함 패턴 미검출)'),
       '진동/베어링 ' + (axTxt.join('  ·  ') || '대역 이탈 없음(또는 학습 전)'),
       '지속 최악 ' + dwTxt,
@@ -4439,7 +4511,7 @@ export class App extends Component {
           verdict: dx.verdict,
           // 헤드라인용 판정 값(리포트는 재판정 없이 인쇄) — patOn=결함 패턴 켜짐 · patNa=측정 불가 · isoOnly=등급 미반영 고 ISO 존
           judge: {
-            patOn: !!dx.patGi, patNa: !!(dx.cov && (dx.cov.missing || []).indexOf('결함 패턴') >= 0),
+            patOn: !!dx.patGi, patNa: !!(dx.cov && (dx.cov.missing || []).indexOf('결함 패턴') >= 0), patWhy: (dx.cov && dx.cov.patWhy) || '',
             isoGi: dx.isoGi != null ? dx.isoGi : null, isoOnly: dx.isoOnly || 0,
             site: (_ev && _ev.top && _ev.top.f) ? _ev.top.f : '',
             score: (_ev && _ev.top && _ev.top.score != null) ? _ev.top.score : null,
@@ -4553,6 +4625,13 @@ export class App extends Component {
             // 결함 패턴 측정 불가 = 측정 상태 — ISO 값만으로 조치 지시 안 함
             var _covMiss = (dx && dx.cov && dx.cov.missing) || [];
             if (_covMiss.indexOf('결함 패턴') >= 0) {
+              var _pw = dx.cov.patWhy;
+              if (_pw === 'data') return { kind: 'nojudge', cls: 'hold', icon: '⏸', title: '판정 못 함 — 이 구간의 파형 부족',
+                body: '스펙트럼을 만들 데이터가 부족해 베어링 상태를 판정하지 않았습니다. 다른 기간으로 다시 생성하십시오.',
+                basis: 'ISO 대역제한 속도 RMS ' + E.fmt(det.isoRms) + ' mm/s — 이 값만으로는 베어링 상태를 말할 수 없습니다' };
+              if (_pw === 'sleeve') return { kind: 'nojudge', cls: 'hold', icon: '⏸', title: '결함 패턴 판정 대상 아님 — 저널 베어링',
+                body: '구름베어링 결함주파수가 없는 저널(sleeve) 베어링이라 결함 패턴으로 판정하지 않습니다. 진동 크기는 ISO 존으로 확인하십시오.',
+                basis: 'ISO 대역제한 속도 RMS ' + E.fmt(det.isoRms) + ' mm/s' };
               return { kind: 'nojudge', cls: 'hold', icon: '⏸', title: '판정 못 함 — 회전수·베어링 정보 필요',
                 body: '결함주파수 격자를 세울 수 없어 베어링 상태를 판정하지 않았습니다. 설정 → 설비 정보에 명판 회전수와 베어링 품번을 넣고 다시 생성하십시오.',
                 basis: 'ISO 대역제한 속도 RMS ' + E.fmt(det.isoRms) + ' mm/s — 이 값만으로는 베어링 상태를 말할 수 없습니다' };
@@ -6266,7 +6345,7 @@ export class App extends Component {
     base.evalWinBad = durMs(S.evalWindow) < _ivMs;
     // 채널은 웹훅 하나 — jsh에 SMTP 없음, HTTP API·자동화 도구 경유는 전부 웹훅 URL로 표현
     base.notifChannels = [
-      { key: 'webhook', label: '웹훅', hint: 'Slack · Teams · Discord · Google Chat · 자체 엔드포인트 — 이메일·문자는 n8n 등 자동화 도구를 이 URL로 받아 중계', ph: 'https://hooks.slack.com/services/…', ready: true }
+      { key: 'webhook', label: '웹훅', hint: 'Slack · Discord · Google Chat · 자체 엔드포인트 — 이메일·문자는 n8n 등 자동화 도구를 이 URL로 받아 중계', ph: 'https://hooks.slack.com/services/…', ready: true }
     ].map(function (c) {
       var on = !!S.notifCh[c.key];
       var val = (S.notifTo || {})[c.key] || '';
@@ -6392,7 +6471,7 @@ export class App extends Component {
         color = learned < VC.BAND_ORDER.length ? '#d99a2b' : 'var(--text-secondary)';
       } else {
         status = '미학습 — 대역 이탈 판정 안 함';
-        tip = '대역값이 최소 ' + VC.BASELINE_MIN_N + '개 쌓여야 학습됩니다. 추출 주기 10분이면 약 5시간, 1분이면 30분이 걸립니다.';
+        tip = '대역값이 최소 ' + VC.BASELINE_MIN_N + '개 쌓여야 학습됩니다. 추출 주기 10분이면 약 5시간, 30분이면 약 15시간이 걸립니다.';
         color = 'var(--text-muted)';
       }
       // 채움 칩 — 학습 창 채움 정도(학습 상태와 별개: 재료 부족 vs 기준 미설정)

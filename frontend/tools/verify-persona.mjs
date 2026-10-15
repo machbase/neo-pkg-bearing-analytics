@@ -1,29 +1,20 @@
 // 페르소나 판정 규칙(R1~R12) 기계 검사 — 진단 로직(calc/live/app) 수정 시 회귀 확인
-// · 라이브(Neo 127.0.0.1:5654 + BEARING 테이블 데이터 필요) · npm run verify:live 포함
-//   node tools/verify-persona.mjs [TAG]
-globalThis.window = globalThis;
-const NEO = 'http://127.0.0.1:5654'; const _f = globalThis.fetch;
-globalThis.fetch = (u, o) => _f(typeof u === 'string' && u.startsWith('/') ? NEO + u : u, o);
+// · 라이브(Neo + 로그인 계정의 BEARING 테이블 데이터 필요) · npm run verify:live 포함
+//   NEO_USER=… NEO_PASSWORD=… node tools/verify-persona.mjs [테이블]
+await import('./_liveauth.mjs');   // 로그인(NEO_USER·NEO_PASSWORD) — 없으면 건너뜀
 
-// 프리플라이트 — 서버 없으면 원인 불명 스택 대신 명확한 메시지로 종료
-try { await _f(NEO + '/db/query?q=' + encodeURIComponent('SELECT 1 as X'), { signal: AbortSignal.timeout(3000) }); }
-catch (e) { console.error('SKIP — Neo(' + NEO + ') 미기동. 서버를 띄운 뒤 다시 실행하세요.'); process.exit(2); }
-
-const TAG = process.argv[2] || 'BEARING';
 const VC = (await import('../../cgi-bin/calc/calc.js')).default;
 const CH = (await import('../../cgi-bin/chart/chart.js')).default;
 const L = await import('../src/data/live.js');
-const { App } = await import('../src/app.js');
+const { App, normCfg } = await import('../src/app.js');
 const { readFileSync } = await import('node:fs');
 
-// ⚠ 설비 설정(베어링 품번·Class·RPM·단위) 필수 — 빈 cfg면 전부 폴백이 되어 실제 앱과 다른 것을 검증
-const CFG_PATH = new URL('../../cgi-bin/config/equipment.json', import.meta.url);
-const CFG = (() => {
-  try { return JSON.parse(readFileSync(CFG_PATH, 'utf8')); }
-  catch (e) { console.warn('[harness] equipment.json 로드 실패 — 폴백으로 진행:', e.message); return {}; }
-})();
+// 설비 설정 = 로그인 계정의 저장 설정(앱 부팅과 같은 경로) — 빈 cfg면 전부 폴백이라 실제 앱과 다른 것을 검증
+const CFG = normCfg(await L.loadConfig());
+const TBL = process.argv[2] || 'BEARING';
+if (!(await L.listTagTables()).includes(TBL)) { console.log('건너뜀 — 이 계정에 ' + TBL + ' 테이블 없음(테이블 이름을 인자로)'); process.exit(0); }
 
-const data = await L.buildLiveData(Object.assign({}, CH), [TAG], CFG);
+const data = await L.buildLiveData(Object.assign({}, CH), [TBL], CFG);
 const app = new App({}); app.E = Object.assign({}, CH); app.live = true; app.data = data;
 const eq = data.equipment[0];
 app.state.selTag = eq.id;

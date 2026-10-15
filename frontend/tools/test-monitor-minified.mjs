@@ -1,4 +1,4 @@
-// 미니파이 회귀 — 라이브(Neo 필요)
+// 미니파이 회귀 — 라이브(Neo 필요) · npm 스크립트 미포함
 // · 빌드 시 함수명이 축약돼도(judgeTick→ie, shouldNotify→n …) 생성된 타이머 TQL 동작(ReferenceError 없음)
 globalThis.window = globalThis;
 const NEO = 'http://127.0.0.1:5654';

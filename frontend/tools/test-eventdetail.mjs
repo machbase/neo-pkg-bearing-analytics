@@ -1,6 +1,6 @@
 /* 이벤트 사유(DETAIL) — judgeDetail이 격자 점수·부위·확정 근거·충격성 값을 싣는지, 앱·서버가 같은 함수로 채우는지
  * · 이벤트 유형 표(앱↔서버 사본) 일치, 격자 점수 계열(:pattern) 적재
- * 오프라인(Neo 불필요) · 소스 정적 검사 · npm run smoke 미포함
+ * 오프라인(Neo 불필요) · 소스 정적 검사 · npm run smoke 포함
  */
 import fs from 'node:fs';
 
@@ -19,7 +19,12 @@ const chk = (ok, msg, got) => { console.log((ok ? 'PASS ' : 'FAIL ') + msg + (go
   if (m) {
     const durKo = (ms) => (ms < 3600000 ? Math.round(ms / 60000) + '분' : Math.round(ms / 3600000) + '시간');
     const fn = new Function('durKo', m[0] + '; return judgeDetail;')(durKo);
-    const pat = { r: 3.24, key: '외륜(BPFO)' };
+    // 부위 키는 판정이 내는 원문(BPFO·BPFI·BSF) — 문구에서 부위 이름으로
+    const pat = { r: 3.24, key: 'BPFO' };
+    chk(/· 외륜\(BPFO\) ·/.test(fn({ etype: 'threshold' }, pat)), '부위 키 BPFO → 외륜(BPFO)', fn({ etype: 'threshold' }, pat));
+    chk(/내륜\(BPFI\)/.test(fn({ etype: 'threshold' }, { r: 3.5, key: 'BPFI' })), '부위 키 BPFI → 내륜(BPFI)');
+    const bsf = fn({ etype: 'threshold' }, { r: 3.5, key: 'BSF' });
+    chk(/부위 미상/.test(bsf) && !/· BSF ·/.test(bsf), '구름체(BSF)는 부위를 단정하지 않는다 — 부위 미상', bsf);
 
     const obs = fn({ etype: 'observe' }, pat);
     chk(/격자 3\.2/.test(obs) && /외륜/.test(obs), '조짐에 격자 점수와 부위가 들어간다', obs);

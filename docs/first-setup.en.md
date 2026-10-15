@@ -5,7 +5,7 @@ weight: 20
 
 # First setup
 
-[한국어](./first-setup.kr.md) | **English**
+[English](./first-setup.en.md) | [한국어](./first-setup.kr.md) | [日本語](./first-setup.ja.md)
 
 > The app's screens are in Korean. This guide gives each screen label in English with the Korean label in parentheses where it helps you find it.
 
@@ -17,18 +17,20 @@ are stored both follow that account, so an administrator (SYS) has to prepare th
 | Who | What |
 | :--- | :--- |
 | SYS | Settings → Data Source → **User info** card → `Create` (만들기) — creates the dedicated database `NEO_BEARING_STORE` |
-| SYS | Same card, **Grant an account** (패키지 사용 계정에 권한 주기) — pick an account and press the button (once per account) |
+| SYS | Same card, **Package account permissions** (패키지 사용 계정 권한) list — press **Grant** (권한 주기) on that account's row (once per account) |
 | SYS | Grant the data tables to analyze: `GRANT SELECT ON MACHBASEDB.SYS.<table> TO <account>;` |
 
 An account without grants sees only a notice ("cannot reach the database") and a `Check status` (상태 확인) button.
 Once the grants are in place, that button resumes the app without a reload.
+
+The list shows each account's permission status (**granted** 권한 있음 · **partial** 일부만 있음 · **none** 권한 없음) and how many of this package's timers that account has registered. Use **Revoke** (권한 회수) for an account that no longer uses the package. Settings, events and learned baselines are not deleted, so granting again picks up where it left off. Before revoking, sign in as that account and turn off its alarms and band extraction — SYS cannot stop another account's timers, so any timers left behind fail on every cycle after the revoke.
 
 If an account cannot even sign in to the Neo console, it lacks access to the default database (`ERR-2835`).
 That is a Neo prerequisite rather than a package one: `GRANT CONNECT ON DATABASE MACHBASEDB TO <account>;`
 
 ## The settings screen
 
-When you first open the app, the **Settings** screen is where you define what to analyze. Settings is split into six sections down the left side.
+When you first open the app, the monitoring screen shows a "no saved settings" (저장된 설정이 없습니다) notice and a **Start setup** (설정 시작) button. Press it to go to the **Settings** screen, where you define what to analyze. Settings is split into six sections down the left side.
 
 | Section | Contents | Required |
 | :--- | :--- | :---: |
@@ -39,7 +41,7 @@ When you first open the app, the **Settings** screen is where you define what to
 | LLM | Provider for detail-analysis and report opinions | Optional |
 | Data management | Storage usage, ranged & per-tag data deletion | Optional |
 
-Badges next to the section names count what still needs attention — under Equipment, **Cannot judge N** (판정 불가: tags with no RPM or bearing, so no grade) and **Unset N** (미설정); under Criteria, **Untrained N** (미학습) and **Retrain N** (재학습). While anything is left, the ⚙ button in the header also shows an amber dot.
+Badges next to the section names count what still needs attention — under Equipment, **Cannot judge N** (판정 불가: tags with no RPM or bearing, so no grade) and **Unset N** (미설정); under Criteria, **Untrained N** (미학습) and **Retrain N** (재학습). Each section shows only one badge, with the more urgent one taking precedence (Cannot judge over Unset, Untrained over Retrain). While anything is left, the ⚙ button in the header also shows an amber dot.
 
 Changing a setting shows an "unsaved changes" bar at the bottom of the screen; pressing **Save** reloads live data. **Changes take effect only once saved** — until then the monitoring screen, in-app judgment, and server monitoring all keep running on the previous settings. Navigating away with unsaved changes prompts for confirmation (**Cancel** · **Discard and leave** · **Save and leave**). **Discard and leave** throws the edits away and restores the saved settings.
 
@@ -115,10 +117,10 @@ RPM is never guessed. A wrong speed throws the whole fault-frequency grid off wh
 
 "Exactly" means **the actual running speed of the shaft carrying the bearing**.
 
-- Enter the nameplate **rated speed** (1750 for a 4-pole 60 Hz motor), not the synchronous speed (1800). The fault pattern computes fault frequencies from this value and matches them with a **1% tolerance**, so a 2–3% error like the synchronous speed misses the fault.
+- Enter the nameplate **rated speed** (e.g. 1750 for a 4-pole 60 Hz motor), not the synchronous speed (1800). The fault pattern computes fault frequencies from this value and matches them with a **1% tolerance**, so a 2–3% error like the synchronous speed misses the fault.
 - When detail analysis measures the speed from the spectrum and it differs from the entry by **more than 2%**, it shows a warning with a **Save measured N rpm** button. The button saves immediately. The measured value reflects the load at that moment; for machines whose load swings widely, re-check at the usual operating point.
 - Why the measured value is not used for matching directly — in verification on public data, matching with the measured speed did not raise detections and only added false alarms. On machines with a weak running-speed peak (acceleration sensors, for example) the measurement often fails anyway.
-- On a **belt drive**, enter the motor's rated speed. If the sensor sits on a bearing across the belt (fan, pump, …), open the settings button → belt specification and set **sensor position to driven side** — the app converts the speed by the pulley ratio, or uses a measured driven-shaft speed if you enter one (see measurement and drive below).
+- On a **belt drive**, enter the motor's rated speed. If the sensor sits on a bearing across the belt (fan, pump, …), press the **Settings** button → belt specification and set **sensor position to driven side** — the app converts the speed by the pulley ratio, or uses a measured driven-shaft speed if you enter one (see measurement and drive below).
 - If the sensor is on a **gearbox (gear) output shaft**, enter that shaft's speed (motor speed ÷ gear ratio).
 
 ### ISO class reference
@@ -234,7 +236,7 @@ A learning window rarely contains nothing but normal operation, so learning hand
 
 **Momentary spikes don't shift the result.** Center and variation are estimated with median-based statistics rather than mean and standard deviation. A few spikes are enough for the standard-deviation approach to inflate the limit badly — **the criterion meant to catch breaches ends up hiding them.** Median-based estimates hold even when half the sample is contaminated.
 
-**Stopped and ramping intervals are excluded.** Buckets that fall below 20% of the operating level (stopped or idle) and buckets that change sharply against their neighbors (startup and shutdown ramps) are dropped from learning. What was excluded is shown in the completion notice and status line as `excluded 12 (idle 8 · transient 4)`.
+**Stopped and ramping intervals are excluded.** Buckets that fall below 20% of the operating level (stopped or idle) and buckets that change sharply against their neighbors (startup and shutdown ramps) are dropped from learning. What was excluded is shown in the completion notice and status line as `excluded 12 (idle 8 · transient 4)` (`제외 12개(정지 8·과도 4)`).
 
 **A window that is mostly downtime is refused.** If most of the window is stopped, "stopped" becomes the learned normal and merely running the machine shows as a breach. Learning fails in that case with a prompt to retrain over a period that is mostly normal operation.
 

@@ -33,9 +33,9 @@
 
   /* 대역 RMS 계산 — 값의 유일한 정의. TQL에 소스로 박히므로 바깥 이름 참조 금지(첫 회차 ReferenceError).
      최대 2의 거듭제곱 길이 한 블록에 Hann 창 → FFT, 잡음대역폭 NG=Σw²/L로 크기 보정 */
-  /* opt: { demod:[lo,hi], bf:{O,I,B,F}, lineHz } — demod·bf를 주면 포락선 지표도 산출.
-     demod = 복조 대역(Hz, 앱이 고정값으로 전달 — 앵커마다 바뀌면 추세 무의미),
-     bf = 결함주파수의 회전주파수 배수 계수(calc.faultCoeffs), lineHz = 계통주파수(1× 실측에서 거부) */
+  /* opt: { demod:[lo,hi], bf:{O,I,B,F}, lineHz } — demod·bf를 주면 포락선 지표도 산출
+     · demod = 복조 대역(Hz, 앱이 고정값으로 전달 — 앵커마다 바뀌면 추세 무의미)
+     · bf = 결함주파수의 회전주파수 배수 계수(calc.faultCoeffs), lineHz = 계통주파수(1× 실측에서 거부) */
   function bandEnergy(vals, fs, fr, nyq, opt) {
     var m = 1; while (m * 2 <= vals.length) m *= 2;
     if (m < 256 || !(fs > 0)) return null;
@@ -71,9 +71,10 @@
     // 평균 제거 후 창 적용(순서가 바뀌면 직류가 저주파로 샘)
     for (i = 0; i < L; i++) { re[i] = (vals[i] - mean) * W[i]; im[i] = 0; }
     fft(re, im);
-    /* 1× 실측 — 입력 RPM ±5%(유도전동기 슬립 통상 ≤5%) 안의 로컬 최대, 계통주파수(opt.lineHz) 1.5 분해능 안이면 거부.
-       calc.measuredOneX와 같은 규칙(임베드 소스라 여기서 다시 구현). 잡음 바닥은 창 주변 중앙값.
-       범위를 넓히면 벨트로 이어진 모터 등 다른 회전체 봉우리를 1×로 잡음. 못 찾으면 0 → 입력 RPM 사용 */
+    /* 1× 실측 — 입력 RPM ±5%(유도전동기 슬립 통상 ≤5%) 안의 로컬 최대, 계통주파수(opt.lineHz) 1.5 분해능 안이면 거부
+       · calc.measuredOneX와 같은 규칙(임베드 소스라 여기서 다시 구현), 잡음 바닥은 창 주변 중앙값
+       · 범위를 넓히면 벨트로 이어진 모터 등 다른 회전체 봉우리를 1×로 잡음
+       · 못 찾으면 0 → 입력 RPM 사용 */
     function meas1x() {
       if (!(fr > 0)) return 0;
       var i0 = Math.max(1, Math.ceil(fr * 0.95 / df)), i1 = Math.floor(fr * 1.05 / df);
@@ -183,9 +184,9 @@
     return { vals: out, fr: frUse, meas: frM > 0, env: envelope() };
   }
 
-  /* spec: { tags:[{tbl,tag,fr,fs,demod,bf}], nowMs, anchors, grid } → 자체 완결형 TQL 문자열.
-     SCRIPT 하나에서 태그마다 원본 조회 → bandEnergy → BAND INSERT. dryRun이면 $.yield로 값만 방출.
-     anchors(ms 배열) = 창 끝 시각들(백필), 없으면 태그 MAX_TIME 하나(타이머) — 계산부는 동일 */
+  /* spec: { tags:[{tbl,tag,fr,fs,demod,bf}], nowMs, anchors, grid } → 자체 완결형 TQL 문자열
+     · SCRIPT 하나에서 태그마다 원본 조회 → bandEnergy → BAND INSERT, dryRun이면 $.yield로 값만 방출
+     · anchors(ms 배열) = 창 끝 시각들(백필), 없으면 태그 MAX_TIME 하나(타이머) — 계산부는 동일 */
   function buildBandTql(spec) {
     spec = spec || {};
     var tags = spec.tags || [];
@@ -203,9 +204,9 @@
       'function srcOf(t){ return SRC[t]||t; }',
       'function statOf(t){ var s=srcOf(t), i=s.lastIndexOf("."); return i<0 ? "V$"+s+"_STAT" : s.slice(0,i+1)+"V$"+s.slice(i+1)+"_STAT"; }',
       'var TAGS=' + JSON.stringify(tags.map(function (t) {
-        // demod·bf는 앱이 계산해 값으로 전달(서버엔 커토그램·베어링 형상표 없음)
+        // demod·bf는 앱이 계산해 값으로 전달(서버엔 커토그램·베어링 형상표 없음), lineHz = 1× 실측 시 거부할 계통주파수
         return { tbl: t.tbl, tag: t.tag, fr: t.fr, fs: t.fs, win: Math.pow(2, WIN_POW),
-          demod: t.demod || null, bf: t.bf || null };
+          demod: t.demod || null, bf: t.bf || null, lineHz: t.lineHz || 0 };
       })) + ';',
       'var NAMES=' + JSON.stringify(BAND_NAMES) + ';',
       // 고정 별칭으로 대입 — 압축기가 함수 이름을 바꿔도 호출 이름 유지

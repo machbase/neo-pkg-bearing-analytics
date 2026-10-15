@@ -500,7 +500,7 @@
     var hlKo = p.gradeKo, hlColor = p.gradeColor, hlIdx = p.gradeIdx;
     var J = p.judge || {};
     // 판정 불가는 등급이 아닌 측정 상태로 표시(양호로 인쇄 금지)
-    if (J.patNa) { hlKo = '판정 못 함'; hlColor = 'var(--text-muted)'; hlIdx = -1; }
+    if (J.patNa) { hlKo = J.patWhy === 'gate' ? '판정 보류' : J.patWhy === 'sleeve' ? '판정 대상 아님' : '판정 못 함'; hlColor = 'var(--text-muted)'; hlIdx = -1; }
     sectionOpen(h, '진동 심각도 평가', null, '<span class="mono">' + esc(p.sevMachine) + '</span>', 's-sev');
     h.push('<div class="sev-box">');
     h.push('<div style="font-size:11px;color:var(--text-muted);margin-bottom:3px;">' + (isoH
@@ -522,8 +522,16 @@
         : '결함 패턴 없음') + '</span>');
     // 판정·ISO 불일치 안내(양방향) — 확인할 항목까지
     if (J.patNa) {
-      h.push('<div class="judge-gap"><b>회전수·베어링 정보가 없어 판정하지 못했습니다.</b><br>'
-        + '결함주파수 격자를 세울 수 없습니다. 설정 → 설비 정보에 명판 회전수와 베어링 품번을 넣고 다시 생성하십시오.'
+      // 사유별 문구 — gate(계측 이상) · data(스펙트럼 없음) · sleeve(저널 베어링) · 그 외(회전수·베어링 없음)
+      var naHead = J.patWhy === 'gate' ? '계측 이상으로 결함 패턴을 판정하지 않았습니다.'
+        : J.patWhy === 'data' ? '이 구간의 파형으로 결함 패턴을 계산하지 못했습니다.'
+          : J.patWhy === 'sleeve' ? '저널(sleeve) 베어링은 결함 패턴 판정 대상이 아닙니다.'
+            : '회전수·베어링 정보가 없어 판정하지 못했습니다.';
+      var naBody = J.patWhy === 'gate' ? '파형을 믿을 수 없는 상태(클리핑·플랫라인 등)입니다. 센서·케이블·마운팅을 점검한 뒤 다시 생성하십시오.'
+        : J.patWhy === 'data' ? '스펙트럼을 만들 데이터가 부족합니다. 다른 기간으로 다시 생성하십시오.'
+          : J.patWhy === 'sleeve' ? '구름베어링 결함주파수가 없어 결함 패턴으로 등급을 매기지 않습니다. 진동 크기는 아래 ISO 존으로 확인하십시오.'
+            : '결함주파수 격자를 세울 수 없습니다. 설정 → 설비 정보에 명판 회전수와 베어링 품번을 넣고 다시 생성하십시오.';
+      h.push('<div class="judge-gap"><b>' + naHead + '</b><br>' + naBody
         + (isoH ? '<br><span class="mut">참고 — ' + isoPh()
           + ' (존 ' + ['A', 'B', 'C', 'D'][isoH.gradeIdx] + '). 이 값만으로는 베어링 상태를 말할 수 없습니다.</span>' : '')
         + '</div>');

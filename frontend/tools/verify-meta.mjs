@@ -1,26 +1,20 @@
 // 메타데이터 A/B — 같은 데이터에 메타(마운팅·구동·날개수)만 바꿔 판정 경로 변화 확인(메타 입력 무반영 회귀 검사)
-// · 라이브(Neo 127.0.0.1:5654 + BEARING 테이블 데이터 필요) · npm run verify:live 포함
-//   node tools/verify-meta.mjs
-globalThis.window = globalThis;
-const NEO = 'http://127.0.0.1:5654'; const _f = globalThis.fetch;
-globalThis.fetch = (u, o) => _f(typeof u === 'string' && u.startsWith('/') ? NEO + u : u, o);
-
-try { await _f(NEO + '/db/query?q=' + encodeURIComponent('SELECT 1 as X'), { signal: AbortSignal.timeout(3000) }); }
-catch (e) { console.error('SKIP — Neo(' + NEO + ') 미기동. 서버를 띄운 뒤 다시 실행하세요.'); process.exit(2); }
+// · 라이브(Neo + 로그인 계정의 BEARING 테이블 데이터 필요) · npm run verify:live 포함
+//   NEO_USER=… NEO_PASSWORD=… node tools/verify-meta.mjs [테이블]
+await import('./_liveauth.mjs');   // 로그인(NEO_USER·NEO_PASSWORD) — 없으면 건너뜀
 
 const E = (await import('../../cgi-bin/chart/chart.js')).default;
 const L = await import('../src/data/live.js');
-const { App } = await import('../src/app.js');
-const { readFileSync } = await import('node:fs');
-const BASE = (() => {
-  try { return JSON.parse(readFileSync(new URL('../../cgi-bin/config/equipment.json', import.meta.url), 'utf8')); }
-  catch (e) { console.warn('[harness] equipment.json 로드 실패 — 폴백으로 진행:', e.message); return {}; }
-})();
+const { App, normCfg } = await import('../src/app.js');
+// 설비 설정 = 로그인 계정의 저장 설정(앱 부팅과 같은 경로) — 빈 cfg면 전부 폴백이라 실제 앱과 다른 것을 검증
+const BASE = normCfg(await L.loadConfig());
+const TBL = process.argv[2] || 'BEARING';
+if (!(await L.listTagTables()).includes(TBL)) { console.log('건너뜀 — 이 계정에 ' + TBL + ' 테이블 없음(테이블 이름을 인자로)'); process.exit(0); }
 
 let fail = 0;
 async function run(label, extra) {
   const cfg = Object.assign({}, BASE, extra);
-  const data = await L.buildLiveData(Object.assign({}, E), ['BEARING'], cfg);
+  const data = await L.buildLiveData(Object.assign({}, E), [TBL], cfg);
   const app = new App({}); app.E = Object.assign({}, E); app.live = true; app.data = data;
   const eq = data.equipment[0]; app.state.selTag = eq.id;
   const anchor = app._detailAnchorMs(eq);
@@ -40,18 +34,19 @@ async function run(label, extra) {
   console.log('  측정 불가    :', na.length + '종 — ' + na.map(c => c.f.replace(/\(.*/, '')).join(', '));
   const mline = ev.block.split('\n').filter(l => /미입력 메타데이터|메타데이터:|마운팅 상한/.test(l));
   mline.forEach(l => console.log('  ' + l.replace(/^■ /, '· ').slice(0, 150)));
-  return { det, ev };
+  return { det, ev, id: eq.id };
 }
 
 // A는 진짜 "메타 없음" — UI에서 저장한 equipMeta가 BASE에 실려 오므로 명시적으로 비움
 const A = await run('A. 메타 없음 (equipMeta 강제 제거)', { equipMeta: {} });
 const A0 = await run('A0. 현재 저장된 설정 그대로', {});
-const B = await run('B. 자석 마운트', { equipMeta: { 'BEARING:C1': { mount: 'magnet' } } });
+const K = A.id;   // 메타를 바꿀 설비 = 판정 대상(첫 설비)
+const B = await run('B. 자석 마운트', { equipMeta: { [K]: { mount: 'magnet' } } });
 const C = await run('C. 스터드 + 벨트(풀리 120/300) + 날개 7', {
-  equipMeta: { 'BEARING:C1': { mount: 'stud', drive: 'belt', belt: { d1: 120, d2: 300 }, vanes: 7 } },
+  equipMeta: { [K]: { mount: 'stud', drive: 'belt', belt: { d1: 120, d2: 300 }, vanes: 7 } },
 });
 const D = await run('D. 자석 + 직결 (해당없음 처리 확인)', {
-  equipMeta: { 'BEARING:C1': { mount: 'magnet', drive: 'direct' } },
+  equipMeta: { [K]: { mount: 'magnet', drive: 'direct' } },
 });
 
 // ── 회귀 어서션: 메타가 판정 경로를 실제로 바꾸는지 ─────────────────────────

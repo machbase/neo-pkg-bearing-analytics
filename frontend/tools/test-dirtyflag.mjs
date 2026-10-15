@@ -1,6 +1,6 @@
 /* 설정 입력의 저장 경로 — 저장 대상 키를 바꾸는 setState는 ① dirty: true(저장 안내) 또는 ② 즉시 저장(_persistCfg/_persistView/_applyNow) 중 하나
    · 둘 다 없으면 값이 state에만 남아 새로고침에 사라짐
-   오프라인(Neo 불필요) · app.js 소스 정적 검사 · npm run smoke 미포함 */
+   오프라인(Neo 불필요) · app.js 소스 정적 검사 · npm run smoke 포함 */
 import fs from 'node:fs';
 
 const SRC = fs.readFileSync(new URL('../src/app.js', import.meta.url), 'utf8');

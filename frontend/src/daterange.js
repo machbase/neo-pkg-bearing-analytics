@@ -54,12 +54,11 @@ function dayBounded(f, t) {
   var a = CH.parts(f), b = CH.parts(t);
   return a.h === 0 && a.m === 0 && b.h === 23 && b.m === 59;
 }
-/* 트리거 버튼 기간 문구 — 날짜 전용 자리(내보내기·삭제 등 되돌릴 수 없는 동작)는 연도 항상 표기 */
-function rangeLabel(f, t, withTime, withYear) {
-  var thisYear = CH.parts(Date.now()).Y;
+// 트리거 버튼 기간 문구 — 연도 항상 표기
+function rangeLabel(f, t, withTime) {
   var one = function (ms) {
     var p = CH.parts(ms);
-    var s = (withYear || p.Y !== thisYear ? p.Y + '-' : '') + pad(p.M) + '-' + pad(p.D);
+    var s = p.Y + '-' + pad(p.M) + '-' + pad(p.D);
     return withTime ? s + ' ' + pad(p.h) + ':' + pad(p.m) : s;
   };
   return one(f) + ' ~ ' + one(t);
@@ -157,7 +156,7 @@ export class DateRange extends Component {
     clearTimeout(this._noticeT);
     this.setState({ view: addMonths(st.view, dir), notice: '' });
   }
-  // 첫 클릭 시작, 다음 클릭 종료 — 시작보다 앞을 누르면 새 시작
+  // 첫 클릭 시작, 다음 클릭 종료 — 시작보다 앞을 누르면 두 날을 맞바꿔 확정
   _pickDay(ms) {
     var st = this.state, b = this._bounds();
     // 데이터 없는 날은 선택 불가 — 무시하지 않고 이유 표시
@@ -336,10 +335,10 @@ export class DateRange extends Component {
   render(p, st) {
     var self = this;
     var f = parseLocal(p.from), t = parseLocal(p.to);
-    /* 시각은 하루 경계에 안 맞는 구간(프리셋·이벤트 클릭 등)에만 표기 */
+    /* 시각 입력 자리는 항상 시각 표기, 그 외(mode='date' 제외)는 하루 경계에 안 맞는 구간(프리셋·이벤트 클릭 등)만 */
     var withT = useTime(p) || (p.mode !== 'date' && !dayBounded(f, t));
     // label 있으면 구간 대신 표기 — 태그마다 구간이 다른 프리셋 등 단일 구간 표기가 틀리는 자리용
-    var label = p.label || ((isNaN(f) || isNaN(t)) ? (p.placeholder || '기간 선택') : rangeLabel(f, t, withT, p.mode === 'date'));
+    var label = p.label || ((isNaN(f) || isNaN(t)) ? (p.placeholder || '기간 선택') : rangeLabel(f, t, withT));
     /* 직접 고른 구간 표시 색은 --info(--primary-*는 다크 표면에서 대비 부족)
        글자는 두 테마 모두 --text-primary, 강조는 옅은 배경·테두리 */
     var on = !!p.active;

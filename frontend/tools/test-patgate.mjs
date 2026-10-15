@@ -57,7 +57,7 @@ chk(VC.patternGrade(VC.TGT_ADOPT, false, undefined) === 0,
   '창 임계를 안 밝히면 게이트를 열지 않는다 — 기본값은 조용히 틀린 창으로 판정하게 한다');
 
 // ── 3. 세 경로 동일 규칙 호출 (구조) ─────────────────────────────────
-/* 값 검사로는 다른 검출기 재도입을 못 잡음 — 호출 형태 고정 */
+/* 값 검사로는 경로별 다른 검출기 사용을 못 잡음 — 호출 형태 고정 */
 const appSrc = await readFile(new URL('../src/app.js', import.meta.url), 'utf8');
 const liveSrc = await readFile(new URL('../src/data/live.js', import.meta.url), 'utf8');
 const monSrc = await readFile(new URL('../../cgi-bin/monitor/monitor.js', import.meta.url), 'utf8');

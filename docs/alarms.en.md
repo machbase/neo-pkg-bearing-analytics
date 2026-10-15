@@ -5,11 +5,11 @@ weight: 40
 
 # Alarms and events
 
-[한국어](./alarms.kr.md) | **English**
+[English](./alarms.en.md) | [한국어](./alarms.kr.md) | [日本語](./alarms.ja.md)
 
 Alarms periodically evaluate the selected tags, record state changes as **events**, and notify the channel you configure. Settings live under **Settings → Alarms**.
 
-Click the alarm indicator in the header to turn alarms on or off. The click saves that one value immediately, so it persists across sessions — unsaved edits on the Settings tab are not saved along with it. While alarms are on, a monitoring-mode badge (**서버 상시** server / **앱** in-app / **앱 · 보기 전용** in-app, view only) appears next to it. When off, cards still show grades, but events are no longer recorded or sent (the server monitoring timer is removed too).
+Click the alarm indicator in the header to turn alarms on or off. The click saves that one value immediately, so it persists across sessions — unsaved edits on the Settings tab are not saved along with it. While alarms are on, a monitoring-mode badge (**서버 상시** server / **앱** in-app / **앱 · 보기 전용** in-app, view only) appears next to it. When off, cards still show grades, but events are no longer recorded or sent (the server monitoring timer is removed too; the band extraction timer is removed only when you turn band extraction off separately).
 
 > For how grades and events are computed, see [How detection works](./detection.en.md). This document covers configuration and operation.
 
@@ -38,7 +38,7 @@ Things to know:
 
 - **Changed settings take effect only after saving again.** The timer runs with the settings as of the last save.
 - **Only tables with ROLLUP are evaluated.** Tags in tables without rollups are silently excluded from server monitoring; check those with in-app monitoring.
-- **Turning server mode off deletes the timer.** Removing the package also cleans it up.
+- **Turning server mode off deletes the timer.** Removing the package cleans up only the timers of the account that clicked Uninstall; for another account's timer, turn alarms off in the app as that account, or stop it on the Neo timer screen and then delete it.
 - **No timer is created when there are no tags to monitor.**
 - If the timer stops by itself, the app **re-registers it automatically** while it is open (up to three times). A notice then reminds you that the gap was not actually confirmed as "no anomaly".
 
@@ -81,7 +81,7 @@ The first item in alarm settings reads as one sentence:
 | Interval | 1s · 3s · 5s · 10s · 30s · 1m | How often to evaluate (default 3 s) |
 
 - A **longer** window merges short fluctuations into one state — fewer false alarms, slower response.
-- If the window is shorter than the interval, some data never enters any evaluation — that combination is blocked with a warning.
+- Windows shorter than the interval are blocked in the options. If you later lengthen the interval so it exceeds the window, a warning appears; evaluation then widens the window to the interval length, so no data is skipped.
 - For equipment with periodic load changes, use a window longer than the load cycle; otherwise load swings register as stops or breaches.
 - With many tags and a short interval, a load warning appears.
 
@@ -93,7 +93,7 @@ One place configures **when** to alarm (the confirmation rule) and **where and h
 
 ### When to alarm — two consecutive cycles
 
-**This is a fixed rule, not a setting.** A grade is confirmed only when the same judgment holds for two consecutive cycles, and the alarm goes out then. Going up and coming down alike.
+**This is a fixed rule, not a setting.** A grade is confirmed only when the same judgment holds for two consecutive cycles, and the alarm goes out then. The same applies whether the grade is worsening or improving.
 
 ```
 cycle 1   Warning   observation event · no alert
@@ -118,9 +118,8 @@ There is one delivery channel: **webhook**. The message format is shaped from th
 
 | Target | Recognized URL | Message shape |
 | :--- | :--- | :--- |
-| Discord | `discord.com/api/webhooks/…` | A card with a severity color bar (Warning amber · Danger orange · Critical red · otherwise green) |
+| Discord | `discord.com/api/webhooks/…` (`discordapp.com` also recognized) | A card with a severity color bar (Warning amber · Danger orange · Critical red · otherwise green) |
 | Slack | `hooks.slack.com/…` | Three lines of text (title · value · time) |
-| Microsoft Teams | `…webhook.office.com/…`, `…office.com/webhookb2/…`, `…logic.azure.com/…` | Three lines of text |
 | Google Chat | `chat.googleapis.com/…` | Three lines of text |
 | Your own endpoint (any other URL) | — | Everything: subject, plain-text body, HTML body, structured event data |
 
@@ -166,6 +165,7 @@ If **five or more events of the same type and grade** occur in one judgment cycl
 [주의] 신호 두절 91대
 PUMP_A 38 · FAN_B 25 · LINE_3 16 · 외 12
 6분 무수신
+2026-10-12 14:03:20
 ```
 
 When collection stops, every tag reports signal loss in the same cycle. Sent one by one they exceed the channel rate limit (Slack 1/s, Discord 5 per 2 s) and **only an arbitrary subset arrives** — "91 lost" arriving as "8 random lost" is worse than nothing, because the rest look healthy.
@@ -178,7 +178,7 @@ Four or fewer are sent individually — for two or three machines the tag, value
 
 ### Discord
 
-You need channel-management permission. We recommend a dedicated alarm channel (e.g. `#vibration-alarms`) — alarms mixed into a chat channel are hard to trace later.
+Do this in a channel where you have server-management permission. We recommend a dedicated alarm channel (e.g. `#vibration-alarms`) — alarms mixed into a chat channel are hard to trace later.
 
 1. Click **⚙️ Edit Channel** next to the channel
 2. Open **Integrations** in the left menu
@@ -232,15 +232,6 @@ Things to know:
 - On the free plan, **messages older than 90 days are hidden.** Keep alarm history in the app's event list, not in Slack — events are never auto-deleted.
 - For multiple channels, repeat **Add New Webhook to Workspace** to get a URL per channel. The app has a single webhook field, though, so per-severity channels are not supported.
 
-### Microsoft Teams
-
-Create a webhook URL in a Teams channel and paste it into the app's webhook field. The app recognizes these address forms as Teams and sends a text message:
-
-- `https://….webhook.office.com/…` or `…office.com/webhookb2/…` (a channel's Incoming Webhook connector)
-- `https://….logic.azure.com/…` (a webhook trigger from Teams Workflows / Power Automate)
-
-Which menu creates a webhook in Teams, and whether it is allowed at all, depends on your organization's Teams policy. If you cannot find it, ask your Teams administrator. After entering the URL, always confirm actual delivery with **Send test** — depending on how the workflow is set up, it may not accept plain text messages.
-
 ## Band energy evidence (optional)
 
 To see, as evidence, changes where overall vibration barely moves but one frequency band jumps — early bearing faults being the classic case — turn band extraction on. It lives under **Settings → Criteria → Band energy trend**.
@@ -292,7 +283,7 @@ Events appear in the list at the bottom of the **Monitoring** tab. Period chips 
 | Server monitoring could not read the notification settings and did not send N events | At send time the timer could not read the account's notification settings. The events are still recorded | **Open notification settings** → save them again |
 | Skipped a cycle because the previous judgment state could not be read | Judging without the previous state would repeat alerts, so that cycle is not judged | Check the DB connection. The next cycle retries automatically |
 | N tags failed | Only those tags could not be judged or saved (the rest were processed). The reason is shown | Check the reason. The next cycle retries automatically |
-| The cycle ended with an error | The whole cycle ended in an error. The reason is shown | Check the reason. If it persists, **Re-register** |
+| The cycle ended with an error | The whole cycle ended in an error. The reason is shown | Check the reason. Retried automatically on the next cycle |
 
 **Band extraction**
 

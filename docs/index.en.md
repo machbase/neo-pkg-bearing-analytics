@@ -5,13 +5,13 @@ weight: 10
 
 # Bearing Vibration Analysis
 
-[한국어](./index.kr.md) | **English**
+[English](./index.en.md) | [한국어](./index.kr.md) | [日本語](./index.ja.md)
 
 neo-pkg-bearing-analytics turns vibration sensor data stored in Machbase Neo TAG tables into machine-health insight — without writing any SQL or TQL.
 
 Its core is **bearing fault diagnosis**. Envelope demodulation checks whether evidence stands at the bearing defect frequencies (BPFO / BPFI / BSF / FTF), and the method has been verified against public run-to-failure datasets.
 
-**A severity grade rises only when there is evidence of a bearing defect.** High vibration on its own does not raise it — that is reported separately as **ISO 10816 severity**. When the spectrum shows common rotating-machinery patterns such as unbalance (1×), misalignment (2×) or mechanical looseness, the app **notes them as "suspected" but does not grade them**: without a phase (tacho) reference or an axial channel, those cannot be confirmed in principle. [What this tool does and does not do](./scope.en.md) draws the full boundary.
+**A severity grade rises only when there is evidence of a bearing defect.** High vibration on its own does not raise it — that is reported separately as **ISO 10816 severity**. When the spectrum shows common rotating-machinery patterns such as imbalance (1×), misalignment (2×) or mechanical looseness, the app **notes them as "suspected" but does not grade them**: without a phase (tacho) reference or an axial channel, those cannot be confirmed in principle. [What this tool does and does not do](./scope.en.md) draws the full boundary.
 
 > If the terms above (BPFO, envelope, fault pattern) are unfamiliar, read the [Glossary](./glossary.en.md) first — it is a single page.
 
@@ -29,7 +29,7 @@ Before first use, an administrator (SYS) has to create the dedicated database an
 
 Select `neo-pkg-bearing-analytics` in the left panel and press **Uninstall** to remove the package. Accumulated settings, events, baselines, and reports are preserved.
 
-The timers this package registers (server monitoring, band extraction, and so on) stay outside the package in Neo's timer list, so uninstall stops and deletes them **using the login of the account that pressed Uninstall**. Timers are registered per account, so **timers of other accounts are not removed** — turn alarms off in the app under each account before uninstalling, which deletes that account's timers. If the package is already gone, stop and then delete `NEO_BEARING_*` in Neo's timer screen. The uninstall log lists the timers it deleted and repeats this guidance.
+The timers this package registers (server monitoring, band extraction, and so on) stay outside the package in Neo's timer list, so uninstall stops and deletes that account's timers **using the login of the account that pressed Uninstall**. Timers are registered per account, so **timers of other accounts are not removed** — before uninstalling, turn alarms off in the app under each account, also turn off **Criteria → Band & fault-pattern extraction**, and save, which deletes that account's timers. If the package is already gone, stop and then delete `NEO_BEARING_*` in Neo's timer screen. The uninstall log lists the timers it deleted and repeats this guidance.
 
 ## How it works
 
@@ -39,7 +39,7 @@ All analysis is computed deterministically inside the package. Signal processing
 
 ## Screen layout
 
-There are three main tabs plus a Settings (⚙) entry point. The header also holds the alarm toggle and a theme switch.
+There are three main tabs plus a Settings (⚙) entry point. The right side of the header holds the alarm toggle and a theme switch.
 
 | Tab | Purpose |
 | :--- | :--- |
@@ -55,7 +55,7 @@ There are three main tabs plus a Settings (⚙) entry point. The header also hol
 | Criterion | Question | Role | Needs training |
 | :--- | :--- | :--- | :---: |
 | **Fault pattern** | Does evidence stand at the bearing fault frequencies? | **gate** — without it the grade stays Good | No |
-| **ISO zone** | Is it absolutely high by international standard? | **height** — how urgent | No |
+| **ISO zone** | Is it absolutely high by the international standard? | **height** — how urgent | No |
 | Baseline | Is it high compared to this machine's own normal? | evidence display | Yes |
 | Band energy | Has one specific frequency band jumped? | evidence display | Yes |
 
@@ -91,7 +91,7 @@ Grading, diagnosis, and reporting all work even without a provider connected.
 
 ## What gets stored
 
-Everything lives in a dedicated database, `NEO_BEARING_STORE`. An administrator creates it once and grants each account; after that the app creates its own tables automatically as you save settings and run alarm evaluation.
+Everything lives in a dedicated database, `NEO_BEARING_STORE`. An administrator creates it once and grants each account; after that the app creates the tables it needs automatically when it is opened (the shared tables the first time it is opened as SYS, each account's CONFIG table the first time that account opens it).
 
 | Name | Kind | Contents | Per-account separation |
 | :--- | :--- | :--- | :--- |
@@ -100,7 +100,7 @@ Everything lives in a dedicated database, `NEO_BEARING_STORE`. An administrator 
 | `SYS.BASELINE` | LOOKUP table | Learned normal state (μ, σ) | Row key `<account>:` |
 | `SYS.MONSTATE` | LOOKUP table | Last evaluation state per tag, monitoring status, which tab leads evaluation | Row key `<account>:` |
 | `<account>.CONFIG` | LOOKUP table | All settings — data source, equipment, criteria, alarms, LLM keys | **One table per account** |
-| `<account>/vibration-reports/` | Files | Generated report HTML | One folder per account |
+| `<account>/vibration-reports/` | Files | Generated report HTML (the account in the folder name is lowercase) | One folder per account |
 
 The first four tables are shared: one copy, with the account encoded in each row's key. The UI shows names without the prefix. `CONFIG` is the exception — it holds LLM API keys and webhook URLs, and Machbase has no row-level permissions, so only a separate table keeps other accounts from reading it at all.
 

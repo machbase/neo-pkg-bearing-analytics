@@ -18,7 +18,8 @@ const ARGS = {
   kvUpdate: ['CONFIG', 'k', 'v'], kvDelete: ['CONFIG', 'k'], usageCount: ['BAND'],
   dropTable: ['BAND'], tableTypeOf: ['BAND'], colLength: ['BAND', 'VAL'],
   catalogTables: ['SYS'], catalogCount: ['SYS'], tagSchemas: ['SYS'], sessionUser: ['abc123'],
-  dbUsable: ['NEO_BEARING_STORE'], grantStatements: ['JOY'], purgeNames: ['BAND'],
+  dbUsable: ['NEO_BEARING_STORE'], grantStatements: ['JOY'], revokeStatements: ['JOY'], purgeNames: ['BAND'],
+  statSummary: ['BAND'], statNameCounts: ['EVENTS'], metaNames: ['BAND'],
 };
 // SQL 을 만들지 않는 것들 — 이름 조립 헬퍼와 상수
 const SKIP = new Set(['esc', 'ident', 'sqlDate', 'setScope', 'scope', 'appTable',
@@ -61,7 +62,9 @@ chk(['BAND', 'EVENTS', 'BASELINE', 'MONSTATE'].every((t) => S.appTable(t) === 'N
   '나머지 넷은 공용 스키마', ['BAND', 'EVENTS', 'BASELINE', 'MONSTATE'].map((t) => S.appTable(t)).join(' '));
 
 /* 공용 표 문장은 내 행으로 좁혀져야 함(키 접두나 LIKE 조건) — 빠지면 남의 행 조회·삭제, DDL·메타 조회는 제외 */
-const SHARED_RE = /NEO_BEARING_STORE\.SYS\.(BAND|EVENTS|BASELINE|MONSTATE)\b/;
+const SHARED_RE = /NEO_BEARING_STORE\.SYS\.(V\$(BAND|EVENTS)_STAT|_(band|events)_meta|BAND|EVENTS|BASELINE|MONSTATE)\b/;
+chk(S.statSummary('BAND').includes('NEO_BEARING_STORE.SYS.V$BAND_STAT') && S.metaNames('EVENTS').includes('NEO_BEARING_STORE.SYS._events_meta'),
+  '공용 표의 통계뷰·메타 표도 같은 접두', S.statSummary('BAND').slice(0, 90));
 /* eventsLegacySelect만 예외 — 소유자 없는 옛 LOG 표를 통째로 읽는 1회성 이관 경로(SYS만 실행) */
 const rowTouching = scoped.filter(([k, sql]) => SHARED_RE.test(sql) && k !== 'eventsLegacySelect'
   && !/^(CREATE|DROP|GRANT|REVOKE)\b/i.test(sql) && !/M\$SYS_/.test(sql));

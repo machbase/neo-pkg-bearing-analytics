@@ -1,5 +1,7 @@
 # neo-pkg-bearing-analytics v1.0.0
 
+[English](README.md) | [한국어](README.kr.md) | [日本語](README.ja.md)
+
 A bearing-focused vibration analysis package for rotating machinery, built on time-series data stored in Machbase Neo.
 
 > **It does not replace a human diagnosis.** It covers the gap between scheduled inspections, ranks
@@ -12,7 +14,7 @@ neo-pkg-bearing-analytics turns vibration sensor data in Machbase Neo TAG tables
 
 Its core is **bearing fault diagnosis**: envelope demodulation in a fixed 1–5 kHz band and defect-frequency matching (BPFO / BPFI / BSF / FTF), verified against public run-to-failure datasets.
 
-A severity grade rises only when there is evidence of a bearing defect. High vibration on its own does not raise it — that is reported separately as **ISO 10816 severity**. Common rotating-machinery patterns (unbalance, misalignment, looseness) are surfaced as *suspected* findings rather than graded, because confirming them needs a phase reference or an axial channel this package does not assume.
+A severity grade rises only when there is evidence of a bearing defect. High vibration on its own does not raise it — that is reported separately as **ISO 10816 severity**. Common rotating-machinery patterns (imbalance, misalignment, looseness) are surfaced as *suspected* findings rather than graded, because confirming them needs a phase reference or an axial channel this package does not assume.
 
 Open the app in your browser and every piece of equipment is graded in real time — the fault pattern decides whether there is a grade, the ISO 10816 zone decides how high. Drill into any tag for waveform and spectrum analysis, get rule-based fault diagnosis with prioritized recommended actions, and generate analysis reports in one click.
 
@@ -22,7 +24,7 @@ The app connects to your Neo instance on launch, auto-detects TAG tables, and ru
 
 ## Who is it for?
 
-- **Maintenance / reliability engineers** — watch equipment condition at a glance, catch bearing faults early (with unbalance, misalignment, and looseness flagged as suspected), and get concrete recommended actions
+- **Maintenance / reliability engineers** — watch equipment condition at a glance, catch bearing faults early (with imbalance, misalignment, and looseness flagged as suspected), and get concrete recommended actions
 - **Data engineers** — serve vibration analytics on top of Machbase Neo without building custom queries, charts, or threshold logic
 
 ## Key Features
@@ -35,32 +37,32 @@ The app connects to your Neo instance on launch, auto-detects TAG tables, and ru
 - **App or Server Monitoring** — evaluate in the open app, or register the evaluation settings as a Neo timer so events keep accruing with the app closed. Both modes run the *same* judgment rules, and the app reports when monitoring has stopped, stalled, or has nothing left to evaluate — so "no events" never quietly means "monitoring is dead". Several tabs or PCs on one account share the work: only one evaluates and notifies.
 - **Alarms & Events** — eight event types: five for the grade (observation, threshold, sustained, improved, recovered) and three for monitoring health (signal lost, instrumentation fault, instrumentation restored). A grade change must hold for two consecutive cycles before it alerts, and per-severity re-notify and bundled delivery keep the channel quiet; stopped equipment freezes evaluation rather than reading as a recovery. Events are stored in a TAG table in the package database (`NEO_BEARING_STORE`) and can be exported to CSV or JSON.
 - **Band Energy Trend** — an optional server-side timer extracts per-band energy (sub-synchronous / 1× / fault / high / very high) and envelope series so degradation invisible to overall RMS still surfaces as evidence. Past intervals can be backfilled to start learning immediately.
-- **Reports** — one-click generation with a cancellable progress flow, one self-contained HTML file per selected tag, and a paged archive (created · report name · period · type). Report charts stay live — wheel zoom, drag, tooltips, theme-aware redraw — with a summary/full toggle and a ruleset fingerprint that tells you whether a number changed because the data moved or because the criteria did.
+- **Reports** — one-click generation with a cancellable progress flow, one self-contained HTML file per selected tag, and a paged archive (created · report name · period · type). Report charts stay live — wheel zoom, drag, tooltips, theme-aware redraw — with a summary/full toggle and a judgment fingerprint that tells you whether a number changed because the data moved or because the judgment engine (package) changed.
 - **Flexible Settings** — multi-table selection with alias editing, per-equipment unit / class / RPM / bearing (catalog with auto-computed fault frequencies, or custom designation and geometry; sleeve bearings supported), belt drives with driven-side sensor support, ISO machine-class thresholds, baseline learning, webhook notification routing, and data management (usage and ranged / per-tag cleanup).
 - **Optional LLM Findings** — connect Claude / OpenAI / Gemini / Ollama to add a narrative expert opinion to detail analysis and reports; everything else works without it.
 
 ## Requirements
 
-- Machbase Neo 8.5.9 or later.
+- Machbase Neo 8.7.1 or later.
 - An administrator (SYS) creates the package database `NEO_BEARING_STORE` and grants each account once, from the app's Settings → Data Source screen, and grants `SELECT` on the data tables to analyze.
 - TAG tables with the standard `NAME · TIME · VALUE` columns.
 - Server monitoring evaluates only tables that have a ROLLUP.
 
 ## Documentation
 
-- [Introduction & contents](docs/index.en.md) ([한국어](docs/index.kr.md))
-- [Glossary](docs/glossary.en.md) ([한국어](docs/glossary.kr.md))
-- [First setup](docs/first-setup.en.md) ([한국어](docs/first-setup.kr.md))
-- [Usage](docs/usage.en.md) ([한국어](docs/usage.kr.md))
-- [Alarms & events](docs/alarms.en.md) ([한국어](docs/alarms.kr.md))
-- [How detection works](docs/detection.en.md) ([한국어](docs/detection.kr.md)) — what is measured and how grades are decided
-- [Fault types and signatures](docs/faults.en.md) ([한국어](docs/faults.kr.md))
-- [What this tool does and does not do](docs/scope.en.md) ([한국어](docs/scope.kr.md)) — measured performance and limits
-- [Troubleshooting](docs/troubleshooting.en.md) ([한국어](docs/troubleshooting.kr.md))
+- [Introduction & contents](docs/index.en.md)
+- [Glossary](docs/glossary.en.md)
+- [First setup](docs/first-setup.en.md)
+- [Usage](docs/usage.en.md)
+- [Alarms & events](docs/alarms.en.md)
+- [How detection works](docs/detection.en.md) — what is measured and how grades are decided
+- [Fault types and signatures](docs/faults.en.md)
+- [What this tool does and does not do](docs/scope.en.md) — measured performance and limits
+- [Troubleshooting](docs/troubleshooting.en.md)
 
 ## Current Status
 
-v1.0.0. Runs on live TAG-table data only; there is no mock/demo mode. All analysis is deterministic; the LLM opinion layer is optional. Notifications go out over a single webhook channel (Slack, Microsoft Teams, Discord, Google Chat, or your own endpoint); email or SMS is reached by relaying that webhook through an automation tool such as n8n.
+v1.0.0. Runs on live TAG-table data only; there is no mock/demo mode. All analysis is deterministic; the LLM opinion layer is optional. Notifications go out over a single webhook channel (Slack, Discord, Google Chat, or your own endpoint); email or SMS is reached by relaying that webhook through an automation tool such as n8n.
 
 ---
 Development: see [frontend/README.md](frontend/README.md) (Vite + Preact).

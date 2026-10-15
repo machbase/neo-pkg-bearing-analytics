@@ -91,9 +91,10 @@
     return routed(gradeKo);
   }
 
-  /* 한 판정 회차의 발송 목록 — 거르고(shouldNotify) 같은 유형·등급을 묶음.
-     동시 다발 이벤트를 개별 발송하면 채널 한도(Slack 초당 1건·Discord 2초 5건)에 걸려 일부만 도착.
-     BUNDLE_MIN 미만은 개별. ⚠ 묶음은 발송 형태일 뿐, 이력은 항상 개별 저장 */
+  /* 한 판정 회차의 발송 목록 — 거르고(shouldNotify) 같은 유형·등급을 묶음
+     · 동시 다발 이벤트를 개별 발송하면 채널 한도(Slack 초당 1건·Discord 2초 5건)에 걸려 일부만 도착
+     · BUNDLE_MIN 미만은 개별
+     · ⚠ 묶음은 발송 형태일 뿐, 이력은 항상 개별 저장 */
   function planNotifications(evs, cfg, ch, timeText) {
     // ⚠ 함수 안에 둠 — 임베드 소스라 바깥 이름은 서버에서만 ReferenceError
     var BUNDLE_MIN = 5;
@@ -148,9 +149,9 @@
     return { channels: { webhook: { on: !!ch.webhook, to: to.webhook || '' } }, routes: out };
   }
 
-  /* 설정 표(CONFIG) 조각 행 → 한 영역의 객체. rows: [[K, VAL], …]
-     형식은 db.js writeDomain — 키 'cfg:<영역>#<순번>', 값은 URI 인코딩 문자열 조각.
-     행 없음 = 빈 객체(오류 아님), 조각 누락·해독 실패 = 오류(빈 설정과 구분) */
+  /* 설정 표(CONFIG) 조각 행 → 한 영역의 객체, rows: [[K, VAL], …]
+     · 형식은 db.js writeDomain — 키 'cfg:<영역>#<순번>', 값은 URI 인코딩 문자열 조각
+     · 행 없음 = 빈 객체(오류 아님), 조각 누락·해독 실패 = 오류(빈 설정과 구분) */
   function configFromRows(rows, domain) {
     var re = /^cfg:(.+)#(\d+)$/, parts = [], n = 0, i;
     for (i = 0; i < (rows || []).length; i++) {

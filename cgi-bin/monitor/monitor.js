@@ -62,7 +62,7 @@
       'var _cv = []; for (var _i = 0; _i < 1024; _i++) _cv.push(Math.sin(_i / 5));',
       'bandRmsAveraged(convertDomain(_cv, 1024, "g", "mm/s", 10), 1024, 10, 500, 8); convertDomain(_cv, 1024, "μm", "mm/s", 10);',
       'gateFromBuckets([{cnt:10,rms:1,sum:0,mn:-1,mx:1}], 1); sensorTick(null, null, 0, { escHold: 0, recHold: 0 });',
-      'judgeDetail({ etype: "recovery", epMs: 1000 }, { r: 4, key: "외륜(BPFO)" }, { crest: 9, kurt: 5 });',
+      'judgeDetail({ etype: "recovery", epMs: 1000 }, { r: 4, key: "BPFO" }, { crest: 9, kurt: 5 });',
       'var _e = { etype: "threshold", tag: "T", grade: "위험", val: 1, lim: 1, ts: 0, tbl: "T" };',
       'eventMessage(_e); shouldNotify(_e, { channels: {}, routes: {} });',
       'notifyCfgFrom(configFromRows([["cfg:monitor#0", "%7B%7D"]], "monitor").obj, { order: ["x"], timing: { x: "y" } });',

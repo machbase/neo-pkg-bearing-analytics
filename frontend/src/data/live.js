@@ -58,6 +58,8 @@ export const appDb = DB.appDb;
 export const storePrefix = DB.storePrefix;
 export const listUsers = DB.listUsers;
 export const grantTo = DB.grantTo;
+export const revokeFrom = DB.revokeFrom;
+export const accessStatus = DB.accessStatus;
 export const userKeyPrefix = DB.userKeyPrefix;
 export const configTable = DB.configTable;
 export const srcMapOf = DB.srcMapOf;
@@ -181,7 +183,7 @@ export async function buildLiveData(E, tables, cfg) {
   /* 트렌드·스파크는 NAME IN 배치 조회(태그별 개별 조회는 서버 직렬 처리로 태그 수 비례 지연)
      묶음 단위 = (테이블 × 롤업단위) — 단위는 태그별 데이터 기간으로 정해져 같은 테이블 안에서도 다를 수 있음 */
   const groups = {};
-  const sparkBy = {};   // 테이블별 스파크 기준 시각(가장 최근 데이터) — 초 버킷 36개
+  const sparkBy = {};   // 테이블별 스파크 기준 시각(가장 최근 데이터) — 직전 60초를 초 버킷으로
   for (const eq of equipment) {
     const st = eq.stat;
     const spanSec = Math.max(1, (st.maxMs - st.minMs) / 1000);
@@ -234,12 +236,13 @@ export async function buildLiveData(E, tables, cfg) {
     const eqs = equipment.filter(e => e.table === table);
     jobs.push((async () => {
       let byTag;
-      try { byTag = await DB.rollupBatch(table, eqs.map(e => e.name), 'sec', anchor - 36000, anchor, { truncCapMs: 60000 }); }
+      try { byTag = await DB.rollupBatch(table, eqs.map(e => e.name), 'sec', anchor - 60000, anchor, { truncCapMs: 60000 }); }
       catch (e) { byTag = {}; }
       /* 샘플레이트 추정 — 1순위 표본 간격(Δt) 중앙값("초당 행 수"는 주기 기록·중복 적재에서 틀림)
          폴백: 초당 버킷 건수 중앙값 → 전체 평균(count/span) */
       await Promise.all(eqs.map(async eq => {
         const spark = byTag[eq.name] || [];
+        eq.sparkBuf = spark;   // 카드 스파크라인 최근 60초 — 판정 틱이 이어 붙임
         eq.sparkVals = spark.map(b => b.rms);
         const st = eq.stat;
         // 조회 실패 시 폴백으로 진행(태그 하나의 실패가 적재 전체를 막지 않게)

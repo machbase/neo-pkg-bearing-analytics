@@ -792,9 +792,9 @@
     return { rms: rms, used: used, dropped: cnts.length - used, n: n, ac: haveSum };
   }
   /* ── ISO 10816 대역제한(10~1000 Hz) 실효값 ───────────────────────────────
-     ISO 존 경계는 10~1000 Hz 속도 RMS 기준(전대역 값과 다른 양)
-     필터는 4차 버터워스 시간영역 밴드패스(FFT보다 싸고 값 사실상 일치)
-     서버 TQL 임베드(isoSrc) — 바깥 이름 참조 금지 */
+     · ISO 존 경계는 10~1000 Hz 속도 RMS 기준(전대역 값과 다른 양)
+     · 필터는 4차 버터워스 시간영역 밴드패스(FFT보다 싸고 값 사실상 일치)
+     · 서버 TQL 임베드(isoSrc) — 바깥 이름 참조 금지 */
 
   // 2차 IIR 섹션 — 계수는 bandpass가 전달
   function biquad(b0, b1, b2, a1, a2, sig) {
@@ -835,9 +835,9 @@
     return Math.sqrt(ss / y.length);
   }
   /* ── 계측 게이트 ─────────────────────────────────────────────────────────
-     파형이 기계 신호인지 계측 문제인지 판별(판정 앞단 garbage-in 방어)
-     플랫라인·DC는 롤업 집계로 매 판정, 클리핑 등은 원본 파형 있을 때만
-     반환 null(이상 없음) 또는 { key, label, detail, gi } — 플랫라인·데이터 부족은 위험(2), 나머지는 주의(1) */
+     · 파형이 기계 신호인지 계측 문제인지 판별(판정 앞단 garbage-in 방어)
+     · 플랫라인·DC는 롤업 집계로 매 판정, 클리핑 등은 원본 파형 있을 때만
+     · 반환 null(이상 없음) 또는 { key, label, detail, gi } — 플랫라인·데이터 부족은 위험(2), 나머지는 주의(1) */
 
   var GATE_FLAT_RATIO = 0.002;   // σ < peak의 0.2% = 사실상 상수
   var GATE_DRIFT_RATIO = 0.5;    // 버킷 평균 흔들림 > 버킷 안 σ의 0.5배 = 기준선 흔들림(창 RMS 12% 이상 과대)
@@ -970,8 +970,8 @@
   }
 
   /* 샘플레이트 추정 — 이웃 Δt 중앙값의 역수("초당 행 수"는 주기 기록·중복 적재에서 틀림)
-     tsUs: 오름차순 정수 μs(ms는 고주파 간격이 0으로 뭉개짐, ns는 JS 안전 정수 초과)
-     간격 30개 미만이면 0(호출측 폴백) */
+     · tsUs: 오름차순 정수 μs(ms는 고주파 간격이 0으로 뭉개짐, ns는 JS 안전 정수 초과)
+     · 간격 30개 미만이면 0(호출측 폴백) */
   function fsFromTimes(tsUs) {
     if (!tsUs || tsUs.length < 2) return 0;
     var d = [], i, v;
@@ -1055,8 +1055,8 @@
     return patOn ? Math.max(1, isoGi || 0) : 0;
   }
   /* 판정 회차의 등급 후보(rg)·회차 식별자(cyc) — 앱·서버 감시 공용(patSrc 임베드)
-     capable(회전수·기하 있음)인데 결과 없음 = 판정 보류 → 직전 등급·회차 유지(양호로 읽으면 거짓 복귀 후 재악화 알림)
-     pat: {on, at} | null · prev: 직전 판정 상태 | null · hG: 높이(ISO 존 등급) → {rg, cyc, miss} */
+     · capable(회전수·기하 있음)인데 결과 없음 = 판정 보류 → 직전 등급·회차 유지(양호로 읽으면 거짓 복귀 후 재악화 알림)
+     · pat: {on, at} | null, prev: 직전 판정 상태 | null, hG: 높이(ISO 존 등급) → {rg, cyc, miss} */
   function patternRound(pat, capable, prev, hG) {
     if (!pat && capable) {
       return { rg: prev ? (prev.g || 0) : 0, cyc: (prev && prev.cyc != null) ? prev.cyc : null, miss: true };
@@ -1064,9 +1064,9 @@
     return { rg: patternGate(!!(pat && pat.on), hG), cyc: pat ? (pat.at || null) : null, miss: false };
   }
   /* 결함 패턴 축 채택 — 감시·상세·서버 모두 targetedMatch, 창 길이만 다름
-     r=격자 배수, thr=창에 맞춘 임계(25회전 MON_ADOPT · 100회전 TGT_ADOPT)
-     ⚠ thr 기본값 없음 — 호출측이 창 임계를 안 주면 판정 안 함(창 변경 시 틀린 임계 방지)
-     반환 0/1(켜짐 여부, 높이는 patternGate가 ISO로 결정). 계측 게이트 중엔 0 */
+     · r=격자 배수, thr=창에 맞춘 임계(25회전 MON_ADOPT · 100회전 TGT_ADOPT)
+     · ⚠ thr 기본값 없음 — 호출측이 창 임계를 안 주면 판정 안 함(창 변경 시 틀린 임계 방지)
+     · 반환 0/1(켜짐 여부, 높이는 patternGate가 ISO로 결정), 계측 게이트 중엔 0 */
   function patternGrade(r, gate, thr) {
     return (gate || !(thr > 0) || !(r >= thr)) ? 0 : 1;
   }
@@ -1115,8 +1115,8 @@
     }).filter(Boolean);
   }
   /* 켑스트럼 프리화이트닝 — 스펙트럼 진폭을 1로 눌러 위상만 남김(축 관련 결정론적 성분 제거)
-     ⚠ 판정 경로에 쓰지 말 것 — 복조 대역이 1 kHz 고역통과라 축 성분은 이미 걸러지고, 화이트닝은 공진 대역 성형만 지워 SNR 손실
-     대역통과 없는 원신호·가변속 조건용 */
+     · ⚠ 판정 경로에 쓰지 말 것 — 복조 대역이 1 kHz 고역통과라 축 성분은 이미 걸러지고, 화이트닝은 공진 대역 성형만 지워 SNR 손실
+     · 대역통과 없는 원신호·가변속 조건용 */
   function prewhiten(values) {
     var n = values.length;
     if (n < 64) return values;
@@ -1354,8 +1354,8 @@
   }
 
   /* 벨트 구동 파생 주파수 — 반대쪽 축 1×(비동기 기본파의 흔한 정체)·벨트 통과주파수
-     fr = 센서 축 1×. onDriven이면 센서가 종동축 → 반대쪽은 모터(fr × D2/D1), 벨트 속도는 π·D2·fr
-     벨트 통과주파수는 벨트길이(len) 있을 때만 — 단위는 풀리경과 같게(mm) */
+     · fr = 센서 축 1×, onDriven이면 센서가 종동축 → 반대쪽은 모터(fr × D2/D1), 벨트 속도는 π·D2·fr
+     · 벨트 통과주파수는 벨트길이(len) 있을 때만 — 단위는 풀리경과 같게(mm) */
   function beltFreqs(fr, belt, onDriven) {
     if (!(fr > 0) || !belt) return null;
     var d1 = Number(belt.d1) || 0, d2 = Number(belt.d2) || 0, L = Number(belt.len) || 0;
@@ -1623,8 +1623,8 @@
   }
 
   /* ---------------- 베이스라인(정상 상태) 학습 — 로버스트 ----------------
-     한계 = μ + k·σ, μ=median · σ=1.4826·MAD(평균·표준편차는 스파이크에 σ가 부풀어 이탈을 덮음)
-     1.4826 = 정규 등가 스케일 보정("3σ" 의미·저장 포맷 {mu,sigma,k} 유지) */
+     · 한계 = μ + k·σ, μ=median · σ=1.4826·MAD(평균·표준편차는 스파이크에 σ가 부풀어 이탈을 덮음)
+     · 1.4826 = 정규 등가 스케일 보정("3σ" 의미·저장 포맷 {mu,sigma,k} 유지) */
   var BASELINE_MIN_N = 30; // 최소 표본(미만이면 산포 추정 신뢰 불가)
   function median(a) {
     if (!a.length) return NaN;

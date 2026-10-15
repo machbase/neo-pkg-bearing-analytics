@@ -16,6 +16,11 @@ const spec = {
   ],
   dryRun: true,
 };
+// 앱과 같은 저장소 표 위치·행 키 접두 — 없으면 판정 상태 표를 기본 DB에서 찾아 ERR-2025(테스트는 SYS 권한 실행)
+const SQL = (await import('../../cgi-bin/db/sql.js')).default;
+SQL.setScope('NEO_BEARING_STORE', 'SYS');
+spec.tblPrefix = SQL.sharedScope();
+spec.keyPrefix = SQL.userPrefix();
 /* 시드 태그 없으면 건너뜀(사유 출력) — 데이터 부재를 코드 회귀로 오독 방지 */
 const seeded = await fetch(NEO + '/db/query?format=csv&q='
   + encodeURIComponent("select count(*) from VIBE_TEST where NAME in ('" + spec.tags.map((t) => t.tag).join("','") + "')"))
@@ -52,7 +57,7 @@ check('done 행 방출(태그 순회 완료)', /(^|\n)done,/.test(text));
 const doneRow = (text.match(/(?:^|\n)done,(\d+),(\d+)/) || []);
 check('순회 태그 수 = 3', doneRow[2] === '3');
 check('state 행 방출(판정 상태)', /(^|\n)state,/.test(text));
-// SENSOR_NORMAL RMS(~1.58)면 grade 1(주의) → 직전상태 없을 때 evt 방출, prev 있으면 무이벤트 정상
+// evt 행은 참고 출력 — 검사 대상 아님
 console.log('\n(참고) evt 행:', (text.match(/(?:^|\n)evt,[^\n]*/g) || []).join(' | ') || '없음(직전상태와 동일이면 정상)');
 
 console.log(`\nmonitor-tql live: ${pass} passed, ${fail} failed`);

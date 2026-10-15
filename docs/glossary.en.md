@@ -5,7 +5,7 @@ weight: 15
 
 # Glossary
 
-[한국어](./glossary.kr.md) | **English**
+[English](./glossary.en.md) | [한국어](./glossary.kr.md) | [日本語](./glossary.ja.md)
 
 Every term these documents use, explained in order. If vibration analysis is new to you, this page is enough to follow the rest.
 
@@ -60,7 +60,7 @@ Envelope demodulation extracts **only the outline** of the signal. The fast osci
 
 By analogy: to hear a distant, regular hammering, you **count the beat rather than listen to the pitch**.
 
-This app keeps **only the 1–5 kHz band** before extracting the envelope — the band where impacts ring the housing's high-frequency resonance.
+For the fault pattern that sets the grade and the envelope in detail analysis, this app keeps **only the 1–5 kHz band** before extracting the envelope — the band where impacts ring the housing's high-frequency resonance. (The envelope trend accumulated by band extraction uses the highest octave below the mounting limit and the sampling limit.)
 
 ### Kurtogram (per-band impulsiveness)
 
@@ -76,7 +76,7 @@ Sidebands are evidence that the impacts are **genuinely tied to rotation** rathe
 
 ### Pitch diameter · driven shaft
 
-- **Pitch diameter** — for a bearing, the diameter of the circle through the ball centres; for a belt pulley, the diameter where the belt rides. A pulley's pitch diameter is slightly smaller than its outer diameter and is stamped on the pulley or listed in its catalog.
+- **Pitch diameter** — for a bearing, the diameter of the circle through the ball centers; for a belt pulley, the diameter where the belt rides. A pulley's pitch diameter is slightly smaller than its outer diameter and is stamped on the pulley or listed in its catalog.
 - **Driven shaft (driven side)** — on a belt-driven machine, the shaft on the far side from the motor (fan, pump, …). If the sensor sits on a bearing there, set the sensor position to **driven side** so the fault frequencies are computed from that shaft's speed.
 
 ---
@@ -95,7 +95,7 @@ The largest instantaneous value divided by RMS. Like kurtosis, it measures **imp
 
 ### Instrumentation fault
 
-A state where **the measurement itself is hard to trust** — clipping (saturation), a flatline (the value barely changes), DC drift (the mean wanders), an isolated spike. Detail analysis then shows a "signal anomaly — check the sensor" warning and **withholds diagnosis**, and monitoring stops grading that machine (card: On hold · instrumentation fault).
+A state where **the measurement itself is hard to trust** — clipping (saturation), a flatline (the value barely changes), DC drift (the mean wanders), an isolated spike. Detail analysis then shows a "signal anomaly — check the sensor" warning and **withholds diagnosis**. In monitoring, clipping, flatline, DC drift and too few samples stop grading that machine (card: On hold · instrumentation fault), while an isolated spike or extreme kurtosis does not stop grading and is kept as evidence only.
 
 A sensor with a large but steady mean (a MEMS accelerometer's gravity axis, for example) is not an instrumentation fault — it only gets a grey "DC component" note.
 
@@ -148,7 +148,7 @@ A state where the app **leaves a score blank rather than scoring it zero** — f
 
 ### Judgment fingerprint
 
-A short string printed on every report, computed from the thresholds and criteria used. If two reports share a fingerprint, the criteria were the same and the data changed; if not, the judgment settings changed in between.
+A short string printed on every report, computed from the judgment engine's rules and fixed constants. If two reports share a fingerprint, they were judged by the same engine; if not, the package (judgment engine) changed in between. Thresholds you changed are compared through the report's Thresholds section, not the fingerprint.
 
 ---
 

@@ -133,6 +133,13 @@ const cases = [
     srcCap: { perTable: [{ table: 'VIBRATION_RAW', shown: 20, total: 27, byTotal: false }], dropped: 7, droppedKeys: {}, eligible: 27, shown: 20, byTotal: false } },
     ['27개 중 20개', '7개 제외', '테이블당 상한']],
   ['settings source 상한 안(안내 없음)', { tab: 'settings', setSection: 'source' }, ['!표시 상한']],
+  // 계정 권한 표(SYS) — 상태·타이머·버튼, 회수는 줄 안에서 확인
+  ['settings source 계정 권한 표', { tab: 'settings', setSection: 'source', user: 'SYS', grantUsers: ['JOY', 'TESTUSER'],
+    grantStatus: { JOY: { n: 5, total: 5, timers: 1 } } },
+    ['패키지 사용 계정 권한', '권한 있음', '권한 없음', '타이머 1개', '권한 회수', '권한 주기', '-- 권한 회수', '!의 권한을 회수할까요?']],
+  ['settings source 계정 권한 회수 확인', { tab: 'settings', setSection: 'source', user: 'SYS', grantUsers: ['JOY'],
+    grantStatus: { JOY: { n: 5, total: 5, timers: 1 } }, grantAsk: 'JOY' },
+    ['의 권한을 회수할까요?', '매 회차 실패합니다', '>회수<', '>취소<']],
   /* 별칭 편집 목록·검색 — 스모크엔 DB가 없어 _tagCache를 심어 필터 경로를 태움 */
   ['settings source 별칭 목록', { tab: 'settings', setSection: 'source', srcSel: ['VIBRATION_RAW'], _tagCache: { VIBRATION_RAW: ['P1', 'P2', 'MOTOR_A'] } },
     ['VIBRATION_RAW · P1', 'VIBRATION_RAW · MOTOR_A', '>3개<']],

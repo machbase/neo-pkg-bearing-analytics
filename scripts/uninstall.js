@@ -6,8 +6,8 @@
 // 세션을 못 얻거나 로그인 실패면 삭제 없이 안내만. 상주 서비스가 없어 start/stop 훅 없음
 var PREFIXES = ['NEO_BEARING_MONITOR', 'NEO_BEARING_BAND', 'NEO_BEARING_WD',
   'NEO_VIBE_MONITOR', 'NEO_VIBE_BAND', 'NEO_VIBE_WD'];   // 옛 이름 포함
-var GUIDE = '다른 계정이 등록한 NEO_BEARING_* 타이머는 그 계정으로 앱에서 알람을 끄거나, Neo 타이머 화면에서 멈춘 뒤 삭제하세요';
-var GUIDE_ALL = '남은 NEO_BEARING_* 타이머는 각 계정으로 앱에서 알람을 끄거나, Neo 타이머 화면에서 멈춘 뒤 삭제하세요';
+var GUIDE = '다른 계정이 등록한 NEO_BEARING_* 타이머는 그 계정으로 앱에서 알람과 대역 추출을 끄거나, Neo 타이머 화면에서 멈춘 뒤 삭제하세요';
+var GUIDE_ALL = '남은 NEO_BEARING_* 타이머는 각 계정으로 앱에서 알람과 대역 추출을 끄거나, Neo 타이머 화면에서 멈춘 뒤 삭제하세요';
 
 // 정리 실패가 제거를 막지 않음 — 어떤 오류든 안내로 끝냄
 (function () {
