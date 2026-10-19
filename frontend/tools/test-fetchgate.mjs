@@ -118,11 +118,13 @@ chk(seen.length === 1 && !/relogin/.test(seen[0].path), '만료가 멀면 갱신
 // 만료 1분 안쪽이면 요청 전 갱신 — 요청 도중 만료 방지
 reset();
 store.accessToken = mkExpJwt('joy', 30);
+const oldTok = store.accessToken;
 reply = (p) => (/relogin/.test(p) ? okJson({ success: true, accessToken: mkExpJwt('joy', 300), refreshToken: 'rt-2' })
   : okJson({ success: true, data: { rows: [] } }));
 globalThis.fetch = async (p, init) => { seen.push({ path: p, init: init || {} }); return reply(p); };
 await DB.q('select 1');
 chk(seen.length === 2 && seen[0].path === '/web/api/relogin', '만료 임박이면 먼저 갱신한다', seen.map((s) => s.path).join(' → '));
+chk(hdr(0, 'Authorization') === 'Bearer ' + oldTok, 'relogin 에도 현재 토큰을 싣는다 — 없으면 Neo가 401(missing authorization header)', String(hdr(0, 'Authorization')).slice(0, 30));
 chk(store.refreshToken === 'rt-2', '새 refreshToken 을 저장한다', store.refreshToken);
 chk(hdr(1, 'Authorization') === 'Bearer ' + store.accessToken, '갱신된 토큰으로 요청이 나간다');
 

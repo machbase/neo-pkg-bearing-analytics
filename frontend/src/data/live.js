@@ -29,6 +29,8 @@ export const rollupBatch = DB.rollupBatch;
 export const listTags = DB.listTags;
 export const tagStats = DB.tagStats;
 export const rollupTrend = DB.rollupTrend;
+export const isNoRollup = DB.isNoRollup;
+export const probeRollup = DB.probeRollup;
 export const rawWindow = DB.rawWindow;   // 원시 파형 구간(분석 창·추이 청크·ISO 계산 공용)
 // 상시감시 영속화 — 이벤트·판정상태·베이스라인(판정은 app._judgeLive)
 export const ensureMonTables = DB.ensureMonTables;

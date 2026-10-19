@@ -1,0 +1,59 @@
+baseURL: https://machbase.github.io/neo-pkg-bearing-analytics/
+title: Machbase Neo Bearing Analytics
+
+enableRobotsTXT: true
+hasCJKLanguage: true
+
+defaultContentLanguage: en
+languages:
+  en:
+    languageName: English
+    languageCode: en-US
+    title: MACHBASE NEO BEARING ANALYTICS
+    weight: 1
+  kr:
+    languageName: 한국어
+    languageCode: ko-KR
+    title: MACHBASE NEO BEARING ANALYTICS
+    weight: 2
+  ja:
+    languageName: 日本語
+    languageCode: ja-JP
+    title: MACHBASE NEO BEARING ANALYTICS
+    weight: 3
+
+module:
+  imports:
+    - path: github.com/imfing/hextra
+
+markup:
+  goldmark:
+    renderer:
+      unsafe: true
+  highlight:
+    noClasses: false
+
+params:
+  navbar:
+    displayTitle: true
+  footer:
+    displayCopyright: true
+    displayPoweredBy: false
+  page:
+    contextMenu:
+      enable: true
+  search:
+    enable: true
+
+menu:
+  main:
+    - identifier: docs
+      name: Machbase Docs
+      url: https://docs.machbase.com/
+      weight: 10
+    - identifier: github
+      name: GitHub
+      url: https://github.com/machbase/neo-pkg-bearing-analytics
+      params:
+        icon: github
+      weight: 20

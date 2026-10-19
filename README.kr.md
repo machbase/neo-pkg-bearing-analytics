@@ -6,7 +6,7 @@ Machbase Neo에 저장된 시계열 데이터를 바탕으로 회전기계를 �
 
 > **사람의 진단을 대신하지 않습니다.** 정기 점검 사이의 공백을 메우고, 무엇부터 봐야 할지 순서를 매기고,
 > 점검자가 도착하기 전에 필요한 스펙트럼을 화면에 띄워 둡니다.
-> 실측 성적과 명시된 한계는 [이 도구가 하는 일과 하지 않는 일](docs/scope.kr.md)을 참고하세요.
+> 실측 성적과 명시된 한계는 [이 도구가 하는 일과 하지 않는 일](https://machbase.github.io/neo-pkg-bearing-analytics/kr/scope/)을 참고하세요.
 
 ## 개요
 
@@ -30,8 +30,8 @@ neo-pkg-bearing-analytics는 Machbase Neo TAG table에 쌓인 진동 센서 데�
 ## 주요 기능
 
 - **실시간 모니터링** — 실시간 스파크라인이 붙은 설비 카드 그리드, 결함 패턴이 켜는 등급(양호 / 주의 / 위험 / 심각), 지금 등급을 매길 수 없는 설비(정지 · 신호 두절 · 계측 이상 · RPM이나 베어링 미입력)를 세는 **판정 보류** 수, 필터를 겸하는 KPI 요약 바, 테이블 필터, 끌어다 놓아 바꾸는 카드 순서, 걸러 볼 수 있는 이벤트 목록을 제공합니다. 헤더의 토글로 알람 판정을 켜고 끕니다.
-- **상세분석** — 선택한 태그의 스냅샷입니다. 원시 파형, RMS / Peak-to-Peak / Crest Factor / 첨도(Kurtosis) 추이, 결함 대역 에너지 추이, 베어링 결함 주파수 마커(1× / 2× / 3×, BPFO / BPFI / BSF / FTF)를 얹은 FFT 스펙트럼, 포락선, 켑스트럼, 스펙트로그램, 대역별 충격성(커토그램)을 보여 주고, 하모닉 / 측대역 분석도 함께 합니다. 베어링 판정은 포락선이 이끕니다. 커토그램·켑스트럼·스펙트로그램은 맥락을 보여 주려고 띄울 뿐 일부러 등급에서 뺐습니다([이 도구가 하는 일과 하지 않는 일](docs/scope.kr.md) 참고).
-- **결함 패턴 게이트 등급 판정** — 결함 패턴(베어링 결함 주파수 자리에 서는 근거)이 등급을 켜고, ISO 존(절대 기준, 규격이 정한 대로 10\~1000 Hz로 대역 제한)이 그 높이를 정합니다. 학습된 베이스라인(자기 평소 대비 상대 기준)과 대역 에너지(주파수 대역별 상대 기준)는 추적해 근거로 보여 주지만 등급을 올리지는 않습니다. 그래서 학습 여부와 관계없이 태그의 등급은 같습니다. 등급을 정하는 두 축은 모두 학습이 필요 없어, RPM과 베어링만 입력하면 바로 등급 판정이 완성됩니다. 상세분석과 모니터링은 같은 규칙을 씁니다([이상 판정 원리](docs/detection.kr.md)).
+- **상세분석** — 선택한 태그의 스냅샷입니다. 원시 파형, RMS / Peak-to-Peak / Crest Factor / 첨도(Kurtosis) 추이, 결함 대역 에너지 추이, 베어링 결함 주파수 마커(1× / 2× / 3×, BPFO / BPFI / BSF / FTF)를 얹은 FFT 스펙트럼, 포락선, 켑스트럼, 스펙트로그램, 대역별 충격성(커토그램)을 보여 주고, 하모닉 / 측대역 분석도 함께 합니다. 베어링 판정은 포락선이 이끕니다. 커토그램·켑스트럼·스펙트로그램은 맥락을 보여 주려고 띄울 뿐 일부러 등급에서 뺐습니다([이 도구가 하는 일과 하지 않는 일](https://machbase.github.io/neo-pkg-bearing-analytics/kr/scope/) 참고).
+- **결함 패턴 게이트 등급 판정** — 결함 패턴(베어링 결함 주파수 자리에 서는 근거)이 등급을 켜고, ISO 존(절대 기준, 규격이 정한 대로 10\~1000 Hz로 대역 제한)이 그 높이를 정합니다. 학습된 베이스라인(자기 평소 대비 상대 기준)과 대역 에너지(주파수 대역별 상대 기준)는 추적해 근거로 보여 주지만 등급을 올리지는 않습니다. 그래서 학습 여부와 관계없이 태그의 등급은 같습니다. 등급을 정하는 두 축은 모두 학습이 필요 없어, RPM과 베어링만 입력하면 바로 등급 판정이 완성됩니다. 상세분석과 모니터링은 같은 규칙을 씁니다([이상 판정 원리](https://machbase.github.io/neo-pkg-bearing-analytics/kr/detection/)).
 - **규칙 기반 진단** — 결함(불평형, 정렬불량, 베어링 내륜/외륜, 풀림, 기어)을 자동 판정하고, 출처를 밝힌 근거와 근거 점수, 우선순위가 매겨진 권고 조치를 함께 보여 줍니다. 현재 측정으로 가릴 수 없는 결함은 낮은 점수를 주는 대신 사유와 함께 "측정 불가"로 표시합니다.
 - **계측 유효성 게이트** — 클리핑, 플랫라인, DC 드리프트, 단발 스파이크 패턴이 보이면 진단 전체를 "진단 보류" 상태로 두고 모든 후보의 근거 점수를 함께 낮춥니다. 흔들리는 측정은 스펙트럼 전체에 영향을 주기 때문입니다. 일정한 DC 오프셋(MEMS 중력축, 근접 변위센서의 갭 전압)은 적어 두기만 하고 판정을 막지 않습니다.
 - **앱 감시 또는 서버 상시 감시** — 열려 있는 앱에서 판정하거나, 판정 설정을 Neo 타이머로 등록해 앱을 닫아도 이벤트가 계속 쌓이게 할 수 있습니다. 두 방식은 *같은* 판정 규칙으로 동작하고, 감시가 멈췄거나 지연되거나 더 판정할 대상이 없으면 앱이 알려 줍니다 — 그래서 "이벤트 없음"이 조용히 "감시가 죽었음"을 뜻하는 일은 없습니다. 한 계정의 여러 탭이나 PC는 일을 나눠 맡아, 판정과 알림은 하나만 합니다.
@@ -46,19 +46,19 @@ neo-pkg-bearing-analytics는 Machbase Neo TAG table에 쌓인 진동 센서 데�
 - Machbase Neo 8.7.1 이상.
 - 관리자(SYS)가 앱의 설정 → 데이터 소스 화면에서 패키지 데이터베이스 `NEO_BEARING_STORE`를 만들고 계정마다 한 번 권한을 주며, 분석할 데이터 테이블에는 `SELECT` 권한을 줍니다.
 - 표준 `NAME · TIME · VALUE` 컬럼을 가진 TAG table.
-- 서버 상시 감시는 ROLLUP이 있는 테이블만 판정합니다.
+- 데이터 테이블에 ROLLUP 설정 권장 — 없어도 동작하지만 원본 데이터를 직접 집계해 추이 그래프가 최근 구간(상세분석·리포트는 최근 2시간)으로 줄고, 서버 상시 감시에서는 빠집니다. 앱 설정 화면에 해당 테이블이 표시됩니다.
 
 ## 문서
 
-- [소개와 목차](docs/index.kr.md)
-- [용어 사전](docs/glossary.kr.md)
-- [첫 설정](docs/first-setup.kr.md)
-- [사용 방법](docs/usage.kr.md)
-- [알람과 이벤트](docs/alarms.kr.md)
-- [이상 판정 원리](docs/detection.kr.md) — 무엇을 재고 어떤 기준으로 등급을 매기는가
-- [고장 유형과 시그니처](docs/faults.kr.md)
-- [이 도구가 하는 일과 하지 않는 일](docs/scope.kr.md) — 실측 성적과 한계
-- [문제 해결](docs/troubleshooting.kr.md)
+- [소개와 목차](https://machbase.github.io/neo-pkg-bearing-analytics/kr/)
+- [용어 사전](https://machbase.github.io/neo-pkg-bearing-analytics/kr/glossary/)
+- [첫 설정](https://machbase.github.io/neo-pkg-bearing-analytics/kr/first-setup/)
+- [사용 방법](https://machbase.github.io/neo-pkg-bearing-analytics/kr/usage/)
+- [알람과 이벤트](https://machbase.github.io/neo-pkg-bearing-analytics/kr/alarms/)
+- [이상 판정 원리](https://machbase.github.io/neo-pkg-bearing-analytics/kr/detection/) — 무엇을 재고 어떤 기준으로 등급을 매기는가
+- [고장 유형과 시그니처](https://machbase.github.io/neo-pkg-bearing-analytics/kr/faults/)
+- [이 도구가 하는 일과 하지 않는 일](https://machbase.github.io/neo-pkg-bearing-analytics/kr/scope/) — 실측 성적과 한계
+- [문제 해결](https://machbase.github.io/neo-pkg-bearing-analytics/kr/troubleshooting/)
 
 ## 현재 상태
 

@@ -2,7 +2,7 @@
 import { Component } from 'preact/compat';
 import { view } from './view.js';
 import { pickerOpen } from './daterange.js';
-import { listTagTables, tagSchemas, listTags, tagStats, rollupTrend, loadConfig, saveConfig, saveConfigPartial, buildLiveData, liveDetail, sweepAnchors, monPattern, emptyDet, rollupBatch, loadTrendChunks , timerStates, monTimer, bandTimer, wdTimer, deleteWdTimer, rawWindow, CAPS, pkgBase} from './data/live.js';
+import { listTagTables, tagSchemas, listTags, tagStats, rollupTrend, isNoRollup, probeRollup, loadConfig, saveConfig, saveConfigPartial, buildLiveData, liveDetail, sweepAnchors, monPattern, emptyDet, rollupBatch, loadTrendChunks , timerStates, monTimer, bandTimer, wdTimer, deleteWdTimer, rawWindow, CAPS, pkgBase} from './data/live.js';
 import { ensureMonTables, loadEventsRange, countEvents, loadBaselines, saveBaseline, deleteBaseline, insertEvent, insertBandPoint, loadMonState, saveMonState, createMonitorTimer, deleteMonitorTimer, createBandTimer, deleteBandTimer, bandRaw, bandLatest, bandTrend, bandBackfill, bandTimes } from './data/live.js';
 import { usageStats, countRange, tagUsage, deleteEventsRange, deleteEventsOfTag, deleteBandRange, deleteBandOfTag, deleteMonState } from './data/live.js';
 import { runTql } from './data/live.js';
@@ -149,6 +149,7 @@ function routesWithDefaults(routes) {
 }
 // 조회 기간 프리셋(시간) — 짧을수록 고해상도 버킷(≤2h=초·≤3d=분)
 var PERIOD_H = { '1h': 1, '6h': 6, '24h': 24, '7d': 168 };
+var TRUNC_CAP_MS = 2 * 3600000; // 롤업 없는 테이블의 추이 조회 구간(db.js rollupTrend 폴백 기본값과 같음)
 // 계측 게이트 발동 시 전 결함 후보 근거점수 상한 — 게이트는 전역 상태라 일부만 누르면 미검증 후보가 1위로 상승
 var GATE_CAP = 40;
 // 알람 시나리오 지속시간(진입 확인·복귀 유지·지속 재알림) 코드 → ms
@@ -712,6 +713,7 @@ export class App extends Component {
         ensureMonTables().catch(function () {}); // 상시감시 표 존재 보장 — 신규 설치 대비
         // 저장된 선택 없으면 미선택으로 시작(설정 → 데이터 소스에서 선택)
         var sel = (cfg.srcSel || []).filter(function (t) { return tables.indexOf(t) >= 0; });
+        self._loadRollups(sel); // 롤업 유무 — 부팅은 선택 테이블만(전체는 설정 진입 시), 비차단
         buildLiveData(E, sel, cfg).then(function (data) {
           var failed = data.failed || [];
           self.data = data;
@@ -2603,7 +2605,8 @@ export class App extends Component {
     return { kurt: [], bands: [], xLabels: [] };
   }
   // 조회 기간 → 롤업 창(시작·종료·단위) — 구간 길이별 버킷 단위로 과다 버킷 방지
-  _rollWindow(now, st, scope) {
+  // raw=롤업 없는 테이블 — 원본 집계라 최근 TRUNC_CAP_MS로 창 축소 후 단위 선정
+  _rollWindow(now, st, scope, raw) {
     var S = this.state, rep = scope === 'report'; // 상세분석과 리포트는 조회 기간이 서로 독립
     var p = (rep ? S.genPeriod : S.period) || '1h';
     var fromMs, toMs = now;
@@ -2622,6 +2625,8 @@ export class App extends Component {
       toMs = Math.min(toMs, st.maxMs);
     }
     if (!(toMs > fromMs)) fromMs = toMs - 3600000;
+    var capped = !!raw && toMs - fromMs > TRUNC_CAP_MS;
+    if (capped) fromMs = toMs - TRUNC_CAP_MS;
     // 단위 사다리 — 티어별 버킷 수 상한으로 DB·렌더 비용 일정
     //   ~2시간 초별(≤7,200) / ~5일 분별(≤7,200) / ~1년 시간별(≤8,760) / ~10년 일별(≤3,650) / 그 이상 월별
     var spanSec = Math.max(1, (toMs - fromMs) / 1000);
@@ -2630,8 +2635,8 @@ export class App extends Component {
         : spanSec <= 365 * 86400 ? 'hour'
           : spanSec <= 3650 * 86400 ? 'day' : 'month';
     var stepSec = { sec: 1, min: 60, hour: 3600, day: 86400, month: 2592000 }[unit];
-    return { fromMs: fromMs, toMs: toMs, unit: unit, stepSec: stepSec, clock: stepSec <= 60,
-      label: { sec: '초별 (1s)', min: '분별 (1m)', hour: '시간별 (1h)', day: '일별 (1d)', month: '월별 (1M)' }[unit] };
+    return { fromMs: fromMs, toMs: toMs, unit: unit, stepSec: stepSec, clock: stepSec <= 60, raw: !!raw, capped: capped,
+      label: { sec: '초별 (1s)', min: '분별 (1m)', hour: '시간별 (1h)', day: '일별 (1d)', month: '월별 (1M)' }[unit] + (raw ? ' · 원본 집계' : '') };
   }
   // 선택 기간의 롤업을 DB에서 fresh 조회 (기준점=그 태그의 현재 최신 데이터 시각)
   _rollForAsync(eq, scope) {
@@ -2639,9 +2644,17 @@ export class App extends Component {
     return tagStats(eq.table).then(function (stats) {
       var st = stats[eq.name];
       var now = (st && st.maxMs) || eq.lastSeen || self.data.now;
-      var w = self._rollWindow(now, st, scope);
-      return rollupTrend(eq.table, eq.name, w.unit, w.fromMs, w.toMs).then(function (buckets) {
-        return { roll: buckets || [], label: w.label, stepSec: w.stepSec, clock: w.clock, fromMs: w.fromMs, toMs: w.toMs };
+      var nr = isNoRollup(eq.table), w = self._rollWindow(now, st, scope, nr);
+      function run() {
+        return rollupTrend(eq.table, eq.name, w.unit, w.fromMs, w.toMs).then(function (buckets) {
+          return { roll: buckets || [], label: w.label, stepSec: w.stepSec, clock: w.clock, fromMs: w.fromMs, toMs: w.toMs, raw: w.raw, capped: w.capped };
+        });
+      }
+      // 이번 조회에서 롤업 없음이 확인되면 축소 창으로 재조회(큰 단위로 2시간만 집계된 버킷 방지)
+      return run().then(function (rf) {
+        if (nr || !isNoRollup(eq.table)) return rf;
+        w = self._rollWindow(now, st, scope, true);
+        return run();
       });
     });
   }
@@ -2658,7 +2671,7 @@ export class App extends Component {
         Object.assign(c, rf, { state: 'ready' }); self.forceUpdate();
       }).catch(function (e) { c.state = 'error'; c.label = '조회 실패'; console.warn('[vibe] rollFor failed', e); });
     }
-    return { roll: c.roll, label: c.label, stepSec: c.stepSec, clock: c.clock, fromMs: c.fromMs, toMs: c.toMs };
+    return { roll: c.roll, label: c.label, stepSec: c.stepSec, clock: c.clock, fromMs: c.fromMs, toMs: c.toMs, raw: !!c.raw, capped: !!c.capped };
   }
   /* detIn: 계산된 상세(리포트는 리포트 기간 끝 앵커) — 생략 시 화면 기준 재조회라 앵커 불일치로 emptyDet 위 판정
      sev: VC.sevMetrics 결과 — 넘기면 진폭 정상 구간에서도 Crest 초과를 문구에 반영 */
@@ -3694,6 +3707,15 @@ export class App extends Component {
       }
       self.forceUpdate();
     }).catch(function () { self.liveSchemas = null; });
+  }
+  /* 테이블별 롤업 유무 사전 확인(판정 결과는 db.js가 기억) — 끝나면 재렌더
+     tables 생략 시 전체 목록, 컬럼 구성 미지원 table은 제외(선택 불가라 확인 불필요) */
+  _loadRollups(tables) {
+    var self = this;
+    var list = (tables || this.liveTables || []).filter(function (t) { return !self._srcBlock(t); });
+    return Promise.all(list.map(function (t) {
+      return probeRollup(t).catch(function () { return null; });
+    })).then(function () { self.forceUpdate(); });
   }
   // 선택 테이블의 태그 목록 프리페치 — 저장 전에도 별칭 편집에 바로 표시. force=캐시 무시 재조회(설정탭 진입 시)
   _ensureTags(tables, force) {
@@ -4865,7 +4887,7 @@ export class App extends Component {
     // 설정탭 진입 시 테이블·태그 목록 최신화 (부팅 후 추가/삭제된 것 반영)
     if (id === 'settings' && this.live) {
       var self = this;
-      listTagTables().then(function (t) { self.liveTables = t; self._loadSchemas(); self.forceUpdate(); }).catch(function () {});
+      listTagTables().then(function (t) { self.liveTables = t; self._loadSchemas().then(function () { self._loadRollups(); }); self.forceUpdate(); }).catch(function () {});
       this._ensureTags(this.state.srcSel, true);
       // 별칭 편집 누적 줄 수는 진입 시 초기화(검색어는 유지)
       this.setState({ aliasShown: ALIAS_ROWS_MAX });
@@ -5141,7 +5163,7 @@ export class App extends Component {
       self.setState({ srcNotice: '' });
       listTagTables().then(function (t) {
         self.liveTables = t;
-        self._loadSchemas();
+        self._loadSchemas().then(function () { self._loadRollups(); });
         var alive = function (x) { return t.indexOf(x) >= 0; };
         // 사라진 테이블을 편집본·적용본에서 제거(적용본은 메모리만 — 부팅과 같은 거르기), 편집본의 다른 미저장 선택은 유지
         self.setState({ srcSel: (self.state.srcSel || []).filter(alive) });
@@ -5414,6 +5436,10 @@ export class App extends Component {
       { k: '샘플레이트', v: (det.raw.fs / 1000).toFixed(2) + ' kHz' },
       { k: '롤업 단위', v: _rf.label }
     ];
+    // 롤업 없는 테이블 — 원본 집계·구간 축소 사실을 사양 칸 아래에 안내
+    base.rollupNote = !_rf.raw ? ''
+      : _rf.capped ? 'ROLLUP이 없는 테이블이라 원본 데이터를 직접 집계해, 추이 그래프는 선택 기간 중 최근 2시간만 표시합니다 — 테이블에 ROLLUP을 만들면 전체 기간을 볼 수 있습니다'
+        : 'ROLLUP이 없는 테이블이라 원본 데이터를 직접 집계합니다 — 2시간보다 긴 기간은 최근 2시간만 표시합니다';
     var g = E.STATUS[_gi];
     // 보류 중엔 등급어 유지·색만 중립 — 마지막 판정 정보는 남기되 현재 상태로 주장하지 않음
     base.sevHold = !!_held;
@@ -5803,8 +5829,13 @@ export class App extends Component {
     base.srcTables = (self.liveTables || []).map(function (name) {
       var on = S.srcSel.indexOf(name) >= 0, blk = self._srcBlock(name);
       return { name: name, kind: 'TAG', checked: on, kindColor: '#005fb8', blocked: !!blk, blockReason: blk,
+        noRollup: !blk && isNoRollup(name),
         onToggle: function () { self._toggleSrcTable(name); } };
     });
+    // 선택 테이블 중 롤업 없는 것 — 데이터 소스 안내·서버 감시 제외 경고 공용
+    var _noRoll = base.srcTables.filter(function (t) { return t.checked && t.noRollup; }).map(function (t) { return t.name; });
+    base.srcNoRollNote = _noRoll.length ? 'ROLLUP 없음 (' + _noRoll.join(', ') + ') — 원본 데이터를 직접 집계해 동작은 하지만, 추이 그래프는 최근 2시간까지만 보이고 서버 감시에서는 빠집니다. 테이블에 ROLLUP을 만들면 해제됩니다' : '';
+    base.srvNoRollWarn = _noRoll.length ? '서버 감시에서 빠지는 테이블: ' + _noRoll.join(', ') + ' — ROLLUP이 없어 서버 타이머가 판정하지 않습니다. 이 테이블까지 감시하려면 감시 방식을 앱으로 두거나 테이블에 ROLLUP을 만드세요' : '';
     // 전체 선택은 선택 가능한 테이블만(미지원 테이블은 조회 실패)
     var _srcOk = base.srcTables.filter(function (t) { return !t.blocked; }).map(function (t) { return t.name; });
     base.srcSelAllLabel = _srcOk.length && S.srcSel.length === _srcOk.length ? '전체 해제' : '전체 선택';

@@ -58,9 +58,12 @@
     var rt = '';
     try { rt = (localStorage.getItem(REFRESH_STORE_KEY) || '').trim(); } catch (e) { rt = ''; }
     if (!rt) return Promise.resolve(false);
+    // relogin도 현재 accessToken 헤더 필수(없으면 401 missing authorization header) — 콘솔과 같은 방식
+    var rh = { 'Content-Type': 'application/json' };
+    if (cur) rh.Authorization = 'Bearer ' + cur;
     _refreshing = send('/web/api/relogin', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: rh,
       body: JSON.stringify({ refreshToken: rt }),
     }).then(function (r) { return r.ok ? r.json() : null; }).then(function (j) {
       if (!j || j.success === false || !j.accessToken) return false;
@@ -196,6 +199,20 @@
   function isRollupErr(e) { return /ROLLUP/i.test((e && e.message) || ''); }
   // ROLLUP 미지원으로 기억된 테이블 여부
   function isNoRollup(table) { return !!_noRollup[table]; }
+  /* 롤업 유무 사전 확인 — 없는 태그로 조회해 스캔 없이 판정(롤업 없으면 ERR-2264 즉시 반환)
+     true=있음 / false=없음 / null=판정 불가(다른 오류). 결과는 테이블별 기억 */
+  var _rollKnown = {};
+  function probeRollup(table) {
+    if (table in _rollKnown) return Promise.resolve(_rollKnown[table]);
+    return q(SQL.rollupTrend(table, '__rollup_probe__', 'sec', 0, 0, false))
+      .then(function () { return true; }, function (e) { return isRollupErr(e) ? false : null; })
+      .then(function (ok) {
+        if (ok === null) return null;
+        _rollKnown[table] = ok;
+        if (!ok) _noRollup[table] = true;
+        return ok;
+      });
+  }
 
   // DATE_TRUNC 폴백은 원본 전체 스캔 → 폴백 시 opts.truncCapMs(기본 2시간)로 구간 캡
   function rollupTrend(table, tag, unit, fromMs, toMs, opts) {
@@ -1052,7 +1069,7 @@
     timerName: timerName, deleteWdTimer: deleteWdTimer,
     createBandTimer: createBandTimer, deleteBandTimer: deleteBandTimer, bandTrend: bandTrend, bandRaw: bandRaw, bandBackfill: bandBackfill, bandTimes: bandTimes, bandLatest: bandLatest,
     ensureDir: ensureDir, saveFile: saveFile, listDir: listDir, deleteFile: deleteFile, readFileBlob: readFileBlob,
-    listTagTables: listTagTables, tagSchemas: tagSchemas, listTags: listTags, tagStats: tagStats, isNoRollup: isNoRollup,
+    listTagTables: listTagTables, tagSchemas: tagSchemas, listTags: listTags, tagStats: tagStats, isNoRollup: isNoRollup, probeRollup: probeRollup,
     rollupTrend: rollupTrend, rollupBatch: rollupBatch, rawWindow: rawWindow, lastSampleMs: lastSampleMs, sampleTimes: sampleTimes, fftSpectrum: fftSpectrum,
     loadConfig: loadConfig, saveConfig: saveConfig, saveConfigPartial: saveConfigPartial,
     migrateConfigToDb: migrateConfigToDb, checkAppDb: checkAppDb, setupSql: setupSql, createAppDb: createAppDb, appDb: appDb,
