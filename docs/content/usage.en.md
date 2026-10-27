@@ -122,13 +122,15 @@ A single grey **DC component** (DC 성분) line without the warning box is not a
 
 ### Severity assessment
 
-The top card shows the overall grade and a zone-boundary bar, with the **judgment time** next to the grade ("worst of 8 points in the period", and so on). Without RPM or a bearing, "criteria n/N (… not applied)" is shown as well.
+The top of the card shows the overall grade (the bar under it marks which of the four steps it is), the verdict, and one line on how the two axes produced the grade (for example "fault pattern present + ISO zone A → Warning"). Below them come **what to do now** (지금 할 일) and the supporting facts (evidence score, plus the **judgment time** and how many of the period's segments gave the same verdict); without RPM or a bearing, "criteria n/N (… not applied)" is shown as well. A reason sentence is added only when that one line cannot explain the result, such as when the fault pattern could not be measured or the vibration is high with no pattern.
 
-**That grade is not set by the vibration magnitude (ISO) shown next to it.** Exactly one axis raises it: the **fault pattern** — whether evidence stands at a bearing defect frequency (BPFO / BPFI / BSF / FTF) in the [envelope]({{< relref "glossary#envelope-demodulation" >}}). Only then does the grade rise, and the ISO zone decides **how high** it rises.
+Two boxes underneath show how the grade was set. **① Fault pattern** (① 결함 패턴) is the axis that switches the grade on (none / present), and **② Vibration magnitude** (② 진동 크기) is the axis that sets its height — the ISO zone A–D bar fills up to the current value, and the row below lists the grade each zone gives when a fault pattern is present (A·B → Warning, C → Danger, D → Critical). The zone bar uses no grade colors, and the zones are named by their ISO meaning (A new-machine level · B long-term operation OK · C restricted operation · D damage likely) rather than by grade words.
+
+**That grade is not set by the vibration magnitude (ISO).** Exactly one axis raises it: the **fault pattern** — whether evidence stands at a bearing defect frequency (BPFO / BPFI / BSF / FTF) in the [envelope]({{< relref "glossary#envelope-demodulation" >}}). Only then does the grade rise, and the ISO zone decides **how high** it rises.
 
 So a machine that shakes hard but shows no fault pattern **stays at Good**, while one with ordinary amplitude but a clear pattern moves up — which is exactly where early bearing damage lives, before it reaches the amplitude. Baseline and band values never move the grade; they appear **as supporting evidence** only.
 
-The four headline cards below (value · limit · change) are **period statistics** — computed over the whole selected period, not the grade.
+The **period statistics** table (ISO value · Crest Factor P95 · broadband RMS P95 · rate of change · worst sustained RMS · observation window) is computed over the whole selected period. Only the ISO value row is a basis for the grade; the other rows only state the fact against their limit (within · over). Hover over a note to see the full calculation conditions.
 
 Monitoring cards use **the same judgment rule**, so the two screens do not disagree (detail analysis uses a longer window and checks several points across the period). [How detection works]({{< relref "detection" >}}) has the full principle.
 
@@ -154,12 +156,11 @@ Falling kurtosis normally reads as "getting better", but this combination can me
 
 | Chart | What it shows |
 | :--- | :--- |
-| Statistics summary | Key statistics for the period |
 | RMS trend | Vibration energy over time · ISO zone reference lines |
 | Peak-to-Peak · Crest Factor · Kurtosis trends | Impact size and waveform spikiness over time |
 | Defect-band energy trend | Per-band energy over time. With band extraction on, envelope series (periodicity, fault frequencies) are drawn too. Click a legend entry to hide or show that series. **View vs. alarm limit** (알람 기준으로 보기) rescales each series by its trained limit — 1.0 is the trained limit, so you see at a glance how close each series is (requires trained band baselines; bands never raise alerts and serve as evidence only) |
 | Raw waveform | Time-domain vibration (wheel to zoom, drag to pan, double-click to reset) |
-| FFT spectrum | Frequency content. With a bearing registered, markers for 1×/2×/3× and BPFO/BPFI/BSF/FTF |
+| FFT spectrum | Frequency content. With a bearing registered, marks 1× · 2× · BPFO · BPFI · BSF · FTF and lists those frequencies below the chart |
 | ↳ Range | Defaults to the lower range; switch to **full band** (전대역) to expand out to the sensor's maximum measurable frequency |
 | Spectrogram | Time-frequency evolution — when a fault band started to grow |
 | Per-band impulsiveness (kurtogram) | Shows which frequency band is most impulsive, **for reference only**. Envelope analysis uses the fixed 1–5 kHz band, not this one. If a mounting method is specified, bands above its limit are excluded from the search |
@@ -167,9 +168,11 @@ Falling kurtosis normally reads as "getting better", but this combination can me
 | Cepstrum | Periodic structure in harmonics and sidebands |
 | Diagnostic indicators (time domain) | Impulse and energy indicators computed from the raw waveform |
 
-### Diagnosis and recommended actions
+### Diagnosis and action details
 
-Press **Expand comprehensive analysis** (종합 분석 펼치기) to see the rule-based diagnosis. It calls out faults such as imbalance, misalignment, bearing inner/outer race, looseness, and gear issues, and presents **supporting evidence** (with the indicator each piece came from) alongside **prioritized recommended actions**.
+Press **Expand comprehensive analysis** (종합 분석 펼치기) to see the rule-based diagnosis. It calls out faults such as imbalance, misalignment, bearing inner/outer race, looseness, and gear issues, and presents **supporting evidence** (with the indicator each piece came from) alongside **action details** (how to carry out what to do now, and what would strengthen the verdict, each with its reason).
+
+Action details are not a fixed list: only the items that match the verdict (fault pattern · vibration magnitude · impulsiveness · trend · vibration of unknown origin · missing equipment information) are picked, up to five. When a measurement gate is active, only measurement checks appear and no machine inspection items.
 
 > This verdict is computed from a single-channel, single-direction measurement with no phase information, using nameplate rotational speed. Fault mechanisms are **hypotheses**; a confirmed diagnosis requires multi-axis and phase measurement plus review by a maintenance engineer.
 
@@ -177,7 +180,9 @@ Press **Expand comprehensive analysis** (종합 분석 펼치기) to see the rul
 
 With an LLM connected, **Generate LLM opinion** (LLM 상세 소견 생성) below the comprehensive analysis produces a narrative expert opinion grounded only in the measured values shown in the charts. Pick the provider from the dropdown next to the button; the model used is noted beneath the opinion.
 
-The tone and judgment rules are built into the instructions the app sends to the LLM. The LLM only narrates the verdict the engine has already reached — it quotes the engine's values (never recomputing fault frequencies or scores, never reordering the ranking), closes on a provisional note when the measurement warning is up, always reports negative findings ("looked for, not found"), writes "cannot be measured" instead of a score for items that are undecidable in principle, and does not inflate the grade.
+The opinion is written for the equipment owner rather than a vibration specialist, and answers three questions: **current state (지금 상태) · why it looks that way (그렇게 보는 이유) · recommended actions (권장 행동)**. The LLM reads the measurement data with all its technical terms, but writes the opinion in plain words (for example, "BSF sidebands" becomes "a signal from the bearing balls").
+
+The verdict (grade · cause ranking · actions) has already been set by the engine; the LLM only explains what it means. It never recomputes values or reorders the ranking, closes on a provisional note when the measurement warning is up, never describes items that are undecidable in principle as "unlikely", and does not inflate the grade. Recommended actions cover only the on-screen what to do now and action details — the LLM does not invent new ones.
 
 Without an LLM connected, the rule-based diagnosis stands on its own.
 
@@ -196,18 +201,20 @@ Generation runs in four steps — query data → compute indicators → generate
 
 ### Report structure
 
-| Section | Contents |
+The **Summary** (요약) · **Full analysis** (전체 분석) tabs at the top of the report switch the view. Summary is built for a quick read; Full analysis lays out every chart and all evidence in numbered sections (01 Severity through 05 Action details). The **View evidence** (근거 보기) and **View in-depth analysis** (심층 분석 보기) links in the summary jump to the matching section of the full analysis.
+
+| Tab | Contents |
 | :--- | :--- |
-| Severity assessment | Grade verdict and position against zones |
-| Overall vibration level | Headline indicator levels |
-| Statistics · indicator summary | Statistics and indicator values for the period |
-| Evidence strength | Evidence score per fault candidate (0–100), highest first = priority |
-| In-depth analysis | LLM opinion (when connected) |
-| Conclusions and recommendations | Verdict and actions |
+| Summary | Grade (position among four steps) and verdict · what to do now · LLM opinion key summary (when connected) · key figures (ISO value · Crest Factor P95 · broadband RMS P95) · fault candidates · limits of judgment · action details |
+| Full analysis | Severity (fault pattern × vibration magnitude, indicator table) · Trend · Spectrum (FFT · raw waveform · spectrogram · envelope · kurtogram) · Fault evidence (evidence score 0–100 · counter-evidence · unexplained components) · Action details · LLM opinion (when connected) · Measurement info |
 
-The **Summary** (요약) · **Full** (전체) buttons at the top of the report switch the view (the **Full view** (전체 보기) link inside the summary box does the same). Summary is built for a 30-second read; Full expands every chart and all evidence. Printing includes the full content.
+Verdicts, evidence and actions in the report are written as terse Korean bullet phrases (개조식). The LLM opinion consists of a one-line key summary plus three parts — current state · why it looks that way · recommended actions — and is marked **Provisional** (잠정 판정) when the top evidence score is below 70 or a measurement gate is active.
 
-> **Print with the print button at the top of the report** (Print · Save as PDF). A report opened from the app sits in a frame isolated from the console (so the report file cannot reach your login), and the browser's Ctrl+P prints only that outer frame.
+The FFT in the spectrum section is drawn over the default range where the fault frequencies are visible; the **Full band** (전대역) button widens it to the highest frequency the sensor can measure. In the reference frequency list below the chart (shaft harmonics · bearing fault frequencies), the component the evidence points to is outlined.
+
+Printing outputs the full analysis in the light theme: charts in a single column, the FFT at the range chosen on screen, and the measurement info on one row.
+
+> **Print with the print button at the top of the report** (Print · Save as PDF). A report opened from the app sits in a frame isolated from the console (so the report file cannot reach your login or API token), and the browser's Ctrl+P prints only that outer frame.
 
 Saved reports are **self-contained HTML** with no external references, and their charts are live rather than baked images — wheel zoom, drag, and tooltips work, and they redraw to match the theme. Handing over the single file is enough for someone else to explore it the same way.
 

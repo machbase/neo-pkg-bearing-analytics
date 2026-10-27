@@ -1,7 +1,14 @@
-// 서버 판정 TQL 생성기 — 라이브(Neo 필요, VIBE_TEST 시드 없거나 정지면 건너뜀) · npm run smoke:live 포함
+// 서버 판정 TQL 생성기 — 라이브(Neo 필요, NEO_TOKEN 없거나 VIBE_TEST 시드 없거나 정지면 건너뜀) · npm run smoke:live 포함
 // · dryRun(실테이블 무변경)으로 SCRIPT 컨텍스트에서 judgeTick 임베드+DB조회+판정 순회 확인
 globalThis.window = globalThis;
-const NEO = 'http://127.0.0.1:5654';
+const NEO = process.env.NEO_URL || 'http://127.0.0.1:5654';
+// 앱과 같은 신원 — 토큰 계정으로 조회·실행(헤더 없는 요청은 서버 설정에 따라 401 또는 기본 신원)
+const TOKEN = (process.env.NEO_TOKEN || '').trim();
+if (!TOKEN) { console.log('건너뜀 — 라이브 Neo API 토큰 필요: NEO_TOKEN 환경변수'); process.exit(0); }
+const AUTH = { Authorization: 'Bearer ' + TOKEN };
+const who = await fetch(NEO + '/db/token/validate', { method: 'POST', headers: AUTH })
+  .then((r) => (r.ok ? r.json() : null)).then((j) => (j && j.valid ? String(j.user).toUpperCase() : '')).catch(() => '');
+if (!who) { console.log('건너뜀 — 토큰 무효이거나 Neo 미기동(' + NEO + ')'); process.exit(0); }
 const { judgeTick } = await import('../src/app.js');
 const { buildMonitorTql } = (await import('../../cgi-bin/monitor/monitor.js')).default;
 
@@ -16,14 +23,15 @@ const spec = {
   ],
   dryRun: true,
 };
-// 앱과 같은 저장소 표 위치·행 키 접두 — 없으면 판정 상태 표를 기본 DB에서 찾아 ERR-2025(테스트는 SYS 권한 실행)
+// 앱과 같은 저장소 표 위치·행 키 접두·데이터 표 수식 이름 — 없으면 기본 DB·자기 스키마에서 찾아 ERR-2025
 const SQL = (await import('../../cgi-bin/db/sql.js')).default;
-SQL.setScope('NEO_BEARING_STORE', 'SYS');
+SQL.setScope('NEO_BEARING_STORE', who);
 spec.tblPrefix = SQL.sharedScope();
 spec.keyPrefix = SQL.userPrefix();
+spec.srcMap = { VIBE_TEST: 'SYS.VIBE_TEST' };
 /* 시드 태그 없으면 건너뜀(사유 출력) — 데이터 부재를 코드 회귀로 오독 방지 */
 const seeded = await fetch(NEO + '/db/query?format=csv&q='
-  + encodeURIComponent("select count(*) from VIBE_TEST where NAME in ('" + spec.tags.map((t) => t.tag).join("','") + "')"))
+  + encodeURIComponent("select count(*) from SYS.VIBE_TEST where NAME in ('" + spec.tags.map((t) => t.tag).join("','") + "')"), { headers: AUTH })
   .then((r) => r.text()).then((t) => Number((t.trim().split(String.fromCharCode(10))[1] || '0')) > 0).catch(() => false);
 if (!seeded) {
   console.log('건너뜀 — VIBE_TEST에 시드 태그(' + spec.tags.map((t) => t.tag).join(', ') + ')가 없습니다.');
@@ -32,7 +40,7 @@ if (!seeded) {
 }
 /* 데이터가 오래돼도 건너뜀 — 판정 TQL은 now 기준 창만 조회해 시드 생성기 정지 시 순회 0건 */
 const lastMs = await fetch(NEO + '/db/query?format=csv&timeformat=ns&q='
-  + encodeURIComponent("select max(TIME) from VIBE_TEST where NAME in ('" + spec.tags.map((t) => t.tag).join("','") + "')"))
+  + encodeURIComponent("select max(TIME) from SYS.VIBE_TEST where NAME in ('" + spec.tags.map((t) => t.tag).join("','") + "')"), { headers: AUTH })
   .then((r) => r.text()).then((t) => Number((t.trim().split(String.fromCharCode(10))[1] || '0')) / 1e6).catch(() => 0);
 const staleMs = Date.now() - lastMs;
 if (!(lastMs > 0) || staleMs > 5 * 60000) {
@@ -44,7 +52,7 @@ if (!(lastMs > 0) || staleMs > 5 * 60000) {
 const tql = buildMonitorTql(spec);
 console.log('--- 생성 TQL 길이:', tql.length, '자 · judgeTick 임베드:', tql.includes('function judgeTick'));
 
-const res = await fetch(NEO + '/db/tql', { method: 'POST', headers: { 'Content-Type': 'text/plain' }, body: tql });
+const res = await fetch(NEO + '/db/tql', { method: 'POST', headers: Object.assign({ 'Content-Type': 'text/plain' }, AUTH), body: tql });
 const text = await res.text();
 console.log('--- HTTP', res.status);
 console.log(text.trim());

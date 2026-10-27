@@ -7,14 +7,48 @@ weight: 20
 
 > The app's screens are in Korean. This guide gives each screen label in English with the Korean label in parentheses where it helps you find it.
 
+## Entering the API token
+
+Apart from the Neo console login, the app connects to the server with **an API token issued for each account**. The tables you see, the settings you save and the server-monitoring timers all run with that token account's permissions.
+
+### Issuing a token
+
+1. Sign in to the Neo web console as the account that will use the app.
+2. Click the shield icon **①**, then the **+** button next to **TOKENS** **②**.
+3. Enter a name for the token **③** (e.g. `bearing-analytics`) and click **Issue token** **④**. You can set the expiry date in **NotAfter** (10 years by default).
+
+   ![Create a Neo API token](../static/images/neo-token-create.png)
+
+4. Copy the issued token (it starts with `nt_`) with the copy button **⑤**.
+
+   ![Copy the Neo API token](../static/images/neo-token-copy.png)
+
+> The token string is shown only once, when it is issued. If you lose it, issue a new token.
+
+### Entering it in the app
+
+1. When you open the app, the settings screen shows only the **User info** (유저 정보) card. Until the token is verified, the other settings such as Data Source and the Monitoring, Detail Analysis and Report screens are not shown. Paste the copied token into the field **⑥** and press **Verify & save** (확인·저장) **⑦**.
+
+   ![Enter the API token in the app](../static/images/app-token-input.png)
+
+2. Once verified, the card shows the **signed-in account** (접속 계정) and the masked token, and the app runs as that account.
+
+   ![User info after the token is verified](../static/images/app-token-ok.png)
+
+- Only **a token of the account signed in to the console** is accepted. A token of another account is refused with "this is a token of account ○○" (○○ 계정의 토큰입니다) and not saved.
+- The token is stored **in this browser only**, per account. Enter it again in another browser or on another PC.
+- If the token is revoked or expires, the app returns to the token field. Entering a new token carries on. Server-monitoring timers belong to the account, not the token, so revoking a token does not stop them; a new token for the same account keeps managing them.
+- To replace or remove it, use **Change token** (토큰 변경) or **Remove token** (토큰 지우기) on the same card. Removing it stops queries, evaluation and alert records in that browser (the server-monitoring timer keeps running).
+- Nothing is queried until the token is verified.
+
 ## Before you start — storage and grants
 
-The app runs **as the account signed in to the Neo console**. Which tables you see and where your settings
+The app runs **as the account of the API token you entered**. Which tables you see and where your settings
 are stored both follow that account, so an administrator (SYS) has to prepare things once.
 
 | Who | What |
 | :--- | :--- |
-| SYS | Settings → Data Source → **User info** card → `Create` (만들기) — creates the dedicated database `NEO_BEARING_STORE` |
+| SYS | Settings → **User info** card → `Create` (만들기) — creates the dedicated database `NEO_BEARING_STORE` |
 | SYS | Same card, **Package account permissions** (패키지 사용 계정 권한) list — press **Grant** (권한 주기) on that account's row (once per account) |
 | SYS | Grant the data tables to analyze: `GRANT SELECT ON MACHBASEDB.SYS.<table> TO <account>;` |
 
@@ -22,6 +56,8 @@ An account without grants sees only a notice ("cannot reach the database") and a
 Once the grants are in place, that button resumes the app without a reload.
 
 The list shows each account's permission status (**granted** 권한 있음 · **partial** 일부만 있음 · **none** 권한 없음) and how many of this package's timers that account has registered. Use **Revoke** (권한 회수) for an account that no longer uses the package. Settings, events and learned baselines are not deleted, so granting again picks up where it left off. Before revoking, sign in as that account and turn off its alarms and band extraction — SYS cannot stop another account's timers, so any timers left behind fail on every cycle after the revoke.
+
+When you delete the account itself (for example when someone leaves), **before deleting it** sign in as that account, turn off its alarms and band extraction, and revoke all of its tokens under **TOKENS** in the shield icon (Security) panel. Neo does not remove an account's API tokens or timers when the account is deleted — a leftover token can still read and write workspace files, and recreating an account with the same name hands the old tokens and timers to the new account. Also, an account that has used the app owns a settings table in the dedicated database (`NEO_BEARING_STORE.<account>.CONFIG`), so SYS has to drop that table first — Neo refuses to delete an account that still owns tables.
 
 If an account cannot even sign in to the Neo console, it lacks access to the default database (`ERR-2835`).
 That is a Neo prerequisite rather than a package one: `GRANT CONNECT ON DATABASE MACHBASEDB TO <account>;`
@@ -214,7 +250,7 @@ The **thresholds by class** table can be edited directly and restored with **Res
 
 Learning the equipment's normal state adds a layer of "versus normal" evidence.
 
-The app learns the center (μ) and typical variation (σ) of RMS over a normal operating window, then marks a **sharp rise versus normal** when a value exceeds the limit. This catches a jump relative to normal even when the absolute value is still inside the Good zone. Note that this axis produces **neither a grade nor an event** — it is evidence to read on the card and in the evidence table.
+The app learns the center (μ) and typical variation (σ) of RMS over a normal operating window, then marks a **sharp rise versus normal** when a value exceeds the limit. This catches a jump relative to normal even when the absolute value is still inside ISO zone A. Note that this axis produces **neither a grade nor an event** — it is evidence to read on the card and in the evidence table.
 
 | Setting | Values | Description |
 | :--- | :--- | :--- |

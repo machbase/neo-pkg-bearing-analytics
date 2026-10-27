@@ -8,7 +8,7 @@ globalThis.window = globalThis;
 globalThis.atob = (s) => Buffer.from(s, 'base64').toString('binary');
 const b64 = (o) => Buffer.from(JSON.stringify(o)).toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 const mkJwt = (sub) => `h.${b64({ sub })}.sig`;
-const ls = { accessToken: mkJwt('joy') };
+const ls = { accessToken: mkJwt('alpha'), 'neo-pkg-bearing-analytics.token.ALPHA': 'nt_a_' + 'A'.repeat(43) };
 globalThis.localStorage = {
   getItem: (k) => (k in ls ? ls[k] : null),
   setItem: (k, v) => { ls[k] = String(v); },
@@ -30,7 +30,7 @@ const chk = (ok, msg, extra) => {
   else { fail++; console.error('FAIL', msg, extra === undefined ? '' : extra); }
 };
 const clone = (o) => JSON.parse(JSON.stringify(o));
-DB.setUser('JOY');
+DB.setUser('ALPHA');
 
 // ── 공유 MONSTATE(계정 키 공간) — 탭마다 같은 맵을 읽고 씀 ──────────────────
 const MS = {};
@@ -46,7 +46,7 @@ function mkTab() {
   app._toast = function (m, k) { this._toasts.push((k || '') + ':' + m); };
   app.E = CH;
   app.live = true;
-  app.user = 'JOY';
+  app.user = 'ALPHA';
   app.liveTables = ['A', 'B'];
   app.data = { now: T1, equipment: [], events: [], reports: [] };
   app._monLoad = async () => clone(MS);
@@ -190,11 +190,11 @@ const A = mkTab(), B = mkTab();
 // ── 계정 전환 ─────────────────────────────────────────────────────────
 {
   const lead0 = clone(MS.__lead);
-  ls.accessToken = mkJwt('kim');
+  ls.accessToken = mkJwt('beta');
   B._onStorage();
-  chk(B.state.idSwitch === 'KIM' && !B._isLead(), '다른 계정 로그인 감지(저장소 이벤트) — 안내 표시·담당 내려놓음');
+  chk(B.state.idSwitch === 'BETA' && !B._isLead(), '다른 계정 로그인 감지(저장소 이벤트) — 안내 표시·담당 내려놓음');
   const v = B.renderVals();
-  chk(v.idSwitchShow && v.idSwitchTo === 'KIM' && v.idSwitchFrom === 'JOY' && /앱 감시는 이 탭에서 멈춥니다/.test(v.idSwitchMon),
+  chk(v.idSwitchShow && v.idSwitchTo === 'BETA' && v.idSwitchFrom === 'ALPHA' && /앱 감시는 이 탭에서 멈춥니다/.test(v.idSwitchMon),
     '전체 화면 안내 — 바뀐 계정·원래 계정·감시 상태', v.idSwitchMon);
   const htm = renderToString(view(v));
   chk(/다른 계정으로 로그인되었습니다/.test(htm) && />새로고침</.test(htm) && /position: fixed; inset: 0; z-index: 400/.test(htm), '안내 화면이 실제로 그려짐(새로고침 버튼)');
@@ -217,9 +217,9 @@ const A = mkTab(), B = mkTab();
   fetched = [];
   let err = null;
   await DB.q('select 1').catch((e) => { err = e; });
-  chk(err && err.idSwitch === 'KIM' && fetched.length === 0, 'db.js 관문 — 다른 계정 세션으로는 요청 자체를 보내지 않음', err && err.message);
+  chk(err && err.idSwitch === 'BETA' && fetched.length === 0, 'db.js 관문 — 다른 계정 세션으로는 요청 자체를 보내지 않음', err && err.message);
 
-  ls.accessToken = mkJwt('joy');
+  ls.accessToken = mkJwt('alpha');
   B._onStorage();
   chk(B.state.idSwitch === null, '원래 계정으로 다시 로그인하면 안내 해제');
   await B._coordTick();

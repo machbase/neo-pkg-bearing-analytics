@@ -1,7 +1,7 @@
 /* 판정 입력의 화면 설정 독립성 — 라이브(Neo 필요) · npm run smoke:live 포함
    ① 표시 물리량(g/mm·s⁻¹/μm) 토글에 결함 판정 불변(포락선·커토그램은 표시용 변환값 anaVals 미사용)
    ② 앵커 선택 점수와 그 앵커의 판정 점수가 같은 회전수 기준
-   로그인: NEO_USER·NEO_PASSWORD 환경변수(_liveauth.mjs), 없으면 건너뜀 */
+   신원: NEO_TOKEN 환경변수(_liveauth.mjs), 없으면 건너뜀 */
 const { DB } = await import('./_liveauth.mjs');
 const { liveDetail, sweepAnchors } = await import('../src/data/live.js');
 const CH = (await import('../../cgi-bin/chart/chart.js')).default;

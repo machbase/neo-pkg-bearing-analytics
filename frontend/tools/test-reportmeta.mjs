@@ -25,7 +25,7 @@ chk(/app\._reportBuild\(eq, det, /.test(harSrc), '하네스가 _reportBuild 사�
 const harAssembly = harSrc.slice(0, harSrc.indexOf('const html = Report.buildReportHTML('));
 const ONLY_IN_APP = [
   'gateReason', 'gateCap', 'unmeasurable', 'winNote',
-  '계측 검증 후 재측정', 'ISO Criterion II', '아티팩트는 에너지를 더하기만',
+  '계측 검증 후 재측정', '다음 정기 점검에 베어링 상태 확인', '아티팩트는 에너지를 더하기만',
   'Analysis Engine', 'Ruleset ', 'Fingerprint ',
 ];
 const leaked = ONLY_IN_APP.filter((s) => harAssembly.includes(s));
@@ -40,8 +40,8 @@ chk(extra.length === 0, '하네스 자체 조립은 차트 계열로 한정', ex
 
 // ── 4. 요약 8블록 필드가 _reportMeta 안에 모두 존재 ────────────────────────
 const metaBody = appSrc.slice(appSrc.indexOf('_reportMeta(eq, det, ev, rptSat, dx) {'), appSrc.indexOf('_reportBuild(eq, det, docNo, llmName) {'));
-const NEED = ['gate:', 'gateReason:', 'gateCap:', 'cands:', 'unmeasurable:', 'rpmTxt:', 'obsTxt:', 'action:', 'bias:', 'winNote:',
-  'iso:', 'levelsOk:', 'parsevalOk:', 'mon:', 'rpmMeas:', 'evidence:', 'negatives:', 'unexplained:', 'missing:', 'acq:'];
+const NEED = ['gate:', 'gateReason:', 'gateCap:', 'cands:', 'unmeasurable:', 'rpmTxt:', 'action:', 'bias:', 'winNote:',
+  'iso:', 'levelsOk:', 'parsevalOk:', 'rpmMeas:', 'evidence:', 'negatives:', 'unexplained:', 'missing:', 'acq:'];
 const missing = NEED.filter((k) => !metaBody.includes(k));
 chk(missing.length === 0, '요약·ISO·근거 필드가 _reportMeta에 모두 존재', missing.length ? '누락: ' + missing.join(',') : NEED.length + '종');
 

@@ -104,11 +104,11 @@ const chk = (ok, msg, extra) => {
   };
   let { app, eq, det } = mk('g', 2.089, 0.0773);
   let row = app.renderVals().statRows[0];
-  chk(/^0\.077\d? g · Class/.test(row.v) && /존 판정은 속도 환산/.test(row.t), '가속도 설비 — 상세분석 ISO 판정값을 원본 단위로(예전: 2.089 mm/s)', row.v + ' / ' + row.t);
+  chk(/^0\.077\d? g$/.test(row.v) && /존 판정은 속도 환산/.test(row.t), '가속도 설비 — 상세분석 ISO 판정값을 원본 단위로(예전: 2.089 mm/s)', row.v + ' / ' + row.t);
   chk(/^2\.09 mm\/s\(속도 환산\)$/.test(app._isoDisp(eq, Object.assign({}, det, { isoRaw: null }))), '원본 값이 없으면 환산값을 속도 단위로(원본 단위를 붙이지 않음)', app._isoDisp(eq, Object.assign({}, det, { isoRaw: null })));
   ({ app, eq, det } = mk('mm/s', 2.089, 2.089));
   row = app.renderVals().statRows[0];
-  chk(/^2\.09 mm\/s · Class/.test(row.v) && !/속도 환산/.test(row.t), '속도 센서는 그대로', row.v);
+  chk(/^2\.09 mm\/s$/.test(row.v) && !/속도 환산/.test(row.t), '속도 센서는 그대로', row.v);
 
   // 계측 보류 조치 문구 — 속도 환산값에 원본 단위 표기 없음
   const appSrc = fs.readFileSync(new URL('../src/app.js', import.meta.url), 'utf8');
@@ -121,11 +121,11 @@ const chk = (ok, msg, extra) => {
     judge: { patOn: true, patNa: false, isoGi: 1, isoOnly: 0, site: '베어링 외륜(BPFO)' }, verdict: '-', verdictSub: '-', sevCards: [], stats: [], indics: [],
     data: {
       iso: { rms: '2.089', disp: '0.0773 g', conv: true, gradeIdx: 1, gradeKo: '주의', color: '#d99a2b', anaSec: '8.0', blocks: 8, spread: '1.05' },
-      levels: [], evidence: [], summary: { cands: [], unmeasurable: [], rpmTxt: '-', obsTxt: '-', acqTxt: '-' },
+      levels: [], evidence: [], summary: { cands: [], unmeasurable: [], rpmTxt: '-', acqTxt: '-' },
     },
   });
   const vis = html.replace(/<script[\s\S]*?<\/script>/g, '');   // 보이는 글만(원자료 JSON 제외)
-  chk(/RMS 0\.0773 g/.test(vis) && /존은 속도 환산/.test(vis) && !/2\.089/.test(vis), '리포트 ISO 줄도 원본 단위(예전: 속도 RMS 2.089 mm/s)', (vis.match(/[^>]{0,40}0\.0773 g[^<]{0,30}/) || [''])[0]);
+  chk(/0\.0773 g/.test(vis) && /존은 속도 환산/.test(vis) && !/2\.089/.test(vis), '리포트 ISO 값도 원본 단위(속도 환산값 2.089 mm/s 아님)', (vis.match(/[^>]{0,40}0\.0773 g[^<]{0,30}/) || [''])[0]);
 }
 
 // ── 리포트 DC 성분 안내 — 앱과 같은 구분(경고 아닌 회색 한 줄) ────────────────
@@ -137,7 +137,7 @@ const chk = (ok, msg, extra) => {
   const rpt = (quality) => Report.buildReportHTML({
     docNo: 'VBR-TEST', alias: 'T', tagName: 'T:T', generatedText: '-', specs: [], sevMachine: '-', gradeKo: '정상', gradeColor: '#3aa76d', gradeIdx: 0,
     zones: ['1.12', '2.80', '7.10'], zonesUnit: 'mm/s', judge: { patOn: true, patNa: false, isoGi: 0, isoOnly: 0, site: '' }, verdict: '-', verdictSub: '-', sevCards: [], stats: [], indics: [],
-    data: { quality, levels: [], evidence: [], summary: { cands: [], unmeasurable: [], rpmTxt: '-', obsTxt: '-', acqTxt: '-' } },
+    data: { quality, levels: [], evidence: [], summary: { cands: [], unmeasurable: [], rpmTxt: '-', acqTxt: '-' } },
   }).replace(/<script[\s\S]*?<\/script>/g, '');
   const box = (h) => (/<div class="gate-box[\s\S]*?<div class="gb-d">/.exec(h) || [''])[0];
   const note = (h) => (/<div class="q-note">([^<]*)<\/div>/.exec(h) || ['', ''])[1];

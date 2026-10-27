@@ -7,6 +7,7 @@ globalThis.window = globalThis;
 const store = new Map();
 let failSelect = false;
 const hits = { write: 0, rpc: 0, file: 0 };
+import './_faketoken.mjs';   // db.js 관문용 토큰 칸
 globalThis.fetch = async (url, init) => {
   const u = String(url);
   if (/\/web\/api\/rpc/.test(u)) { hits.rpc++; return { ok: true, status: 200, json: async () => ({ result: [] }) }; }
@@ -118,7 +119,7 @@ function mkApp() {
     '이후 저장은 실제 설정을 그대로 다시 쓴다(설비 정보 보존)');
 }
 {
-  // 세션 끊김이면 인증 화면 우선
+  // 인증 끊김이면 인증 화면 우선
   await seed(REAL);
   const app = mkApp();
   app.state.authMsg = '세션이 만료되었습니다';

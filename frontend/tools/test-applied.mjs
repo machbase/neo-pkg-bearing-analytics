@@ -6,6 +6,7 @@ globalThis.window = globalThis;
 // CONFIG 테이블을 메모리 맵으로 흉내(test-cfgload와 같은 방식) — 쓰기 실패 토글 가능
 const store = new Map();
 let failWrite = false;
+import './_faketoken.mjs';   // db.js 관문용 토큰 칸
 globalThis.fetch = async (url) => {
   const u = String(url);
   if (/\/web\/api\/rpc/.test(u)) return { ok: true, status: 200, json: async () => ({ result: [] }) };

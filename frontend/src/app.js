@@ -6,13 +6,15 @@ import { listTagTables, tagSchemas, listTags, tagStats, rollupTrend, isNoRollup,
 import { ensureMonTables, loadEventsRange, countEvents, loadBaselines, saveBaseline, deleteBaseline, insertEvent, insertBandPoint, loadMonState, saveMonState, createMonitorTimer, deleteMonitorTimer, createBandTimer, deleteBandTimer, bandRaw, bandLatest, bandTrend, bandBackfill, bandTimes } from './data/live.js';
 import { usageStats, countRange, tagUsage, deleteEventsRange, deleteEventsOfTag, deleteBandRange, deleteBandOfTag, deleteMonState } from './data/live.js';
 import { runTql } from './data/live.js';
-import { jwtUser, sessionJwt, whoami, onAuthFail, setUser, checkAppDb, setupSql, createAppDb, appDb, storePrefix, userKeyPrefix, configTable, srcMapOf, listUsers, grantTo, revokeFrom, accessStatus, migrateConfigToDb } from './data/live.js';
+import { consoleUser, apiToken, setApiToken, clearApiToken, tokenHint, validateToken, whoami, onAuthFail, setUser, checkAppDb, setupSql, createAppDb, appDb, storePrefix, userKeyPrefix, configTable, srcMapOf, listUsers, grantTo, revokeFrom, accessStatus, migrateConfigToDb } from './data/live.js';
 import Monitor from '../../cgi-bin/monitor/monitor.js';
 import Band from '../../cgi-bin/monitor/band.js';
 import Notify from '../../cgi-bin/notify/notify.js';
 // 별칭 편집이 한 번에 그리는 줄 수 — 넘치는 분은 검색으로 좁힘
 var ALIAS_ROWS_MAX = 200;
 var GRADE_WORDS = ['양호', '주의', '위험', '심각']; // 이벤트 GRADE 저장·표시용(인덱스 ↔ 단어)
+// ISO 존 이름 — 규격 정의어(등급어와 구분 · 리포트 ISO_ZONE과 같은 말)
+var ISO_ZONE_KO = ['A(신규 설비 수준)', 'B(장기 운전 가능)', 'C(제한 운전)', 'D(손상 우려)'];
 // 대역 학습 기간 — 1시간은 최소 표본(30) 미달이라 제외
 var BAND_WIN_H = { '6h': 6, '24h': 24, '3d': 72, '7d': 168 };
 var ISO_WIN_MS = 1000;      // ISO 대역제한 계산용 원본 창(10 Hz 10주기)
@@ -108,8 +110,6 @@ var BAND_CHUNK_GAP = 400; // 청크 간 휴지 — 감시 타이머 양보
    - 등급 이벤트: 추출 주기 패턴 축 / 계측 이벤트: 10초 축
    - 베이스라인·대역은 상태만 추적(옛 이력 라벨은 TYPEKO에 유지) */
 var EVT_LIVE_TYPES = ['observe', 'threshold', 'sustained', 'improve', 'recovery', 'sensor_fault', 'sensor_ok', 'signal_lost'];
-// 등급을 올린 축의 표시 이름 — 단일 출처(사본 두면 축 추가 시 배지 빈칸·오표기)
-var GRADE_SRC_KO = { iso: 'ISO 존', baseline: '베이스라인', band: '대역·포락선', pattern: '결함 패턴' };
 var TYPEKO = { observe: '관찰', threshold: '임계 초과', sustained: '상태 지속', recovery: '정상 복귀', improve: '상태 개선', signal_lost: '신호 두절', sensor_fault: '계측 이상', sensor_ok: '계측 복귀', baseline: '베이스라인 이탈', band: '대역 이탈', bandrec: '대역 복귀' };
 /* 등급 이벤트(값=판정값) 유형 — 가속도·변위 설비 행은 원본 단위라 기준 숫자 없음
    근거는 DETAIL 머리의 'ISO <존> 구간'(_judgeLive·monitor.js) */
@@ -398,13 +398,16 @@ export class App extends Component {
     // 이 탭 식별자 — 담당 기록·저장 표시의 주인 구분
     this._tabId = Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
     var self0 = this;
-    this._onStorage = function () { self0._checkIdentity(); };   // 다른 탭의 로그인 변화 즉시 감지
+    // 다른 탭의 로그인 변화·토큰 삭제 즉시 감지
+    this._onStorage = function () { self0._checkIdentity(); self0._checkToken(); };
     var savedTheme = null;
     try { savedTheme = localStorage.getItem('vibeTheme'); } catch (e) {}
     var theme = savedTheme ? (savedTheme === 'light' ? 'light' : 'dark') : ((props && props.defaultTheme === 'light') ? 'light' : 'dark');
     this.state = {
       ready: false, tab: (props && props.defaultTab) || 'monitor', theme: theme,
       user: '', authMsg: '', cfgFail: null,
+      // API 토큰 입력 — needsToken: 입력칸 필수 표시, tokenEdit: 부팅 뒤 교체 입력칸
+      needsToken: false, tokenEdit: false, tokenInput: '', tokenBusy: false, tokenMsg: '',
       needsDb: false, dbExists: false, dbSetup: null, dbWhy: '', dbAdmin: false, dbBusy: false,
       grantUsers: null, grantStatus: null, grantBusy: '', grantAsk: '', grantMsg: '',
       configured: true, monitorOn: true,
@@ -504,55 +507,103 @@ export class App extends Component {
   _clock() { var el = document.getElementById('vclock'); if (!el) return; var now = Date.now(); el.textContent = CH.fmtFull(now).slice(0, 19) + (CH.getZone() ? ' ' + CH.offsetLabel(now) : ''); }
   componentWillUnmount() { window.removeEventListener('resize', this._onResize); window.removeEventListener('storage', this._onStorage); if (this._raf) clearTimeout(this._raf); if (this._pt) clearTimeout(this._pt); if (this._tt) clearTimeout(this._tt); if (this._live) clearInterval(this._live); if (this._clk) clearInterval(this._clk); if (this._gt) clearTimeout(this._gt); if (this._resyncT) clearTimeout(this._resyncT); if (this._loadRetryT) clearTimeout(this._loadRetryT); }
   _poll() { this._boot(ENGINE); } // 모듈 import라 로드 대기 불필요
-  // 신원 확인 우선 — 세션 없으면 서버 호출 금지(헤더 없는 요청은 기본 신원으로 통과됨)
+  /* 신원 확인 우선 — 토큰 확인 전엔 서버 조회 없음(헤더 없는 /db/* 요청은 기본 신원으로 통과될 수 있음)
+     · 콘솔 로그인 계정 = 토큰 계정 = 실제 실행 계정이어야 부팅 */
   _boot(E) {
     var self = this;
     this.E = E;
-    var who = jwtUser();
+    var who = consoleUser();
     if (!who) { this._initNoAuth('Neo 콘솔에 로그인되어 있지 않습니다'); return; }
+    var tok = apiToken();
+    if (!tok) { this._initNoAuth('API 토큰이 없습니다 — ' + who + ' 계정의 토큰을 입력하세요', true); return; }
     onAuthFail(function () { self._onAuthLost(); });
-    // 세션 sub와 실제 실행 계정 대조 — 불일치 시 남의 권한으로 도는 상태라 차단
-    whoami().then(function (user) {
-      if (user !== who) {
-        self._initNoAuth('로그인 계정(' + who + ')과 실제 실행 계정(' + user + ')이 다릅니다 — 관리자에게 알리세요');
+    validateToken(tok).then(function (tu) {
+      if (!tu) {
+        clearApiToken();
+        self._initNoAuth('저장된 토큰이 유효하지 않습니다(폐기·만료) — 새 토큰을 입력하세요', true);
         return null;
       }
-      self.user = user;
-      setUser(user);
-      self.setState({ user: user, authMsg: '' });
-      // 앱 저장소는 전용 DB의 계정 스키마 — DB 없음·권한 없음이면 관리자용 SQL 안내
-      return checkAppDb().then(function (usable) {
-        if (!usable) { self._initNeedsDb(); return false; }
-        return ensureMonTables()
-          .then(function () { return migrateConfigToDb(); })
-          .then(function () { return true; })
-          // DB는 있는데 실패 = 권한 문제 — 안내 분기
-          .catch(function (e) { self._initNeedsDb((e && e.message) || String(e), true); return false; });
+      if (tu !== who) {
+        self._initNoAuth('토큰 계정(' + tu + ')이 콘솔 로그인 계정(' + who + ')과 다릅니다 — ' + who + ' 계정의 토큰을 입력하세요', true);
+        return null;
+      }
+      // 토큰 계정과 실제 실행 계정 대조 — 불일치 시 남의 권한으로 도는 상태라 차단
+      return whoami().then(function (user) {
+        if (user !== tu) {
+          self._initNoAuth('토큰 계정(' + tu + ')과 실제 실행 계정(' + user + ')이 다릅니다 — 관리자에게 알리세요');
+          return null;
+        }
+        self.user = user;
+        setUser(user);
+        self.setState({ user: user, authMsg: '', needsToken: false, tokenMsg: '' });
+        // 앱 저장소는 전용 DB의 계정 스키마 — DB 없음·권한 없음이면 관리자용 SQL 안내
+        return checkAppDb().then(function (usable) {
+          if (!usable) { self._initNeedsDb(); return false; }
+          return ensureMonTables()
+            .then(function () { return migrateConfigToDb(); })
+            .then(function () { return true; })
+            // DB는 있는데 실패 = 권한 문제 — 안내 분기
+            .catch(function (e) { self._initNeedsDb((e && e.message) || String(e), true); return false; });
+        });
       });
     }).then(function (ok) {
       if (ok) self._bootAs(E);
       // 권한 부여 대상 계정 목록 — 저장소 준비 여부와 무관하게 관리자에게 필요
       if (self.state.user === 'SYS') self._loadGrantUsers();
     }).catch(function (e) {
-      self._initNoAuth('로그인 계정을 확인하지 못했습니다 — ' + ((e && e.message) || e));
+      self._initNoAuth('계정을 확인하지 못했습니다 — ' + ((e && e.message) || e), true);
     });
   }
-  // 인증 전/끊김 화면 — 조회 없이 설정 화면만, 사유 표시로 빈 화면과 구분
-  _initNoAuth(why) {
+  // 인증 전/끊김 화면 — 조회 없이 설정 화면만, 사유 표시로 빈 화면과 구분. askToken: 토큰 입력칸 표시
+  _initNoAuth(why, askToken) {
     this.live = false;
+    this.liveTables = [];
     this.data = { now: Date.now(), equipment: [], events: [], reports: [] };
     if (this._live) clearInterval(this._live);
     if (this._cat) clearInterval(this._cat);
     this.setState({
-      ready: true, authMsg: why || '인증이 필요합니다', user: '',
+      ready: true, authMsg: why || '인증이 필요합니다', user: '', needsToken: !!askToken,
       srcSel: [], selTag: null, diagTag: null, events: [], reports: [],
       tab: 'settings', setSection: 'source',
     });
   }
+  /* 토큰 확인·저장 — 콘솔 로그인 계정(부팅 뒤엔 이 탭의 계정)의 토큰만 받음
+     · 첫 부팅 전이면 바로 부팅, 토큰 끊김 뒤면 새로고침(타이머·폴링 재기동을 한 경로로) */
+  _tokenSubmit() {
+    var self = this, S = this.state, tok = String(S.tokenInput || '').trim();
+    if (S.tokenBusy) return;
+    if (!tok) { this.setState({ tokenMsg: '토큰을 입력하세요' }); return; }
+    var who = this.user || consoleUser();
+    if (!who) { this.setState({ tokenMsg: 'Neo 콘솔에 로그인되어 있지 않습니다' }); return; }
+    this.setState({ tokenBusy: true, tokenMsg: '' });
+    validateToken(tok).then(function (tu) {
+      if (!tu) { self.setState({ tokenBusy: false, tokenMsg: '유효하지 않은 토큰입니다(오타·폐기·만료)' }); return; }
+      if (tu !== who) { self.setState({ tokenBusy: false, tokenMsg: tu + ' 계정의 토큰입니다 — ' + who + ' 계정의 토큰을 입력하세요' }); return; }
+      if (!setApiToken(tok)) { self.setState({ tokenBusy: false, tokenMsg: '이 브라우저에 토큰을 저장하지 못했습니다(사이트 데이터 차단)' }); return; }
+      self.setState({ tokenBusy: false, tokenInput: '', tokenEdit: false, tokenMsg: '' });
+      if (self.user && !self.state.authMsg) { self._toast('토큰을 바꿨습니다', 'ok'); return; }
+      if (self.user) { window.location.reload(); return; }
+      self.setState({ authMsg: '', needsToken: false });
+      self._boot(ENGINE);
+    }, function (e) {
+      self.setState({ tokenBusy: false, tokenMsg: '토큰을 확인하지 못했습니다 — ' + ((e && e.message) || e) });
+    });
+  }
+  // 이 브라우저의 토큰 삭제 — 조회·판정·알림 기록이 멈추고 입력 화면으로
+  _tokenClear() {
+    clearApiToken();
+    this.setState({ tokenEdit: false, tokenInput: '', tokenMsg: '' });
+    if (this.user) this._onAuthLost();
+    else this._initNoAuth('토큰을 지웠습니다 — 새 토큰을 입력하세요', true);
+  }
+  // 부팅 뒤 토큰이 사라졌는지(다른 탭에서 삭제)
+  _checkToken() {
+    if (this.user && !this.state.authMsg && !apiToken()) this._onAuthLost();
+  }
   /* 설정 읽기 실패 화면 — 데이터·타이머 미기동, 사유별 다음 행동만 제공
      - 조회 실패: 재시도만(재설정 권유 시 멀쩡한 설정 삭제 위험)
      - 조각 손상: 해당 영역만 기본값으로 여는 길 추가
-     - 세션 끊김이면 인증 화면 우선 */
+     - 인증 끊김이면 인증 화면 우선 */
   _initCfgFail(err) {
     if (this.state.authMsg) return;
     this.live = false;
@@ -594,6 +645,7 @@ export class App extends Component {
   }
   _initNeedsDb(why, hasDb) {
     this.live = false;
+    this.liveTables = [];
     this.data = { now: Date.now(), equipment: [], events: [], reports: [] };
     if (this._live) clearInterval(this._live);
     if (this._cat) clearInterval(this._cat);
@@ -677,10 +729,10 @@ export class App extends Component {
     this.setState({ needsDb: false, dbBusy: false, dbWhy: '' });
     this._boot(ENGINE);
   }
-  // 세션 도중 토큰 만료 — 폴링 중단(미중단 시 매 주기 401)
+  // 사용 도중 토큰 무효(401)·삭제 — 폴링 중단(미중단 시 매 주기 401)
   _onAuthLost() {
     if (this.state.authMsg) return;
-    this._initNoAuth('세션이 만료되었습니다 — Neo 콘솔에서 다시 로그인한 뒤 새로고침하세요');
+    this._initNoAuth('API 토큰이 유효하지 않거나 지워졌습니다(폐기·만료) — ' + (this.user || '') + ' 계정의 새 토큰을 입력하세요', true);
   }
   /* 부팅 — 설정 읽기 결과(db.loadConfig)로 분기
      읽음·저장 이력 없음은 그대로 부팅, 실패는 기본값 대체 없이 사유 화면(_initCfgFail) */
@@ -1355,10 +1407,12 @@ export class App extends Component {
     if (DATA_KEYS.some(function (k) { return JSON.stringify(prev[k]) !== JSON.stringify(A[k]); })) this._reloadLive(true);
     else if (prev.monitorInterval !== A.monitorInterval) this._startTimers();
   }
+  // 앱 사용 준비 — 토큰·계정 확인과 저장소 접근까지 끝난 상태. 그 전엔 유저 정보만 표시
+  _appReady() { var S = this.state; return !!S.user && !S.authMsg && !S.needsDb; }
   // 로그인 계정 확인 — 다른 계정이면 이 탭의 쓰기를 모두 멈추고 새로고침 안내(같은 계정 재로그인은 무관)
   _checkIdentity() {
     if (!this.user) return true;
-    var who = jwtUser(), bad = !!who && who !== String(this.user).toUpperCase();
+    var who = consoleUser(), bad = !!who && who !== String(this.user).toUpperCase();
     var next = bad ? who : null;
     if (bad) this._lead = false;   // 담당 내려놓음 — 같은 계정의 다른 탭이 이어받음, 원래 계정 복귀 시 다음 조율에서 다시 잡음
     if ((this.state.idSwitch || null) !== next) this.setState({ idSwitch: next });
@@ -2542,18 +2596,28 @@ export class App extends Component {
         return liveDetail(self.E, eq, p.at, vu, fromMs).then(function (det) { return { det: det, pick: p }; });
       });
   }
-  _anchorNote(snap) {
-    if (!this.live || !snap || !snap.anchor) return '';
-    var E = this.E, at = E.fmtDT(snap.anchor);
-    var p = snap.pick;
-    if (!p || !p.worst) return '판정 기준 시각 ' + at;   // 사용자가 이벤트에서 짚은 시각
-    var s = '판정 기준 시각 ' + at + ' · 기간 ' + p.live + '곳 중 ';
-    // 분포는 이상 수준(level > 0)일 때만 표기
-    if (!p.level) s += '가장 나쁜 곳';
-    else if (p.atLevel <= 1) s += '이 1곳만 이 수준 — 단발일 수 있습니다';
-    else s += p.atLevel + '곳이 이 수준';
-    if (p.stopped) s += ' (정지 의심 ' + p.stopped + '곳 제외)';
-    return s;
+  // 판정 기준 시각·분포(상세분석·리포트 지금 할 일 아래 사실 줄) — 시각은 기간이 하루 안(day)이면 시:분만
+  _anchorBrief(snap, day) {
+    if (!this.live || !snap || !snap.anchor) return null;
+    var at = this.E.fmtDT(snap.anchor), p = snap.pick, note = '';
+    if (p && p.worst) {
+      note = p.live + '구간 중 ' + (!p.level ? '가장 나쁜 곳' : p.atLevel <= 1 ? '이곳만 · 단발 가능성' : p.atLevel + '구간 동일');
+      if (p.stopped) note += ' · 정지 의심 ' + p.stopped + '구간 제외';
+    }
+    return { at: day && at.slice(0, 10) === day ? at.slice(11) : at.slice(5), note: note };
+  }
+  /* 심각도 패널 판정 값 — 상세 화면·리포트 공용(리포트는 재판정 없이 인쇄)
+     · patOn=결함 패턴 켜짐 · patNa=측정 불가 · isoOnly=등급 미반영 고 ISO 존
+     · byZone=결함 패턴이 있을 때 존별 등급(정본 규칙 VC.patternGate) · isoPos=존 막대 위 ISO 값 위치(%) */
+  _sevJudge(eq, det, dx, site) {
+    var z = this._isoZones(eq);
+    return {
+      patOn: !!dx.patGi, patNa: !!(dx.cov && (dx.cov.missing || []).indexOf('결함 패턴') >= 0), patWhy: (dx.cov && dx.cov.patWhy) || '',
+      isoGi: dx.isoGi != null ? dx.isoGi : null, isoOnly: dx.isoOnly || 0,
+      site: site || '',
+      byZone: [0, 1, 2, 3].map(function (zi) { return VC.patternGate(true, zi); }),
+      isoPos: det.isoRms != null ? Report.isoPinPct(det.isoRms, z, VC.gradeFor(det.isoRms, z)) : null,
+    };
   }
   // 감시가 지금 보고 있는 계측 이상 사유({label,detail}) — 없으면 null
   _gateOf(eq) { return ((this._runState || {})[eq.table + ':' + eq.name] || {}).gate || null; }
@@ -2692,7 +2756,7 @@ export class App extends Component {
     if (kurtIn) ev.push({ src: '지표', txt: '커토시스 ' + kurtIn.v + (kurtIn.hint ? ' · ' + kurtIn.hint : '') });
     var crestIn = det.indics[3];
     if (crestIn) ev.push({ src: '지표', txt: 'Crest Factor ' + crestIn.v + (crestIn.hint ? ' · ' + crestIn.hint : '') });
-    if (!ev.length) ev.push({ src: '지표', txt: '표시 구간 데이터 없음 — 조회 기간을 확인하세요' });
+    if (!ev.length) ev.push({ src: '지표', txt: '표시 구간 데이터 없음 — 조회 기간 확인 필요' });
     // 규칙 패턴 무검출 시 근거 강도 1순위 채택 — 상단 판정과 근거표 일치
     var evx = det.fft.freqs.length ? this._evidence(eq, det) : null;
     if (!cause && evx) {
@@ -2768,7 +2832,7 @@ export class App extends Component {
       var _why = [];
       if (blOnly) _why.push('평소 대비 급증');
       if (bandOnly) _why.push('대역 이탈');
-      if (isoOnly > 0) _why.push('진동 수준 ' + E.STATUS[isoOnly].ko + ' 구간');
+      if (isoOnly > 0) _why.push('진동 크기 ISO ' + ['A', 'B', 'C', 'D'][isoOnly] + ' 구간');
       verdict = '베어링 결함 징후 없음 · ' + _why.join(' · ')
         + ' — 불평형·정렬불량·풀림 등 베어링 외 원인 점검 권장';
     }
@@ -2778,7 +2842,7 @@ export class App extends Component {
     else verdict = (cause || '이상 진동 — 다축 정밀 측정 권장') + ' — ' + (gi >= 3 ? '심각 단계' : gi === 2 ? '진행 단계' : '초기 징후');
     // 전대역 복조의 '없음'은 약한 근거(조기 결함 공진 대역이 Nyquist 밖) → 양호 판정일 때만 단서 부기
     if (gi === 0 && det.demodSrc === 'wideband') {
-      verdict += ' · 전대역 복조(샘플레이트 ' + Math.round(eq.fs || 0) + ' Hz — 1~5 kHz 대역 불성립)이므로 조기 베어링 결함은 이 판정에 포함되지 않습니다';
+      verdict += ' · 전대역 복조(샘플레이트 ' + Math.round(eq.fs || 0) + ' Hz — 1~5 kHz 대역 불성립) — 조기 베어링 결함은 이 판정에 미포함';
     }
     // 계측 게이트 — 계측 문제 파형이면 진단보다 검증 우선, 사유(클리핑·DC·스파이크) 문구 포함
     var _gr = VC.gateReason(det.quality, null);
@@ -2789,15 +2853,17 @@ export class App extends Component {
     else if (gi === 0 && !_patMeta) {
       var _noPat = !_rpmOk ? '회전수 미상' : _sleeve ? '저널 베어링' : '베어링 품번 미지정';
       if (isoOnly > 0 || blOnly || bandOnly || impulse) verdict += ' · 결함 패턴 판정 불가(' + _noPat + ')';
-      else verdict = !_rpmOk ? '회전수 미상 — 주파수 판정 불가(결함 패턴·대역 축 제외) · 설정에서 RPM을 입력하십시오'
-        : _sleeve ? '저널(sleeve) 베어링 — 구름베어링 결함주파수가 없어 결함 패턴 판정 대상이 아닙니다'
-          : '구름베어링 형상 없음(품번 미지정) — 결함 패턴 판정 불가 · 설정에서 베어링 품번을 입력하십시오';
+      else verdict = !_rpmOk ? '회전수 미상 — 주파수 판정 불가(결함 패턴·대역 축 제외) · 설정에서 RPM 입력 필요'
+        : _sleeve ? '저널(sleeve) 베어링 — 구름베어링 결함주파수 없음 · 결함 패턴 판정 대상 아님'
+          : '구름베어링 형상 없음(품번 미지정) — 결함 패턴 판정 불가 · 설정에서 베어링 품번 입력 필요';
     }
-    var acts = this._buildActions(eq, det, dom, cause, evx);
+    var acts = this._buildActions(eq, det, dom, cause, evx, gi);
     return {
       // gi: 패턴 축 반영 등급 — 화면·리포트 공통 사용(판정문·등급 칩 일치)
       verdict: verdict, impulse: impulse, gi: gi, patGi: patGi, gradeSrc: wgA.src,
       isoOnly: isoOnly, isoGi: isoGi, blOnly: blOnly, bandOnly: bandOnly,
+      site: (evx && evx.top && evx.top.f) || '',   // 근거 1순위 부위 — 심각도 패널 결함 패턴 알약
+      topScore: (evx && evx.top && evx.top.score != null) ? evx.top.score : null,   // 근거 1순위 점수 — 지금 할 일 아래 사실 줄
       // 진동(주파수 대역)·베어링(포락선 결함주파수) 분리 반환 — 조치가 다르고 대역 배수는 인접 결함 전파로 오염 가능
       bandAx: _bandJ ? { envR: _bandJ.envR, envKey: _bandJ.envKey, envAlt: _bandJ.envAlt, freqR: _bandJ.freqR, freqKey: _bandJ.freqKey } : null,
       cov: { n: covN, total: coreAx.length, missing: covMiss, extra: extraOn, patWhy: patWhy },
@@ -2806,88 +2872,112 @@ export class App extends Component {
         + (det.isoRms != null ? ' · ISO Zone ' + ['A', 'B', 'C', 'D'][VC.gradeFor(det.isoRms, this._isoZones(eq))] : ''),
       color: g.color, soft: g.soft, gradeKo: g.ko,
       evidence: ev,
-      actions: acts.map(function (t, i) { return { no: (i + 1) + '.', txt: t }; }),
+      actions: acts.map(function (x, i) { return { no: (i + 1) + '.', txt: x.t, why: x.w, tag: x.tag }; }),
     };
   }
-  // 증거 기반 권고 — 진단 결과(원인·지배주파수·지표·추세)에서 조치 생성, 정상에 가까울수록 항목 감소
-  _buildActions(eq, det, dom, cause, evx) {
+  /* 세부 조치 — 지금 할 일(결정)을 실행하는 방법과 진단을 보완할 일. 항목 = { t: 할 일, w: 이유, tag: 꼬리표 }
+     지금 할 일과 같은 시급도 줄은 넣지 않음 · 정상에 가까울수록 항목 감소 */
+  _buildActions(eq, det, dom, cause, evx, gi) {
+    var E = this.E;
     var ind = det.indics || [];
     var kurt = ind[1] ? parseFloat(ind[1].v) : 0;
     var crest = ind[3] ? parseFloat(ind[3].v) : 0;
     var bk = det.bandKurt; // 밴드 커토시스(고주파 임펄스성) — 원파형 커토시스보다 결함 특이도↑
     var impulsive = (bk != null && bk > 4.5) || kurt > 4.5 || crest > 6;
     var tr = this._trendDir(eq.rollup);
-    var hasBearing = !!(eq.bearing && eq.bearing.n > 0);
+    var meta = eq.meta || {};
     var a = [];
+    var add = function (t, w, tag) { a.push({ t: t, w: w || '', tag: tag || '' }); };
     var gate = !!(det.quality && det.quality.gate);
-    // 계측 게이트 — 스파이크성 신호면 검증 1순위
-    if (gate) a.push('계측 검증 우선 — 극단 Crest/첨도는 스파이크성 잡음(ESD·케이블·접촉) 시그니처와 구분 불가. 센서 마운팅·케이블·커넥터 점검 후 재측정');
     // det.isoRms는 liveDetail의 속도(mm/s) 변환값 — 원본 단위 무관
     var isoOk = det.isoRms != null;
     var jg = isoOk ? VC.gradeFor(det.isoRms, this._isoZones(eq)) : eq.grade;
-    var jSrc = isoOk ? 'ISO 대역제한 판정' : '심각도 판정 RMS';
-    // 게이트 켜짐 → 기계 상태 조치 일절 없음(결함 지목·존 권고 포함) — 조치 목록만 보고 센서 점검 누락 방지. 게이트는 전역 상태
+    var zk = ['A', 'B', 'C', 'D'][jg];
+    // 계측 게이트 → 기계 상태 조치 일절 없음(결함 지목·존 권고 포함), 계측 확인 항목만. 게이트는 전역 상태
     if (gate) {
-      // 메타데이터 입력 조치를 앞으로 — 목록 상한 절단 방지, 문구는 근거표의 막힌 사유에서 생성
-      a.push(this._metaAction(evx));
-      a.push('재측정 시 취득 조건 상향: 8초 창 · 0.125 Hz 분해능 · Hanning 50% 중첩 · 8회 평균(측대역·저주파 진단 조건)');
-      if (tr && tr.pct > 10) a.push('추세는 계측 검증 후 재평가 — 스파이크성 신호가 섞이면 RMS 추세 자체가 왜곡됨');
-      // 존 판정은 보류 명시·값만 참고
-      a.push('계측 검증 후 존 판정 재평가 — 현재 관측값은 ' + (isoOk ? this._isoDisp(eq, det) + '(' + ['양호', '주의', '위험', '심각'][jg] + ' 수준)' : this.E.STATUS[jg].ko) + '이나 아티팩트가 섞여 있어 상한값입니다');
+      add('센서 고정 상태 · 케이블 · 커넥터 접촉 점검', '극단 Crest·첨도는 단발 스파이크(정전기·케이블·접촉)와 구분 불가', '점검');
+      // 설비 정보 입력을 앞으로 — 목록 상한 절단 방지
+      a.push.apply(a, this._metaAction(evx));
+      add('재측정 때 8초 이상 연속 수집', '측대역·저주파 정밀 진단 조건(분해능 0.125 Hz · 8회 평균)', '계측');
+      if (tr && tr.pct > 10) add('계측 검증 뒤 추세 다시 확인', '스파이크가 섞이면 RMS 추세 자체가 왜곡됨');
+      add('계측 검증 뒤 진동 크기 다시 확인', '지금 값 ' + (isoOk ? this._isoDisp(eq, det) + '(ISO ' + zk + ' 구간)' : E.STATUS[jg].ko) + '은 아티팩트가 섞인 상한값');
       return a.slice(0, 5);
     }
-    // 시급성은 규격 판정(ISO 대역제한) 기준 — 광대역 감시 등급이 더 높으면 그 사실만 별도 기재
-    a.push((jg >= 3 ? '긴급 점검 · 설비 중요도·추가 증상 고려해 정지 여부 검토 (심각 존'
-      : jg === 2 ? '조기 점검 권장 · 측정 주기 단축으로 추세 감시 (위험 존'
-        : jg === 1 ? '모니터링 강화 · 다음 정기 점검 시 확인 (주의 존'
-          : '정상 운전 유지 · 예방관리 지속 (양호 존') + ' · ' + jSrc + ' 기준)');
-    if (isoOk && eq.grade > jg) a.push('광대역 감시 등급은 ' + this.E.STATUS[eq.grade].ko + '(최신 1초 RMS ' + this.E.fmt(eq.rms) + ' ' + eq.unit + ')로 규격 판정보다 높음 — 고주파 성분 차이. 알람 임계 재검토 또는 협대역 감시 전환 검토');
+    // 점검 항목 — 지금 할 일(점검 시점)을 실행할 때 볼 것. gi > 0은 베어링 결함 패턴이 있을 때만
+    if (gi >= 1) {
+      add('베어링 이상음 · 발열 · 윤활 상태 · 고정 볼트 점검',
+        '베어링 결함 신호 ' + ['', '초기', '진행', '심각'][Math.min(3, gi)] + ' 단계' + (isoOk ? ' · 진동 크기 ISO ' + zk + ' 구간' : ''),
+        gi === 1 ? '정기 점검' : '점검');
+    } else if (isoOk && jg > 0) {
+      add('커플링 정렬 · 체결 볼트 · 회전체 오염·손상 점검', '진동 크기 ISO ' + zk + ' 구간인데 베어링 결함 패턴 없음', '점검');
+    }
+    if (isoOk && eq.grade > jg) add('알람 임계 재검토 또는 협대역 감시로 전환',
+      '광대역 감시 등급 ' + E.STATUS[eq.grade].ko + '(최신 1초 RMS ' + E.fmt(eq.rms) + ' ' + eq.unit + ')이 규격 판정보다 높음(고주파 성분 차이)', '감시 설정');
     // 원인별 (지배 주파수 + 하모닉/측대역 패턴)
     cause = cause || '';
-    if (/불평형/.test(cause)) a.push('회전체 밸런싱(현장 동적 균형) 점검 — 1× 성분 지배');
-    if (/정렬/.test(cause)) a.push('커플링·축 정렬(레이저 얼라인먼트) 점검 — 2× 성분 우세');
-    if (/풀림/.test(cause)) a.push('체결·고정·베어링 하우징 상태 점검 — 1× 하모닉 다수(기계적 풀림 패턴)');
-    if (/외륜/.test(cause)) a.push('베어링 외륜 결함(BPFO 하모닉 열) — 교체 검토·윤활 상태 확인');
-    if (/내륜/.test(cause)) a.push('베어링 내륜 결함(BPFI 하모닉·측대역) — 교체 검토');
-    if (/전동체|볼/.test(cause)) a.push('베어링 전동체 결함(BSF 하모닉) — 교체 검토');
-    // 증상별(충격성, 밴드 커토시스 우선) — fs가 결함주파수를 못 따라가면 포락선 분석 대신 계측 사양 상향 권고
+    if (/불평형/.test(cause)) add('회전체 밸런싱 점검(현장 동적 균형)', '1× 성분 지배', '점검');
+    if (/정렬/.test(cause)) add('커플링·축 정렬 점검(레이저 얼라인먼트)', '2× 성분 우세', '점검');
+    if (/풀림/.test(cause)) add('체결·고정·베어링 하우징 점검', '1× 하모닉 다수(기계적 풀림 패턴)', '점검');
+    // 부위별 교체 검토는 진행 단계(위험) 이상만 — 초기 징후는 점검 항목 확인이 조치
+    if (gi >= 2) {
+      if (/외륜/.test(cause)) add('베어링 교체 검토 · 윤활 상태 확인', '외륜 결함 패턴(BPFO 하모닉 열)', '점검');
+      if (/내륜/.test(cause)) add('베어링 교체 검토', '내륜 결함 패턴(BPFI 하모닉·측대역)', '점검');
+      if (/전동체|볼/.test(cause)) add('베어링 교체 검토', '전동체 결함 패턴(BSF 하모닉)', '점검');
+    }
+    // 증상별(충격성, 밴드 커토시스 우선) — fs가 결함주파수를 못 따라가면 포락선 분석 대신 별도 고주파 측정
     if (impulsive) {
       var _bf = (eq.bearing && eq.bearing.n > 0 && eq.rpm > 0) ? VC.bearingFreqs(eq.rpm, eq.bearing) : null;
-      var _impTxt = '충격성 신호(' + (bk != null ? '밴드 커토시스 ' + bk.toFixed(1) : '커토시스 ' + kurt.toFixed(1)) + '·Crest ' + crest.toFixed(1) + ')';
+      var _impTxt = '충격성 신호(' + (bk != null ? '밴드 커토시스 ' + bk.toFixed(1) : '커토시스 ' + kurt.toFixed(1)) + ' · Crest ' + crest.toFixed(1) + ')';
       if (_bf && !VC.bearingFsOk(eq.fs, _bf)) {
         var _top = Math.max(_bf.BPFO || 0, _bf.BPFI || 0, _bf.BSF || 0);
-        a.push(_impTxt + ' — 원인 규명에 고주파 계측 필요. 현재 fs ' + this._num(eq.fs) + ' Hz로는 포락선 복조 불가(결함주파수 '
-          + _top.toFixed(0) + ' Hz · 최소 ' + this._num(Math.round(_top * VC.BEARING_FS_RATIO)) + ' Hz). 휴대형 진동계로 별도 측정 권장');
+        add('휴대형 진동계로 고주파 별도 측정', _impTxt + ' — 지금 샘플레이트 ' + this._num(eq.fs) + ' Hz로는 결함주파수 ' + _top.toFixed(0)
+          + ' Hz 포락선 복조 불가(최소 ' + this._num(Math.round(_top * VC.BEARING_FS_RATIO)) + ' Hz)', '계측');
       } else {
-        a.push(_impTxt + ' — 베어링·기어 손상 정밀 점검(포락선·고주파)');
+        add('베어링·기어 손상 정밀 점검(포락선·고주파)', _impTxt, '점검');
       }
     }
     // 추세 (관측이 짧으면 "단기 상승"으로 — 장기 추세 단정 회피)
     if (tr && tr.pct > 10) {
       var _rl = eq.rollup || [], _durMin = _rl.length > 1 ? (_rl[_rl.length - 1].ms - _rl[0].ms) / 60000 : 0;
-      a.push((_durMin < 60 ? '단기 RMS 상승(+' + tr.pct.toFixed(0) + '% · 관측 ' + Math.round(_durMin) + '분, 장기 추세 판단 불가)' : 'RMS 상승 추세(+' + tr.pct.toFixed(0) + '%)') + ' — 측정 주기 단축, 추세 추적으로 진행 여부 확인');
+      add('측정 주기 단축 · 추세 추적', _durMin < 60 ? '단기 RMS 상승 +' + tr.pct.toFixed(0) + '%(관측 ' + Math.round(_durMin) + '분, 장기 추세 판단 불가)'
+        : 'RMS 상승 추세(+' + tr.pct.toFixed(0) + '%)');
     }
-    // 메타데이터 부재 → 후보 '측정 불가' — 채울 항목 항상 안내
-    if (!hasBearing || (evx && evx.unmeasurable && evx.unmeasurable.length)) a.push(this._metaAction(evx));
+    // 미설명 성분(가장 큰 것) — 직결이면 옆 기계, 벨트·기어(또는 미상)면 구동 구성까지
+    var _ux = (evx && evx.unexplained) || [];
+    if (_ux.length) add(meta.drive === 'direct' ? '옆 기계·주변 설비 진동 확인' : '벨트·기어 구성(풀리 지름 · 기어 잇수)과 옆 기계 확인',
+      Math.round(parseFloat(_ux[0])) + ' Hz 진동의 출처 판별(지금은 미설명 성분)', '현장 확인');
+    // 비어 있는 설비 정보 — 입력 칸이 있는 항목은 항상 안내
+    a.push.apply(a, this._metaAction(evx));
     // 지배 주파수 불일치 (패턴도 못 잡은 경우만)
-    if (dom && !dom.hit && !cause && eq.grade >= 1) a.push('지배 주파수 ' + dom.domF.toFixed(1) + ' Hz가 1×/2×·베어링 주파수와 불일치 — 비동기 성분(유체·구조 공진 등) 확인');
+    if (dom && !dom.hit && !cause && eq.grade >= 1) add('유체·구조 공진 등 비동기 원인 확인', '지배 주파수 ' + dom.domF.toFixed(1) + ' Hz가 1×·2×·베어링 주파수와 불일치', '현장 확인');
     return a.slice(0, 5);
   }
-  // 근거표의 '측정 불가' 사유 → 입력 항목과 열리는 후보로 변환
+  /* 지금 할 일 한 줄 — 상세분석·리포트 공용. 등급(결함 패턴 게이트) 기준, 판정 못 한 상태면 해소 방법
+     held = 화면의 판정 보류(감시 동결 포함) — 없으면 분석 창 계측 게이트 */
+  _todoText(eq, det, dx, held) {
+    if (held || (det.quality && det.quality.gate)) return '계측 검증 후 재측정 · 센서 마운팅·케이블·커넥터 점검';
+    // 결함 패턴 측정 불가 = 측정 상태 — ISO 값만으로 조치 지시 안 함
+    var miss = (dx && dx.cov && dx.cov.missing) || [];
+    if (miss.indexOf('결함 패턴') >= 0) {
+      var pw = dx.cov.patWhy;
+      return pw === 'data' ? '다른 기간으로 다시 분석 · 이 구간은 파형 부족으로 베어링 상태 미판정'
+        : pw === 'sleeve' ? '진동 크기는 ISO 존으로 확인 · 저널 베어링은 결함 패턴 대상 아님'
+          : '명판 회전수·베어링 품번 입력 후 다시 분석 · 지금은 베어링 상태 미판정';
+    }
+    var isoG = det.isoRms != null ? VC.gradeFor(det.isoRms, this._isoZones(eq)) : 0;
+    // 화면과 같은 등급(결함 패턴 게이트) 기준 — 진폭만 높은 설비 과잉 조치 · 저진폭 초기 결함 누락 방지
+    var g = (dx && dx.gi != null) ? dx.gi : isoG;
+    var t = (g === 0 && isoG > 0) ? '베어링 외 원인 점검 · 정렬·체결·불평형 확인'
+      : (g === 0 && dx && dx.impulse) ? '포락선에서 베어링 결함 주파수 대조 · 센서·케이블·마운팅 점검'
+        : ['운전 유지 · 현 측정 주기로 예방관리', '운전 유지 · 다음 정기 점검에 베어링 상태 확인',
+          '계획 정지 시 베어링 점검 · 그때까지 측정 주기 단축', '긴급 점검 · 설비 중요도에 따라 정지 검토'][g];
+    // 블록간 변동 크면 경계 여유가 불확도 안 → 잠정(R10)
+    return Math.round((det.isoSpread || 1) * 100) / 100 >= 1.5 ? t + ' (잠정)' : t;
+  }
+  // 비어 있는 설비 정보 → 세부 조치 항목(설정에 입력 칸이 있는 항목만, 없으면 빈 배열)
   _metaAction(evx) {
-    var NEED = [
-      { re: /품번/, item: '베어링 품번', opens: '베어링' },
-      { re: /날개수/, item: '임펠러 날개수', opens: '베인/블레이드 통과' },
-      { re: /계통주파수/, item: '계통주파수', opens: '전기적' },
-      { re: /벨트 제원|풀리경/, item: '벨트 제원(풀리경·벨트길이)', opens: '벨트·풀리' },
-      { re: /위상|축방향/, item: '위상·축방향 측정', opens: '불평형·정렬불량' },
-    ];
-    // 사유는 conf[].caveat에(evx.unmeasurable은 이름 배열뿐)
-    var why = ((evx && evx.conf) || []).filter(function (c) { return c.na; }).map(function (c) { return c.caveat || ''; }).join(' ');
-    var hit = NEED.filter(function (n) { return n.re.test(why); });
-    if (!hit.length) return '설비 메타데이터 입력(베어링 품번 · 마운팅 방식 · 계측 방향 · 구동 계통도 · 날개수 · 계통주파수) — 판정 가능 범위가 넓어집니다';
-    return '설비 정보 입력 — ' + hit.map(function (n) { return n.item + '(→ ' + n.opens + ' 판정)'; }).join(' · ')
-      + ' · 마운팅 방식(→ 고주파 대역 유효성) — 현재 "측정 불가" ' + hit.length + '종이 이걸로 열립니다';
+    var n = (evx && evx.missNames) || [];
+    return n.length ? [{ t: n.join(' · ') + ' 입력', w: '설정 → 설비 정보에서 입력하면 판정할 수 있는 결함 후보가 늘어남', tag: '정보 입력' }] : [];
   }
   // 상세분석 이동 + 조회기간을 해당 태그의 데이터 기준으로 재설정 (카드 클릭·이벤트·태그 선택 공용)
   _gotoDetail(id, atMs) {
@@ -2913,6 +3003,31 @@ export class App extends Component {
     if (win && win.fromMs && win.toMs) return E.fmtDT(this._xFrom0(roll, win.fromMs)) + ' ~ ' + E.fmtDT(win.toMs);
     if (!roll || !roll.length) return fallback;
     return E.fmtDT(roll[0].ms) + ' ~ ' + E.fmtDT(roll[roll.length - 1].ms);
+  }
+  /* 상세 메타 줄 구간 — _rangeText와 같은 창, 짧은 표기
+     · 같은 날이면 끝은 시각만 · 올해가 아니면 연도 포함 · 뒤에 길이 */
+  _rangeShort(roll, win) {
+    var E = this.E;
+    var f = (win && win.fromMs) ? this._xFrom0(roll, win.fromMs) : (roll && roll.length ? roll[0].ms : 0);
+    var t = (win && win.toMs) ? win.toMs : (roll && roll.length ? roll[roll.length - 1].ms : 0);
+    if (!(f && t)) return '';
+    var a = E.fmtDT(f), b = E.fmtDT(t), y = E.fmtDT(Date.now()).slice(0, 4);
+    var cut = (a.slice(0, 4) === y && b.slice(0, 4) === y) ? 5 : 0;
+    var txt = a.slice(0, 10) === b.slice(0, 10) ? a.slice(cut) + '–' + b.slice(11) : a.slice(cut) + ' ~ ' + b.slice(cut);
+    return txt + ' (' + this._durText((t - f) / 60000) + ')';
+  }
+  // 길이 표기 — 분 입력, 초·분·시간·일 중 하나
+  _durText(min) {
+    if (!(min > 0)) return '0분';
+    if (min < 1) return Math.max(1, Math.round(min * 60)) + '초';
+    if (min < 120) return Math.round(min) + '분';
+    if (min < 2880) return Math.round(min / 60) + '시간';
+    return this._num(Math.round(min / 1440)) + '일';
+  }
+  // 롤업 단위 표기 — 버킷 초
+  _stepText(s) {
+    s = Math.round(s || 1);
+    return s >= 2592000 ? '1개월' : s >= 86400 ? (s / 86400) + '일' : s >= 3600 ? (s / 3600) + '시간' : s >= 60 ? (s / 60) + '분' : s + '초';
   }
   // 추세 축 시작 — 앞쪽이 통째로 비면 첫 표본까지 당김(끝·중간 결측은 무수신 정보라 유지)
   _xFrom0(roll, fromMs) {
@@ -3056,10 +3171,11 @@ export class App extends Component {
     // 5) 결함별 근거 강도(규칙 기반) — 근거 가점(0~100) 누적 점수화. tags=점수 근거, s=★(0~5)
     var has2x = syncP.some(function (p) { return Math.abs(p.o - 2) < 0.1; });
     var mk = function (f, parts, caveat) { // parts: [[조건, 점수, 태그]…]
-      var sc = 0, tags = [], bd = []; parts.forEach(function (p) { if (p[0]) { sc += p[1]; tags.push(p[2]); bd.push(p[2] + ' +' + p[1]); } });
+      var sc = 0, tags = [], bd = [], gains = [];
+      parts.forEach(function (p) { if (p[0]) { sc += p[1]; tags.push(p[2]); bd.push(p[2] + ' +' + p[1]); gains.push({ t: p[2], p: p[1] }); } });
       sc = Math.max(0, Math.min(100, sc));
-      // 0점 = 근거 부족 명시(가능성 전무로 오해 방지). breakdown = 가점 내역 · caveat = 확정 제약(예: 베어링 미지정)
-      return { f: f, score: sc, s: Math.round(sc / 20), tags: tags, caveat: caveat || '',
+      // 0점 = 근거 부족 명시(가능성 전무로 오해 방지). breakdown = 가점 내역(gains = 같은 내역의 항목별) · caveat = 확정 제약(예: 베어링 미지정)
+      return { f: f, score: sc, s: Math.round(sc / 20), tags: tags, gains: gains, caveat: caveat || '',
         breakdown: bd.length ? bd.join(' · ') + ' = ' + sc : '현재 근거 부족',
         why: (tags.length ? tags.join('·') : '현재 근거 부족') + (caveat ? ' · ' + caveat : '') };
     };
@@ -3124,8 +3240,8 @@ export class App extends Component {
       mk('기계적 풀림(Looseness)', [[domSync && syncP.length >= 3, 55, '정수배 하모닉 다수'], [domSync && syncP.length === 2, 25, '하모닉 일부'], [domSync && subAny, 15, 'subharmonic']], domSync ? '' : '비동기 지배 — 하모닉 근거 약함'),
       mk('베어링(Bearing)', [[matched, 45, bm.hit
         ? (bm.hit.via === 'sideband'
-          ? bm.hit.key + ' 측대역 무리(배경의 ' + bm.hit.ratio.toFixed(1) + '배)·선 ' + bm.hit.harm + '개'
-          : bm.hit.key + ' 일치(오차 ' + bm.hit.relPct.toFixed(1) + '%)·하모닉 ' + bm.hit.harm + '개')
+          ? bm.hit.key + ' 측대역 ' + bm.hit.harm + '개 · 배경 대비 ' + bm.hit.ratio.toFixed(1) + '배'
+          : bm.hit.key + ' 일치 · 하모닉 ' + bm.hit.harm + '개 · 오차 ' + bm.hit.relPct.toFixed(1) + '%')
         : ''],
         [matched && !!(bm.hit && bm.hit.sbValid), 10, bm.hit && bm.hit.sbValid],
         [matched && impScore > 0, Math.min(25, impScore), '임펄스성 보강(매칭 확인 후)']],
@@ -3147,8 +3263,8 @@ export class App extends Component {
         rollingBrg ? '구름베어링(' + (this._bearingLabel(eq) || '형식 지정') + ') — 유막 베어링 현상이라 해당 없음'
           : '유막 베어링 여부·기동정지 추적 필요 — 가설'),
       // 독립 회전원 — 비동기 기본파 + 자체 하모닉 열 = 다른 회전원(벨트·기어 종동축·인접 기계)의 1×
-      mk('독립 회전원(종동축·인접 기계)', [[!domSync && domHarm >= 3, 40, '비동기 기본파 ' + (peaks.length ? peaks[0].f.toFixed(1) : '?') + 'Hz(' + domO.toFixed(2) + '×)의 자체 하모닉 ' + domHarm + '개 — 독립 회전원 시그니처(≈' + (peaks.length ? Math.round(peaks[0].f * 60) : 0) + ' rpm)'],
-        [!domSync && domHarm === 2, 18, '비동기 기본파의 하모닉 2개'],
+      mk('독립 회전원(종동축·인접 기계)', [[!domSync && domHarm >= 3, 40, (peaks.length ? peaks[0].f.toFixed(1) : '?') + ' Hz(' + domO.toFixed(2) + '×) 기본파 + 하모닉 ' + (domHarm - 1) + '개 · ≈' + self._num(peaks.length ? Math.round(peaks[0].f * 60) : 0) + ' rpm'],
+        [!domSync && domHarm === 2, 18, '비동기 기본파 + 하모닉 1개'],
         // 풀리비 일치 시 귀속 확정
         [domIsDriven, 15, beltF ? '벨트 ' + beltF.otherKo + ' 1× ' + beltF.other.toFixed(1) + 'Hz(풀리비 ' + beltF.ratio.toFixed(2) + ')와 일치 — 귀속 확정' : '']],
         domIsDriven ? '' : '구동 계통도(풀리비·기어비)·인접 기계 배치 확인 필요 — 이 한 장이면 귀속이 닫힘'),
@@ -3183,7 +3299,7 @@ export class App extends Component {
         c.why = reason + ' — 이 구성·정보로는 볼 수 없음';
       });
     };
-    naIf(function (c) { return /^불평형|^정렬불량/.test(c.f) && !(hasPhase && hasAxial); }, '위상·축방향 없이는 원리상 판별 불가');
+    naIf(function (c) { return /^불평형|^정렬불량/.test(c.f) && !(hasPhase && hasAxial); }, '위상·축방향 데이터 없음 — 단일 채널로는 원리상 판별 불가');
     naIf(function (c) { return /^베어링/.test(c.f) && !bm.known; }, '베어링 품번 미지정 — BPFO/BPFI/BSF 대조 불가(단, 케이지 FTF는 품번 무관하게 0.35~0.45× 구간 판정이 가능해 별도 후보로 평가함)');
     // 샘플레이트 부족은 미검출 아닌 측정 불가 — 반대 증거로 쓰면 있는 결함을 부정(R7)
     var fsOk = VC.bearingFsOk(eq.fs, bf);
@@ -3224,10 +3340,10 @@ export class App extends Component {
          정상상태 벗어난 구간 포함 시 운전 상태 혼합 → 블록간 변동 작으면 설비 상한, 크면 경고 */
       + (function () {
         var n = acq.averages || 1, sp = (det.ordSpec && det.ordSpec.blockSpread) || 0;
-        if (n < 2) return ' — ⚠단일 블록: 충격성 신호에서 어느 스파이크가 걸렸느냐로 진폭이 변합니다';
+        if (n < 2) return ' — ⚠단일 블록: 충격성 신호에서 어느 스파이크가 걸렸느냐로 진폭이 변함';
         if (det.ordSpec && det.ordSpec.trimmed) return ' — 블록간 변동 ×' + sp.toFixed(2) + '으로 정상상태 전제가 흔들려 앞구간만 평균(창 전체를 쓰면 다른 운전 상태가 섞임)';
         if (n >= 8) return '';
-        if (sp > 0 && sp < 1.25) return ' — 정상상태(블록간 변동 ×' + sp.toFixed(2) + ') 유지 범위에서의 평균 상한. 더 늘리려면 관측 창을 넓혀야 하는데 이 설비는 그 구간에서 정상상태를 벗어납니다';
+        if (sp > 0 && sp < 1.25) return ' — 정상상태(블록간 변동 ×' + sp.toFixed(2) + ') 유지 범위에서의 평균 상한 — 더 늘리려면 관측 창 확대가 필요하나 이 설비는 그 구간에서 정상상태 이탈';
         return ' — 평균 8회 미만(측대역·저주파 정밀 진단 기준은 8초 창·0.125 Hz·8평균)';
       })()
       + (acq.isoBlocks ? ' · ISO 판정은 ' + acq.isoBlocks + '블록 에너지 평균' : ''));
@@ -3250,16 +3366,19 @@ export class App extends Component {
     B.push('■ 대역 분배(속도 RMS · ISO 판정과 동일 방법/시계열 · 에너지 비율): sub(<0.5×) ' + E.fmt(be[3]) + '(' + (frac(3) * 100).toFixed(0) + '%) · 1×대역(0.5~1.5×) ' + E.fmt(be[0]) + '(' + (frac(0) * 100).toFixed(0) + '%) · 결함(1.5~10×) ' + E.fmt(be[1]) + '(' + (frac(1) * 100).toFixed(0) + '%) · 고주파(10×~1kHz) ' + E.fmt(be[2]) + '(' + (frac(2) * 100).toFixed(0) + '%)'
       + (det.parseval ? ' · 검산(허용 3%) ' + (det.parseval.ok ? '통과(제곱합 ' + E.fmt(det.parseval.sumSq) + ' vs 전대역 ' + E.fmt(det.parseval.isoRms) + ', 오차 ' + (det.parseval.relErr * 100).toFixed(1) + '%)' : '⚠실패 — 대역 분해가 전체와 불일치, 아래 비율 해석 금지') : ''));
     B.push('■ 충격성(상관 지표 — 셋은 같은 관측의 세 표현이며 점수엔 단일항 반영): 파형 Kurtosis ' + kurtW.toFixed(1) + ' · Band Kurtosis ' + bk.toFixed(1) + ' · Spectral Kurtosis ' + sk.toFixed(1) + ' · 파형 Crest ' + crestW.toFixed(1) + ' · 롤업 최대 Crest ' + crestR.toFixed(1));
-    if (gate) B.push('■ ⚠계측 게이트(전역): 극단 Crest/첨도 — 단발 스파이크(ESD·케이블·접촉) 시그니처와 구분 불가. 시간영역 임펄스는 주파수영역에서 광대역으로 퍼지므로 모든 스펙트럼 피크 진폭도 잠정입니다. 결함 진단 보류, 센서·케이블·마운팅 검증 우선');
-    // 미입력 메타데이터와 그로 인해 무효화되는 판정 목록
-    var missing = [];
-    if (!bf) missing.push('베어링 품번(→ BPFO/BPFI/BSF/FTF 대조 불가)');
-    if (!det.mount) missing.push('마운팅 방식(→ ' + (det.kurtogram && det.kurtogram.best && det.kurtogram.best.loHz > 2000 ? (det.kurtogram.best.loHz / 1000).toFixed(1) + ' kHz 대역 분석이 자석 마운트면 무효' : '고주파 대역 유효성 미상') + ')');
-    missing.push('계측 방향(H/V/A)·위상(→ 불평형·정렬·굽음 판별 불가)');
-    if (!meta.drive) missing.push('구동방식(직결/벨트/기어 → 비동기 성분 귀속 불가)');
-    else if (meta.drive === 'belt' && !hasBeltLen) missing.push('벨트길이(→ 벨트 통과주파수 대조 불가)');
-    if (!hasVanes) missing.push('날개수(→ 베인 통과 확정 불가)');
-    B.push(missing.length ? '■ 미입력 메타데이터와 그 영향: ' + missing.join(' · ') : '■ 메타데이터: 필요한 항목 입력 완료 — 위 판정은 계측 구성 한계(단채널·위상 없음)만 남습니다');
+    if (gate) B.push('■ ⚠계측 게이트(전역): 극단 Crest/첨도 — 단발 스파이크(ESD·케이블·접촉) 시그니처와 구분 불가 · 시간영역 임펄스가 주파수영역에서 광대역으로 퍼져 모든 스펙트럼 피크 진폭도 잠정 · 결함 진단 보류, 센서·케이블·마운팅 검증 우선');
+    /* 비어 있는 설비 정보와 그 영향 — 설정에 입력 칸이 있는 항목만(계측 방향·위상은 받지 못함)
+       missNames = 이름만(세부 조치 '설비 정보 입력' 줄) */
+    var missing = [], missNames = [];
+    var miss = function (name, eff) { missing.push(name + '(' + eff + ')'); missNames.push(name); };
+    if (!(eq.rpm > 0)) miss('명판 회전수', '→ 1×·결함주파수 계산 불가');
+    if (!(eq.bearing && (eq.bearing.n > 0 || eq.bearing.model === 'sleeve'))) miss('베어링 품번', '→ BPFO/BPFI/BSF/FTF 대조 불가');
+    if (!det.mount) miss('마운팅 방식', '→ ' + (det.kurtogram && det.kurtogram.best && det.kurtogram.best.loHz > 2000 ? (det.kurtogram.best.loHz / 1000).toFixed(1) + ' kHz 대역 분석이 자석 마운트면 무효' : '고주파 대역 유효성 미상'));
+    if (!meta.drive) miss('구동방식', '직결/벨트/기어 → 비동기 성분 귀속 불가');
+    else if (meta.drive === 'belt' && !hasBeltSpec) miss('벨트 제원', '풀리경·벨트길이 → 벨트주파수 대조 불가');
+    else if (meta.drive === 'belt' && !hasBeltLen) miss('벨트길이', '→ 벨트 통과주파수 대조 불가');
+    if (!hasVanes) miss(isGear ? '잇수' : '날개수', isGear ? '→ 기어 메시 대조 불가' : '→ 베인 통과 확정 불가');
+    B.push(missing.length ? '■ 미입력 메타데이터와 그 영향: ' + missing.join(' · ') : '■ 메타데이터: 필요한 항목 입력 완료 — 위 판정은 계측 구성 한계(단채널·위상 없음)만 남음');
     // 결함 대역 탐색 상한 명시 — 상한 = min(마운팅, 에일리어싱, AA 롤오프)
     if (det.kgFmax > 0 || det.mountFmax > 0 || det.aliasFmax > 0) {
       var _cap = [];
@@ -3297,20 +3416,23 @@ export class App extends Component {
           ? ' — 잠정 대역은 결함 대역 탐색에서 제외된 구간이다. 상승은 사실이나 설비 진동인지 센서 부착부 공진인지 구분할 수 없으므로, 결함으로 단정하지 말고 센서 부착 상태 확인을 먼저 권고할 것'
           : ''));
     } else {
-      B.push('■ 대역 베이스라인 이탈: 비교 불가(' + (!bnow ? '대역 추출 미사용 또는 적재값 없음' : '대역 베이스라인 미학습') + ') — 대역별 변화는 이 리포트의 근거가 아니다');
+      B.push('■ 대역 베이스라인 이탈: 비교 불가(' + (!bnow ? '대역 추출 미사용 또는 적재값 없음' : '대역 베이스라인 미학습') + ') — 대역별 변화는 이 리포트의 근거 아님');
     }
-    // 음성 소견(R4) — '찾았으나 없음'도 보고 대상
-    var negatives = [];
-    if (bm.known && !bm.hit) negatives.push('베어링 결함주파수 ' + bm.negatives.join('/') + ' 미검출' + (bm.weak ? '(' + bm.weak.key + ' 근접하나 하모닉 ' + bm.weak.harm + '개로 부족)' : ''));
-    if (!syncP.length) negatives.push('지배 피크 중 정수배 동기 성분 없음');
-    if (!subAny) negatives.push('0.5× subharmonic 미검출');
-    if (!eQ || !eQ.sb1x) negatives.push('포락선 1× 측대역 미검출(단, 분해능 ' + (sResTrue || 0).toFixed(2) + ' Hz 한계 내 — 이보다 좁은 간격은 원리상 관측 불가)');
-    else if (!(bm && bm.hit)) negatives.push('측대역은 관측되나 반송파가 결함주파수로 확인되지 않아 결함 귀속 불가');
-    if (!elec) negatives.push('100/120 Hz(2×계통주파수) 근처 성분 미검출 — 전기적 결함 정황 없음(전원 차단 시험으로 확정)');
-    if (!vane) negatives.push('3× 이상 정수배 성분 미검출 — 베인/블레이드 통과 정황 없음');
+    // 음성 소견(R4) — '찾았으나 없음'도 보고 대상. 같은 순서로 negShort = 짧은 이름(리포트 요약), negCard = '무엇 → 뜻' 한 줄(리포트 근거 카드)
+    var negatives = [], negShort = [], negCard = [];
+    var neg = function (t, s, c) { negatives.push(t); negShort.push(s); negCard.push(c); };
+    if (bm.known && !bm.hit) neg('베어링 결함주파수 ' + bm.negatives.join('/') + ' 미검출' + (bm.weak ? '(' + bm.weak.key + ' 근접하나 하모닉 ' + bm.weak.harm + '개로 부족)' : ''), bm.negatives.join('/'),
+      '베어링 결함주파수 ' + bm.negatives.join('/') + (bm.weak ? ' → ' + bm.weak.key + ' 근접하나 하모닉 부족' : ''));
+    if (!syncP.length) neg('지배 피크 중 정수배 동기 성분 없음', '정수배 동기 성분', '정수배 동기 성분 → 지배 피크가 모두 비동기');
+    if (!subAny) neg('0.5× subharmonic 미검출', '0.5×', '0.5× subharmonic');
+    if (!eQ || !eQ.sb1x) neg('포락선 1× 측대역 미검출(단, 분해능 ' + (sResTrue || 0).toFixed(2) + ' Hz 한계 내 — 이보다 좁은 간격은 원리상 관측 불가)', '포락선 1× 측대역',
+      '포락선 1× 측대역 → 분해능 ' + (sResTrue || 0).toFixed(2) + ' Hz보다 좁은 간격은 관측 불가');
+    else if (!(bm && bm.hit)) neg('측대역은 관측되나 반송파가 결함주파수로 확인되지 않아 결함 귀속 불가', '측대역 반송파의 결함주파수 귀속', '측대역 관측 → 반송파가 결함주파수 아님');
+    if (!elec) neg('100/120 Hz(2×계통주파수) 근처 성분 미검출 — 전기적 결함 정황 없음(전원 차단 시험으로 확정)', '2×계통주파수', '100/120 Hz 계통주파수 → 전기적 결함 정황 없음');
+    if (!vane) neg('3× 이상 정수배 성분 미검출 — 베인/블레이드 통과 정황 없음', '3× 이상 정수배', '3× 이상 정수배 → 베인/블레이드 통과 정황 없음');
     // 기어 '메시 있음·측대역 없음'은 정상 기어 소견
-    if (meshF > 0 && !meshHit) negatives.push('기어 메시 ' + meshF.toFixed(0) + ' Hz(잇수 ' + nVanes + '×1×) 미검출');
-    else if (meshHit && meshSb === 0) negatives.push('기어 메시는 관측되나 1× 간격 측대역 없음 — 정상 기어 범위(치면 손상 정황 없음)');
+    if (meshF > 0 && !meshHit) neg('기어 메시 ' + meshF.toFixed(0) + ' Hz(잇수 ' + nVanes + '×1×) 미검출', '기어 메시 ' + meshF.toFixed(0) + ' Hz', '기어 메시 ' + meshF.toFixed(0) + ' Hz');
+    else if (meshHit && meshSb === 0) neg('기어 메시는 관측되나 1× 간격 측대역 없음 — 정상 기어 범위(치면 손상 정황 없음)', '기어 메시 1× 측대역', '기어 메시 1× 측대역 → 정상 기어 범위');
     if (negatives.length) B.push('■ 음성 소견(찾았으나 없음 — 반대 증거): ' + negatives.join(' · '));
     if (unexplained.length) B.push('■ 미설명 성분(사전으로 설명되지 않음 — 삭제하지 않고 남김): ' + unexplained.join(', ') + ' — 구동 계통도(풀리비·기어비)·인접 기계·유막 확인 시 대부분 해소');
     var confLines = conf.map(function (c) {
@@ -3324,7 +3446,7 @@ export class App extends Component {
       hasBearing: !!bf, domSync: domSync, gate: gate, frMeas: frM,
       // bandDev는 프롬프트·HTML 공용(리포트 문서에도 표시)
       bandDev: bandDev, mountFmax: det.mountFmax || 0, mount: det.mount || '',
-      negatives: negatives, unmeasurable: unmeasurable, unexplained: unexplained, missing: missing, acq: acq };
+      negatives: negatives, negShort: negShort, negCard: negCard, unmeasurable: unmeasurable, unexplained: unexplained, missing: missing, missNames: missNames, acq: acq };
   }
   // 첨도 포화 판정(첨도 추이+RMS 추이) — 화면 경고·LLM 소견·리포트 공용
   _kurtSat(eq) {
@@ -3339,23 +3461,19 @@ export class App extends Component {
     L.push('[설비] ' + (eq.alias || eq.name) + ' (' + eq.name + ') · ' + self._rpmText(eq) + ' (1×=' + fr.toFixed(1) + ' Hz, 2×=' + (2 * fr).toFixed(1) + ' Hz) · ISO Class ' + eq.cls + ' · 단위 ' + u);
     var bf = (eq.bearing && eq.bearing.n > 0 && eq.rpm > 0) ? VC.bearingFreqs(eq.rpm, eq.bearing) : null;
     L.push('[베어링] ' + (bf ? this._bearingLabel(eq) + ' · BPFO ' + bf.BPFO.toFixed(1) + ' / BPFI ' + bf.BPFI.toFixed(1) + ' / BSF ' + bf.BSF.toFixed(1) + ' / FTF ' + bf.FTF.toFixed(1) + ' Hz' : '미지정 (결함 주파수 대조 불가)'));
-    // ISO 규격 판정(10–1000 Hz 대역제한 속도 RMS)과 실시간 감시(광대역 1초 RMS)는 다른 물리량 — 분리 표기
+    /* ISO 규격 판정(10–1000 Hz 대역제한 속도 RMS)만 진동 크기로 넘김
+       감시 등급(알람용 광대역)은 리포트 등급과 다른 축이라 뺌 — 소견이 두 등급을 섞는 것 방지 */
     var isoOk = det.isoRms != null && u === 'mm/s';
     if (isoOk) {
       var isoG = VC.gradeFor(det.isoRms, eq.zones);
       // R10: 경계 여유 < 측정 불확도(±10%)면 존 단정 안 함
       var nearZ = null;
       eq.zones.forEach(function (z, zi) { if (Math.abs(det.isoRms - z) / z < 0.10) nearZ = ['A/B', 'B/C', 'C/D'][zi]; });
-      L.push('[ISO 10816 판정 — 규격 기준] 대역제한(10–1000 Hz) 속도 RMS ' + E.fmt(det.isoRms) + ' mm/s(' + (det.isoBlocks || 1) + '블록 에너지 평균 · 총 ' + (det.anaSec ? det.anaSec.toFixed(1) : '?') + '초' + (Math.round((det.isoSpread || 1) * 100) / 100 >= 1.5 ? ' · ⚠블록간 변동 ×' + det.isoSpread.toFixed(2) + ' — 정상상태 전제 미충족, 존 판정 잠정' : ' · 블록간 변동 ×' + (det.isoSpread || 1).toFixed(2)) + ') → Zone ' + ['A(양호)', 'B(주의)', 'C(위험)', 'D(심각)'][isoG] + ' · 존 경계 A/B ' + E.fmt(eq.zones[0]) + ', B/C ' + E.fmt(eq.zones[1]) + ', C/D ' + E.fmt(eq.zones[2]) + ' — ISO 상태 판정은 이 값으로 하세요'
-        + (nearZ ? ' ⚠' + nearZ + ' 경계 대비 여유 10% 미만 — 불확도 안이라 존을 단정하지 말고 "경계 근접"으로 쓰고 정상상태 다중 평균 재측정을 권하세요' : ''));
-      // 감시 등급 출처 명시 — 등급은 결함주파수 격자가 켜고 ISO가 높이 결정(옆 RMS를 등급 근거로 오독 방지)
-      L.push('[실시간 감시 — 알람 기준(규격 판정 아님)] 감시 등급 ' + E.STATUS[eq.grade].ko
-        + ' — 등급은 결함주파수 격자가 켤 때만 오르고 ISO 값이 그 높이를 정합니다. 아래 광대역 RMS는 등급을 만든 값이 아닙니다'
-        + ' · 참고 광대역 최신 1초 RMS ' + E.fmt(eq.rms) + ' ' + u + '(고주파 포함이라 ISO 값보다 클 수 있음)');
+      L.push('[ISO 10816 판정 — 규격 기준] 대역제한(10–1000 Hz) 속도 RMS ' + E.fmt(det.isoRms) + ' mm/s(' + (det.isoBlocks || 1) + '블록 에너지 평균 · 총 ' + (det.anaSec ? det.anaSec.toFixed(1) : '?') + '초' + (Math.round((det.isoSpread || 1) * 100) / 100 >= 1.5 ? ' · ⚠블록간 변동 ×' + det.isoSpread.toFixed(2) + ' — 정상상태 전제 미충족, 존 판정 잠정' : ' · 블록간 변동 ×' + (det.isoSpread || 1).toFixed(2)) + ') → Zone ' + ISO_ZONE_KO[isoG] + ' · 존 경계 A/B ' + E.fmt(eq.zones[0]) + ', B/C ' + E.fmt(eq.zones[1]) + ', C/D ' + E.fmt(eq.zones[2])
+        + (nearZ ? ' ⚠' + nearZ + ' 경계 대비 여유 10% 미만 — 불확도 안이라 존 단정 불가("경계 근접")' : ''));
     } else {
-      L.push('[현재 심각도] 등급 ' + E.STATUS[eq.grade].ko
-        + ' — 등급은 결함주파수 격자가 켤 때만 오르고 ISO 존이 그 높이를 정합니다. 아래 RMS는 등급을 만든 값이 아닙니다'
-        + ' · 참고 최신 1초 RMS ' + E.fmt(eq.rms) + ' ' + u + ' · 존 경계 A/B ' + E.fmt(eq.zones[0]) + ', B/C ' + E.fmt(eq.zones[1]) + ', C/D ' + E.fmt(eq.zones[2]) + ' ' + u);
+      L.push('[진동 크기 — ISO 판정 불가(센서 단위 ' + u + ')] 참고 최신 1초 RMS ' + E.fmt(eq.rms) + ' ' + u
+        + ' · 존 경계 A/B ' + E.fmt(eq.zones[0]) + ', B/C ' + E.fmt(eq.zones[1]) + ', C/D ' + E.fmt(eq.zones[2]) + ' ' + u);
     }
     if (det.levels) {
       // 가속도 f_eff가 물리 상한 초과 시 값 미게재 — 미분 이득이 고주파 양자화 잡음 증폭(검산 실패 명시)
@@ -3367,8 +3485,16 @@ export class App extends Component {
       L.push('[종합 레벨(물리량별 RMS) — 방향 참고용] 가속도 ' + accTxt + ' · 속도 ' + E.fmt(det.levels['mm/s']) + ' mm/s(광대역 — ISO 판정은 위 [ISO 10816 판정]의 대역제한 값 사용) · 변위 ' + E.fmt(det.levels['μm']) + ' μm(저주파 — 사실상 1× 성분 지배) — 단위가 달라 값 크기 비교 불가');
     }
     var ev = this._evidence(eq, det);
-    L.push('[EVIDENCE — 구조화 근거 (아래 분류를 그대로 근거로 사용하세요)]\n' + ev.block);
-    L.push('[결함 근거 강도 — 규칙 기반 자동 산출 (근거점수=Evidence Score 0~100, 확률 아님. [] 안은 가점 내역. ★ 높은 순 = 우선순위. 임의 %를 만들지 말고 이 점수·순위를 근거로 설명하세요)]\n' + ev.confLines);
+    L.push('[EVIDENCE — 구조화 근거]\n' + ev.block);
+    // 원인 후보 — 별점 없이 점수만, 0점 후보는 개수만(소견의 0점 후보 나열 방지)
+    var cand = [], zero = 0;
+    (ev.conf || []).forEach(function (c) {
+      if (c.na) cand.push('■ ' + c.f + ' 측정 불가 — 점수 없음(' + (c.caveat || '판별 조건 미충족') + ')');
+      else if (c.score > 0) cand.push('■ ' + c.f + ' · 근거점수 ' + c.score + '/100 [' + c.breakdown + ']' + (c.caveat ? ' · ' + c.caveat : ''));
+      else zero++;
+    });
+    if (zero) cand.push('■ 그 외 ' + zero + '종 근거점수 0 — 근거 없음(목록 생략)');
+    L.push('[원인 후보 — 엔진 근거점수 순(0~100, 확률 아님 · ' + VC.EVID_ADOPT + '점 이상이면 원인 확정). [] 안은 가점 내역]\n' + cand.join('\n'));
     if (sat && sat.flag) L.push('[⚠첨도 포화 주의] ' + sat.msg);
     if (det.spectral && det.spectral.notes.length) L.push('[스펙트럼 패턴(하모닉·측대역)] ' + det.spectral.notes.join(' · '));
     if (det.envelope && (det.envelope.hint || det.envelope.fault)) L.push('[포락선] ' + (det.envelope.fault ? '결함 의심 — ' : '') + (det.envelope.hint || ''));
@@ -3382,57 +3508,74 @@ export class App extends Component {
     if (det.quality && !det.quality.ok) L.push('[⚠신호 품질] ' + det.quality.issues.filter(function (x) { return !x.info; }).map(function (x) { return x.label; }).join(', ') + ' 감지 — 측정 신뢰도 저하, 아래 판정은 신중히 해석할 것');
     return L.join('\n');
   }
-  // 소견 프롬프트 — 판정은 결정론 엔진 완료, LLM은 서술만. 엔진 상태값(gate/iso/monitor/negative/unmeasurable/unexplained/window)이 규칙 근거
+  /* 소견 프롬프트 — 판정(등급·원인 순위·조치)은 결정론 엔진 완료, LLM은 그 뜻을 풀어 줌
+     · 모델은 전문용어 데이터를 그대로 보고, 소견은 설비 담당자(비전문가)가 읽는 말로 — 용어 풀이표가 그 다리
+     · 질문 셋(지금 상태 · 그렇게 보는 이유 · 권장 행동). 권장 행동은 엔진의 지금 할 일·세부 조치만(세 번째 조치 목록 방지) */
   _opinionPrompt(eq, det, dx, sat) {
     var E = this.E, ev = this._evidence(eq, det);
     var rl = eq.rollup || [], winMin = rl.length > 1 ? Math.round((rl[rl.length - 1].ms - rl[0].ms) / 60000) : 0;
     var isoOk = det.isoRms != null && eq.unit === 'mm/s';
-    var isoZone = isoOk ? ['A(양호)', 'B(주의)', 'C(위험)', 'D(심각)'][VC.gradeFor(det.isoRms, eq.zones)] : '-';
+    var gate = !!ev.gate;
+    // 리포트·상세분석 제목과 같은 문구 — 패턴 판정 제목은 부위를 나누지 않음(dx.verdict의 부위를 소견이 베끼지 않게)
+    var title = Report.sevTitle(dx.gi, this._sevJudge(eq, det, dx, dx.site), gate, dx.verdict);
     var S = [];
-    S.push('[엔진 판정 상태 — 이 값들은 이미 결정된 결과입니다. 재해석·재계산하지 말고 그대로 인용하세요]');
-    S.push('· gate.tripped = ' + (ev.gate ? 'true' : 'false') + (ev.gate ? ' · 사유: 극단 Crest/첨도 — 단발 스파이크 시그니처와 구분 불가(전역 적용)' : ''));
-    S.push('· iso = ' + (isoOk ? E.fmt(det.isoRms) + ' mm/s → Zone ' + isoZone + ' (10–1000 Hz 대역제한 속도 RMS · ' + (det.isoBlocks || 1) + '블록 에너지 평균 · 총 ' + (det.anaSec || 0).toFixed(1) + '초 · 블록간 변동 ×' + (det.isoSpread || 1).toFixed(2) + ')' : '산정 불가(센서 단위가 속도가 아님)'));
-    S.push('· monitor = 감시 등급 ' + E.STATUS[eq.grade].ko + ' (결함 패턴이 켜고 ISO가 높이를 정함) · 참고 광대역 최신 1초 RMS ' + E.fmt(eq.rms) + ' ' + eq.unit);
-    S.push('· window.minutes = ' + winMin + ' (이 창을 넘는 시간 스케일 주장 금지)');
-    S.push('· negative[] = ' + (ev.negatives && ev.negatives.length ? ev.negatives.join(' | ') : '없음'));
-    S.push('· unmeasurable[] = ' + (ev.unmeasurable && ev.unmeasurable.length ? ev.unmeasurable.join(', ') : '없음'));
-    S.push('· unexplained[] = ' + (ev.unexplained && ev.unexplained.length ? ev.unexplained.join(', ') : '없음'));
-    S.push('· missing_metadata[] = ' + (ev.missing && ev.missing.length ? ev.missing.join(' | ') : '없음'));
-    return '당신은 40년 경력의 설비 진동 분석 기술자입니다.\n'
-      + '아래 측정 데이터와 엔진 판정 결과만 근거로 한국어 소견을 작성하세요.\n'
-      + '검산·결함주파수 매칭·계측 게이트 판정은 엔진이 이미 끝냈습니다. 당신은 그 결과를 규율 있게 서술합니다.\n\n'
+    S.push('[엔진 판정 상태 — 이미 결정된 결과. 재해석·재계산하지 말 것]');
+    S.push('· 판정 = ' + title + ' · 등급 ' + (dx.gradeKo || '-') + '(결함 패턴이 등급을 켜고 ISO 구간이 높이를 정함)');
+    S.push('· 계측 게이트 = ' + (gate ? '걸림 — 극단 Crest/첨도가 단발 스파이크와 구분 불가(전역 적용)' : '통과'));
+    S.push('· ISO 판정 = ' + (isoOk ? E.fmt(det.isoRms) + ' mm/s → Zone ' + ISO_ZONE_KO[VC.gradeFor(det.isoRms, eq.zones)] : '산정 불가(센서 단위가 속도가 아님)'));
+    S.push('· 관측 창 = ' + winMin + '분');
+    S.push('· 미검출 = ' + (ev.negatives && ev.negatives.length ? ev.negatives.join(' | ') : '없음'));
+    S.push('· 측정 불가 = ' + (ev.unmeasurable && ev.unmeasurable.length ? ev.unmeasurable.join(', ') : '없음'));
+    S.push('· 미설명 성분 = ' + (ev.unexplained && ev.unexplained.length ? ev.unexplained.join(', ') : '없음'));
+    S.push('· 미입력 설비 정보 = ' + (ev.missing && ev.missing.length ? ev.missing.join(' | ') : '없음'));
+    var acts = ((dx && dx.actions) || []).map(function (a, i) { return (i + 1) + '. ' + a.txt + (a.why ? ' — 이유: ' + a.why : ''); });
+    return '당신은 40년 경력의 설비 진동 분석 기술자입니다. 아래 측정 데이터와 엔진 판정 결과를 읽고 한국어 소견을 씁니다.\n'
+      + '읽는 사람은 진동 분석 전문가가 아닌 설비 담당자입니다. 데이터는 전문용어로 되어 있지만, 소견은 그 사람이 바로 이해하는 말로 씁니다.\n'
+      + '판정(등급 · 원인 순위 · 조치)은 엔진이 이미 정했습니다. 당신은 그 판정이 무엇을 뜻하는지 풀어 줍니다.\n\n'
+      + '[답할 질문 — 이 순서로]\n'
+      + '1) 지금 상태가 어떻게 보이나\n'
+      + '2) 왜 그렇게 보이나 — 판정을 받치는 근거와 확정을 막는 것\n'
+      + '3) 어떤 행동이 권장되나 — [지금 할 일]과 [세부 조치]를 쉬운 말로, 왜 하는지 붙여서\n\n'
+      + '[쉬운 말로 바꾸기 — 아래 용어는 본문에 그대로 쓰지 않는다]\n'
+      + '· BPFO → 베어링 바깥 궤도 쪽 신호 · BPFI → 안쪽 궤도 쪽 신호 · BSF → 베어링 볼 쪽 신호 · FTF → 볼을 잡아주는 케이지 쪽 신호\n'
+      + '· 포락선 분석 → 짧은 충격이 되풀이되는지 보는 분석 · 측대역 → 신호 세기가 주기적으로 오르내리는 흔적 · 하모닉 → 같은 신호의 배수 성분\n'
+      + '· 반복성 미확인 → 충격이 되풀이되는지 아직 확인 안 됨 · 독립 회전원 → 이 설비 축과 다른 속도로 도는 회전체(옆 기계 · 벨트로 이어진 다른 축)\n'
+      + '· 미설명 성분 → 어디서 오는지 아직 모르는 진동 · 근거점수 → 원인 근거 점수(' + VC.EVID_ADOPT + '점 이상이어야 원인으로 확정)\n'
+      + '· 커토시스 · Crest Factor → 충격성 지표 · 1× → 축 회전 주기 · 동기/비동기 → 축 회전과 맞물린/안 맞물린 진동 · subharmonic(0.5×) → 축 회전의 절반 주기 진동\n'
+      + '· 베인/블레이드 통과 → 날개 통과 진동 · 오일 훨 → 윤활막이 흔들리는 진동 · 2×계통주파수 → 전원에서 오는 진동\n'
+      + '· ISO Zone → 진동 크기 구간(A 신규 설비 수준 · B 장기 운전 가능 · C 제한 운전 · D 손상 우려) · 계측 게이트 → 센서 · 배선 이상 검사\n'
+      + '· 그 밖의 분석 용어(켑스트럼 · 커토그램 · quefrency · Nyquist 등)는 쓰지 않는다\n\n'
       + '[지켜야 할 규칙]\n'
-      + '1) 주어진 값만 인용한다. 결함주파수·회전수·대역값을 새로 만들지 않는다. 계산하지 말고 엔진이 준 숫자를 그대로 쓴다.\n'
-      + '2) 엔진의 근거점수와 순위를 재해석하거나 뒤집지 않는다. 그대로 인용한다(근거점수는 0~100 Evidence Score이며 확률이 아니다).\n'
-      + '3) gate.tripped=true면 확정형 결론을 쓰지 않는다. "~일 가능성이 가장 높습니다" 금지. "계측 검증 전까지 잠정"으로 맺는다.\n'
-      + '4) ISO 판정 등급(iso)과 실시간 감시 등급(monitor)을 반드시 구분해서 쓴다. 두 값을 한 문장에 섞지 않는다. 두 등급이 다르면 "규격 판정 X / 감시 등급 Y — 광대역 고주파 성분 차이"로 한 줄 설명한다.\n'
-      + '5) negative[] 목록을 반드시 한 줄 이상 인쇄한다. "찾았으나 없었다"는 보고할 결과다. 생략하지 않는다.\n'
-      + '6) unmeasurable[] 항목은 "측정 불가"로만 쓴다. 점수·별점·"근거 부족"·"가능성 낮음" 같은 표현을 쓰지 않는다. 원리상 판별할 수 없는 것이다.\n'
-      + '7) unexplained[] 성분을 목록에서 빼지 않는다. "미설명"으로 남기고, 무엇이 있으면 닫히는지(구동 계통도 등)를 적는다.\n'
-      + '8) window.minutes를 넘는 시간 스케일을 주장하지 않는다. 창이 60분 미만이면 "말기", "열화 진행", "수개월 내" 같은 표현을 쓰지 않고 "관측 창이 짧아 추세 판단 불가"로 쓴다.\n'
-      + '9) 등급을 부풀리지 않는다. 평균이 양호한데 순간값으로 "위험"이라 쓰지 않는다. 조치는 등급에 맞춘다 — "즉시 정지"로 단정하지 말고(정지는 설비 중요도·추가 증상 고려), 위험 등급은 "조기·우선순위 높은 점검", 심각 등급은 "긴급 점검 · 중요도에 따라 정지 여부 검토"로 쓴다.\n'
-      + '10) missing_metadata[]가 있으면 [권장 조치]에 "이 항목을 채우면 무엇이 닫히는지"를 한 줄로 적는다.\n'
-      + '11) "대역 베이스라인 이탈"에 ⚠상한 초과(잠정) 표시가 있으면, 그 대역의 상승을 결함 근거로 단정하지 않는다. '
-        + '상승 사실은 반드시 인쇄하되(빼면 센서 부착 불량도 초기 결함도 보고되지 않는다) "설비 진동인지 센서 부착부 공진인지 구분 불가"로 쓰고, '
-        + '[권장 조치] 첫 줄을 "센서 부착 상태 확인"으로 둔다.\n\n'
-      + '[출력 형식]\n'
-      + '다음 6개 섹션을 순서대로, 각각 "## 소제목" 한 줄로 시작해 작성하세요:\n'
-      + '## 진동 상태 요약\n## 시간영역 지표 해석\n## 주파수 분석\n## 결함 메커니즘 추정\n## 추세 및 예후\n## 권장 조치\n'
-      + '· 각 섹션 3~5개 불릿(•), 불릿 하나는 한 문장. "→ 결론" 화살표로 판단을 맺는다.\n'
-      + '· [결함 메커니즘 추정]은 엔진 순위대로 쓰되 "각 순위를 반드시 별도 줄로" 쓴다(한 줄 몰아쓰기·" / " 구분 금지).\n'
-      + '  아래는 형식 예시일 뿐이며 <> 자리에는 반드시 [결함 근거 강도]의 실제 값을 넣는다(예시 숫자를 그대로 쓰지 말 것):\n'
-      + '  1. <후보명> (<점수>점, <별>) — <그 후보의 가점 내역에 적힌 근거>\n  2. <후보명> (<점수>점, <별>) — <근거>\n'
-      + '· ★는 엔진이 준 별 개수를 그대로 복사한다. 측정 불가 항목은 점수·별 대신 "측정 불가"로 쓰고, 사유는 데이터에 적힌 그 항목의 사유를 그대로 인용한다(위상·축방향 / 베어링 품번 미지정 / 날개수 미입력 등 — 임의로 바꾸지 말 것).\n'
-      + '· [권장 조치] 맨 끝에 "핵심 요약:" 2~3문장 한 문단 — (가장 근거점수 높은 후보와 그 근거) + (무엇 때문에 확정 불가) + (다음 단계). gate.tripped=true면 이 문단도 잠정형으로 맺는다.\n\n'
-      + '말투: 결론 먼저, 숫자로 말한다. 수식어를 줄이고 단정형으로 쓴다. 과장·감탄을 쓰지 않는다. 한자·중국어를 쓰지 않는다.\n\n'
+      + '1) 데이터에 있는 사실만 쓴다. 값을 새로 만들거나 계산하지 않는다.\n'
+      + '2) 엔진의 등급 · 원인 순위를 뒤집지 않는다. 근거점수는 확률이 아니다. 근거점수 0인 후보는 쓰지 않는다.\n'
+      + '3) 숫자는 판단에 꼭 필요할 때만 — 진동 크기 · 근거점수 · 관측 창 정도. 한 줄에 숫자 하나 이하. Hz · 배수(×) 값은 [세부 조치]에 나온 것만 쓴다.\n'
+      + '4) 계측 게이트가 걸렸으면 확정형으로 쓰지 않고 "계측 확인 전까지 잠정"으로 맺는다.\n'
+      + '5) 결함 부위(바깥 궤도 · 안쪽 궤도 · 볼 · 케이지)는 원인 후보 이름에 있을 때만 쓴다.\n'
+      + '6) 측정 불가 항목을 "가능성 낮음"으로 쓰지 않는다. 미검출은 "흔적 없음"까지만 쓰고 "배제"로 단정하지 않는다.\n'
+      + '7) 관측 창을 넘는 시간을 주장하지 않는다. 창이 60분 미만이면 "말기" · "열화 진행" · "수개월 내"를 쓰지 않는다.\n'
+      + '8) 등급을 부풀리지 않는다. ISO 값에 ⚠경계 근접이 있으면 구간을 단정하지 않는다.\n'
+      + '9) 권장 행동은 [지금 할 일]과 [세부 조치]에 있는 것만 쓴다. 새 조치를 만들지 않는다. 위상 · 축방향 · 채널 추가 · 회전 신호(타코) 측정은 쓰지 않는다.\n'
+      + '10) 대역 베이스라인 이탈에 ⚠상한 초과(잠정)가 있으면 결함 근거로 쓰지 않고 "설비 진동인지 센서 부착 문제인지 구분 불가"로 쓴다.\n\n'
+      + '[출력 형식 — 아래 네 부분만]\n'
+      + '핵심 요약: <한 줄. 상태 · 이유 · 행동을 " · "로 잇는다>\n'
+      + '## 지금 상태\n• 1~2줄. 첫 줄은 판정이 이 설비에 무슨 뜻인지(당장 운전에 지장이 있는지 등).\n'
+      + '## 그렇게 보는 이유\n• 2~4줄(4줄 넘지 않음). 한 줄에 근거 하나. 판정을 받치는 근거와 확정을 막는 것을 함께 쓴다.\n'
+      + '## 권장 행동\n• 2~3줄. 첫 줄은 [지금 할 일], 다음 줄은 [세부 조치] 중 중요한 것. 한 줄 = "<할 일> — <왜 하는지>". 줄 앞에 "지금 할 일:" 같은 꼬리표를 붙이지 않는다.\n'
+      + '불릿 하나 = 문장 하나. 마침표로 두 문장을 잇지 않고, 줄 끝에 마침표를 찍지 않는다. "→" 기호를 쓰지 않는다. 불릿 한 줄 60자 안팎. 전체 600자 안팎.\n\n'
+      + '말투: 개조식. 모든 줄을 명사형 또는 "~함/~임/~음"으로 끝내고 "~습니다/~니다/~다."로 끝내지 않는다.\n'
+      + '" · "는 나란한 항목에만, " — "는 한 줄에 한 번까지. 대조 · 원인은 "~지만 / ~어"로 잇는다.\n'
+      + '수식어 · 과장 · 감탄을 쓰지 않는다. 한자 · 중국어를 쓰지 않는다. "엔진" · 데이터의 대괄호 머리([EVIDENCE] 등) 같은 내부 말을 본문에 쓰지 않는다.\n\n'
       + S.join('\n') + '\n\n'
-      + '규칙 기반 1차 판정: ' + dx.verdict + '\n\n[측정 데이터]\n' + this._opinionPack(eq, det, sat);
+      + '[측정 데이터]\n' + this._opinionPack(eq, det, sat) + '\n\n'
+      + '[지금 할 일 — 엔진 결정] ' + this._todoText(eq, det, dx) + '\n'
+      + '[세부 조치 — 엔진 결정]\n' + (acts.length ? acts.join('\n') : '없음');
   }
   // "## 소제목" 기준으로 섹션 분리 → [{heading, body}]
   _parseOpinion(text) {
     if (!text) return [];
     var sections = [], cur = null;
     String(text).split('\n').forEach(function (ln) {
+      ln = ln.replace(/([^.\s])\.\s*$/, '$1'); // 개조식 — 줄 끝 마침표 제거(모델이 지시를 어겨도)
       var m = ln.match(/^\s*#{1,3}\s+(.*)/);
       if (m) { cur = { heading: m[1].trim(), body: '' }; sections.push(cur); }
       else if (cur) { cur.body += (cur.body ? '\n' : '') + ln; }
@@ -3486,7 +3629,7 @@ export class App extends Component {
     }
     var rms = C('vc-rms');
     if (rms && rmsV.length) {
-      var refs = [{ val: eq.zones[0], color: '#3aa76d', label: 'A/B ' + E.fmt(eq.zones[0]) }, { val: eq.zones[1], color: '#d99a2b', label: 'B/C ' + E.fmt(eq.zones[1]) }, { val: eq.zones[2], color: '#e07b39', label: 'C/D ' + E.fmt(eq.zones[2]) }];
+      var refs = [{ val: eq.zones[0], color: E.STATUS[0].color, label: 'A/B ' + E.fmt(eq.zones[0]) }, { val: eq.zones[1], color: E.STATUS[1].color, label: 'B/C ' + E.fmt(eq.zones[1]) }, { val: eq.zones[2], color: E.STATUS[2].color, label: 'C/D ' + E.fmt(eq.zones[2]) }];
       var dr = function (s, e) { var w = xWin(s, e); var r = E.drawLine(rms, { values: rmsV.slice(s, e), times: tMs.slice(s, e), xFrom: w.xFrom, xTo: w.xTo, xLabels: xL.slice(s, e), tipLabels: xT.slice(s, e), color: E.SERIES.rms, height: 230, smooth: true, refLines: refs, unit: eq.unit }, CC); if (r) E.addTip(rms, C('vt-rms'), null, r.pts); };
       E.zoomDraw(rms, roll.length, dr, zk);
     }
@@ -4117,11 +4260,26 @@ export class App extends Component {
       return self._refreshUsage();
     });
   }
-  // 유저 정보 표시 — 신원은 콘솔 로그인 세션(계정 변경은 Neo 콘솔에서 재로그인)
+  // 유저 정보 표시 — 신원은 API 토큰(계정 변경은 Neo 콘솔 재로그인 + 그 계정 토큰)
   _userVals(base) {
     var self = this, S = this.state;
     base.userName = S.user || '';
     base.userAuthMsg = S.authMsg || '';
+    base.tokenHintText = S.user ? tokenHint() : '';
+    base.tokenFormShow = !!S.needsToken || (!!S.user && !!S.tokenEdit);
+    base.tokenFor = S.user || consoleUser();
+    base.tokenInput = S.tokenInput || '';
+    base.tokenBusy = !!S.tokenBusy;
+    base.tokenMsg = S.tokenMsg || '';
+    base.tokenCancelShow = !!S.user && !!S.tokenEdit;
+    base.onTokenInput = function (ev) { self.setState({ tokenInput: ev.target.value, tokenMsg: '' }); };
+    // 토큰 입력 블록의 change를 설정 폼 변경 감지(저장 안 한 변경)에서 제외 — 토큰은 확인 즉시 별도 저장
+    base.onTokenChange = function (ev) { ev.stopPropagation(); };
+    base.onTokenKey = function (ev) { if (ev.key === 'Enter') { ev.preventDefault(); self._tokenSubmit(); } };
+    base.onTokenSubmit = function () { self._tokenSubmit(); };
+    base.onTokenEdit = function () { self.setState({ tokenEdit: true, tokenInput: '', tokenMsg: '' }); };
+    base.onTokenCancel = function () { self.setState({ tokenEdit: false, tokenInput: '', tokenMsg: '' }); };
+    base.onTokenClear = function () { self._tokenClear(); };
     base.needsDb = !!S.needsDb;
     base.dbExists = !!S.dbExists;      // 저장소는 있으나 권한 없음 — 안내 분기
     base.dbWhy = S.dbWhy || '';
@@ -4303,10 +4461,8 @@ export class App extends Component {
     }
   }
   // 통계 요약 한 줄 — 문장형 근거(등급 축·이탈 대역·지속 최악) 조립, 화면·리포트 공용(문구 일치)
-  _statSummary(eq, det, dx, roll, gi) {
-    var E = this.E, S = this.state;
-    var g = gi != null ? gi : (dx.gi != null ? dx.gi : (eq.grade || 0));
-    var srcKo = GRADE_SRC_KO;
+  // 대역 배수 문구 — 진동(주파수 대역)·베어링(포락선) 축별, 학습 전·이탈 정보 없으면 빈 배열
+  _bandAxText(dx) {
     var bandKo = { sub: '서브동기', one: '1× 대역', fault: '결함 대역', high: '고주파',
       vh1: '1~2 kHz', vh2: '2~4 kHz', vh3: '4~8 kHz', vh4: '8 kHz+',
       envBPFO: 'BPFO(외륜)', envBPFI: 'BPFI(내륜)', envBSF: 'BSF(볼·롤러)' };
@@ -4317,25 +4473,18 @@ export class App extends Component {
         + (ax.envAlt ? ' / ' + (bandKo[ax.envAlt] || ax.envAlt) + ' — 구분 불충분' : '');
       axTxt.push('베어링 ×' + ax.envR.toFixed(2) + ' (' + ek + ')');
     }
-    // 기간 내 지속된 최악 — 헤드라인은 앵커 시점이라 별도 표시, 시간 기준(dwell)으로 기간 길이 무관. 광대역 원본 단위라 등급 없이 사실만
+    return axTxt;
+  }
+  /* 기간 내 지속된 최악 — 헤드라인은 앵커 시점이라 별도 표시, 시간 기준(dwell)으로 기간 길이 무관. 광대역 원본 단위라 등급 없이 사실만
+     worse: 앵커 분석 창 실효값의 1.5배 초과 */
+  _dwellOf(det, roll) {
     var acRms = (det.raw && det.raw.values.length) ? (function (a) {
       var m = 0, i; for (i = 0; i < a.length; i++) m += a[i]; m /= a.length;
       var ss = 0; for (i = 0; i < a.length; i++) { var d2 = a[i] - m; ss += d2 * d2; }
       return Math.sqrt(ss / a.length);
     })(det.raw.values) : null;
     var dw = VC.dwellWorst(roll, SENSOR_HOLD_MS, VC.DWELL_MIN_N);   // 지속 최악 창 — 상수(SENSOR_HOLD_MS)
-    var dwTxt = dw
-      ? E.fmt(dw.v) + ' ' + eq.unit + ' 이상이 ' + Math.round(dw.durMs / 60000) + '분 지속 (끝 ' + E.fmtDT(dw.ms) + ')'
-        + (acRms != null && dw.v > acRms * 1.5 ? ' — 앵커 시점보다 나쁨, 그 구간을 보려면 기간을 좁히십시오' : '')
-      : '표본 부족(연속 ' + VC.DWELL_MIN_N + '개 이상 필요)';
-    return [
-      '등급을 올린 축 ' + (g > 0 ? (srcKo[dx.gradeSrc] || dx.gradeSrc)
-        : (dx.cov && (dx.cov.missing || []).indexOf('결함 패턴') >= 0)
-          ? '없음(결함 패턴 미측정 — ' + ({ gate: '계측 이상', data: '이 구간 스펙트럼 없음', sleeve: '저널 베어링, 판정 대상 아님' }[dx.cov.patWhy] || '회전수·기하 확인') + ')'
-          : '없음(결함 패턴 미검출)'),
-      '진동/베어링 ' + (axTxt.join('  ·  ') || '대역 이탈 없음(또는 학습 전)'),
-      '지속 최악 ' + dwTxt,
-    ].join('  ·  ');
+    return { dw: dw, worse: !!(dw && acRms != null && dw.v > acRms * 1.5) };
   }
   /* 상세분석 실측 1×로 입력 회전수 저장 — 그 키만 즉시 저장(편집 중인 다른 설비 값은 유지), 저장 뒤 재적재(eq.rpm·상세 캐시 갱신)
      서버 감시·대역 추출은 다음 점검(10초)에 새 회전수로 다시 등록 */
@@ -4373,20 +4522,21 @@ export class App extends Component {
     if (det.isoRaw != null && isFinite(det.isoRaw)) return E.fmt(det.isoRaw) + ' ' + eq.unit;
     return det.isoRms != null ? E.fmt(det.isoRms) + ' mm/s(속도 환산)' : '';
   }
-  // 변화율 꼬리표 — 등급 대신 비교 성립 여부·기준 초과
-  _trendTag(t) {
-    if (!t || !t.winOk) return ' · 관측 60분 미만(비교 안 함)';
-    if (!t.cmp) return ' · 비교 불가(운전 상태 변화)';
-    return t.over ? ' · ×2 초과' : '';
+  // 기간 지표 표의 짧은 비고 — 상세분석 표·리포트 공용(전문은 _sevCards 각주)
+  _sevBrief(m, stepSec) {
+    var E = this.E, n = m.n, t = m.trend;
+    return {
+      crest: '최댓값 ' + n.wCrest.toFixed(2) + ' · ' + this._stepText(stepSec) + ' 롤업',
+      p95: '중앙 ' + E.fmt(n.rMed) + ' · 평균 ' + E.fmt(n.wAvg) + ' · 최대 ' + E.fmt(n.wMax) + ' · B/C 초과 ' + n.overBC + '/' + n.buckets + ' 버킷',
+      trend: !t.winOk ? '관측 ' + this._durText(n.durMin) + ' · 기준선 없음(60분 이상 필요)'
+        : !t.cmp ? '운전 상태 변화 포함 — 정지·기동 구간이 섞임' : '최근 1/4 ÷ 직전 1/4',
+    };
   }
   /* 기간 지표 카드 4장 — 상세분석·리포트 공용(값·등급은 VC.sevMetrics, 여기선 서식·각주만), 반환은 중립 모양
      stepSec: 실제 롤업 단위 — 라벨에 반영(기간에 따라 초·분·시간) */
   _sevCards(m, unit, held, stepSec) {
     var E = this.E, n = m.n;
-    var _rollTxt = (function (s) {
-      s = Math.round(s || 1);
-      return s >= 86400 ? (s / 86400) + '일' : s >= 3600 ? (s / 3600) + '시간' : s >= 60 ? (s / 60) + '분' : s + '초';
-    })(stepSec);
+    var _rollTxt = this._stepText(stepSec);
     // 등급 없는 카드엔 배지·화살표 없음 — 배지는 예외(계측 게이트 '잠정', '충격성 강함')일 때만
     var mk = function (label, d, u, prefix) {
       var noGrade = d.graded === false, over = !noGrade && d.value > d.thr;
@@ -4409,16 +4559,16 @@ export class App extends Component {
     var _cArt = m.crest.artifact || 15;
     c[2].foot2 = '기준 = √(2·ln N) + 1 = ' + n.cThr.toFixed(1) + ' (N=버킷당 ' + this._num(n.perBucket) + '샘플, 잡음만으로는 거의 안 넘는 값) · 최댓값 ' + n.wCrest.toFixed(1)
       + (n.wCrest > _cArt && m.crest.value <= _cArt ? ' — 최댓값은 아티팩트 경계(' + _cArt + ') 초과 · 단발 계측 잡음 가능' : '')
-      + (m.crest.impOk ? '' : ' · 버킷이 10초보다 길어 부하 변동이 섞임 — 충격성은 판단하지 않습니다');
+      + (m.crest.impOk ? '' : ' · 버킷이 10초보다 길어 부하 변동이 섞임 — 충격성 판단 안 함');
     // 변화율 — 등급 없음, 비교가 성립할 때만 기준(×2) 대조
     if (!m.trend.winOk) c[3].thrText = '관측 ' + Math.round(n.durMin) + '분 — 기준선 없음(정상상태·동일 계측조건 전제 미충족)';
     else if (!m.trend.cmp) c[3].thrText = '운전 상태 변화 포함 — 비교 불가(정지·기동 구간이 섞임)';
     // 계측 사유가 값을 튼 방향을 해당 카드에 기재 — 클리핑은 Crest·진폭 과소, DC 드리프트는 RMS 과대
     if (held && held.key === 'clip') {
-      c[2].foot2 = '클리핑은 꼭대기를 잘라 Crest를 낮춥니다 — 이 값이 낮은 것은 정상이라는 뜻이 아닙니다';
-      c[1].foot2 = c[1].foot2 + ' · 클리핑으로 진폭이 과소일 수 있습니다';
+      c[2].foot2 = '클리핑은 꼭대기를 잘라 Crest를 낮춤 — 이 값이 낮다고 정상은 아님';
+      c[1].foot2 = c[1].foot2 + ' · 클리핑으로 진폭 과소 가능';
     } else if (held && held.key === 'dc') {
-      c[0].foot2 = 'DC 드리프트로 기준선이 어긋나 RMS가 과대일 수 있습니다 — 계측 확인 후 재평가';
+      c[0].foot2 = 'DC 드리프트로 기준선이 어긋나 RMS 과대 가능 — 계측 확인 후 재평가';
     }
     return c;
   }
@@ -4457,35 +4607,19 @@ export class App extends Component {
       var _gate = !!_held;
       var m = VC.sevMetrics(roll, { zones: eq.zones, fs: eq.fs, gate: _gate });
       var dx = self._dx(eq, det, m);   // 리포트 앵커 det 그대로(재조회 시 캐시 폐기)
-      var n = m.n, wAvg = n.wAvg, wMax = n.wMax, wMin = n.wMin, wTrend = n.wTrend, cnt = n.cnt;
-      var rP95 = m.p95.value, cP95 = m.crest.value;
+      var cnt = m.n.cnt;
       // 차트 계열용 원시 배열 — 지표(m)와 달리 버킷 그대로
       var rms = roll.map(function (r) { return r.rms; });
       var p2pV = roll.map(function (r) { return r.p2p; });
       var crestA = roll.map(function (r) { return r.crest; });
-      var sevCards = self._sevCards(m, eq.unit, _held, rf.stepSec).map(function (c) {
-        return { label: c.label, badgeKo: c.badgeKo, value: c.valueText, unit: c.unit,
-          thr: c.thrText, over: c.over, arrow: c.arrow, delta: c.deltaText, foot2: c.foot2 };
+      // 지표 표 행 — 비고는 상세분석 표와 같은 짧은 문구(brief), 전문은 각주(foot2)
+      var _br = self._sevBrief(m, rf.stepSec);
+      var sevCards = self._sevCards(m, eq.unit, _held, rf.stepSec).map(function (c, i) {
+        return { label: c.label, badgeKo: c.badgeKo, note: c.note, value: c.valueText, unit: c.unit,
+          thr: c.thrText, over: c.over, arrow: c.arrow, delta: c.deltaText, foot2: c.foot2,
+          brief: ['', _br.p95, _br.crest, _br.trend][i], noJudge: i === 2 && !m.crest.impOk };
       });
-      /* 통계 요약은 진단용 값만 — COUNT/AVG/MIN/MAX는 스펙 패널 중복, 표준편차는 스파이크 지배라 제외
-         등급 근거인 ISO 판정값(속도) 행 포함 — 나머지 통계는 원본 단위 광대역 */
       var _rzIso = self._isoZones(eq);
-      // 칸에는 값만(한 줄), 문장형 근거는 statSummary로 — 화면과 같은 규칙
-      var _isoRpt = det.isoRms != null
-        ? self._isoDisp(eq, det) + ' · Class ' + eq.cls + ' ' + ['A 양호', 'B 주의', 'C 위험', 'D 심각'][VC.gradeFor(det.isoRms, _rzIso)]
-          + (eq.unit && eq.unit !== 'mm/s' ? ' (존 판정은 속도 환산)' : '')
-        : '계산 불가';
-      var statSummary = self._statSummary(eq, det, dx, roll)
-        + (det.isoRms != null && det.isoBlocks > 1 ? '  ·  ISO 판정값 ' + det.isoBlocks + '블록 평균' : '')
-        + (det.isoRms == null ? '  ·  ISO 판정값 계산 불가 — 원시 파형 없음' : '');
-      var stats = [
-        { k: 'ISO 판정값 (등급 근거)', v: _isoRpt },
-        { k: '광대역 RMS (등급 없음)', v: '중앙 ' + E.fmt(n.rMed) + ' · P95 ' + E.fmt(rP95) + ' ' + eq.unit },
-        { k: 'Crest P95', v: cP95.toFixed(2) + ' (기준 ' + n.cThr.toFixed(1) + ')' },
-        { k: '변화율', v: '×' + wTrend.toFixed(2) + self._trendTag(m.trend) },
-        { k: '관측 창', v: Math.round(n.durMin) + '분 · ' + n.buckets + '버킷' },
-        { k: '광대역 B/C 초과', v: n.overBC + ' (' + (n.buckets ? (n.overBC / n.buckets * 100).toFixed(1) : '0') + '%) · 기준 ' + E.fmt(eq.zones[1]) + ' ' + eq.unit },
-      ];
       var specs = [
         { k: '데이터 건수', v: self._num(cnt), unit: '건' },
         { k: '표시 구간', v: self._rangeText(roll, winFrom + ' ~ ' + winTo, rf) },
@@ -4501,6 +4635,8 @@ export class App extends Component {
       return opP.then(function (opinion) {
         live(); // 중단됐으면 소견도 폐기
         self.setState({ genStep: 3 });
+        // 소견을 실제로 낸 모델 표기(ornith:9b → ornith 9B) — LLM 소견 절·측정 정보 공용
+        var llmName = opinion ? String((LA.llmModels || {})[LA.llmProvider] || LA.llmProvider).replace(':', ' ').replace(/(\d+)\s*b$/i, '$1B') : '';
         // 차트는 데이터+엔진 내장 — 저장된 문서에서 캔버스 실시간 렌더(줌/툴팁/테마)
         var useClock = rf.clock;
         var xL = roll.map(function (r) { return useClock ? E.fmtClock(r.ms) : E.fmtMD(r.ms); });
@@ -4529,33 +4665,30 @@ export class App extends Component {
           generatedText: E.fmtDT(genMs) + ' (' + (CH.zoneName() || CH.offsetLabel(genMs)) + ')', logoDataURL: logo,
           specs: specs, sevMachine: eq.name + ' · Class ' + eq.cls + ' · ' + self._rpmText(eq) + (det.frMeas ? ' (실측 ' + Math.round(det.frMeas.rpm) + ')' : ''),
           gradeKo: dx.gradeKo, gradeColor: dx.color,
-          zones: [E.fmt(_rzIso[0]), E.fmt(_rzIso[1]), E.fmt(_rzIso[2])], zonesUnit: 'mm/s', gradeIdx: dx.gi,
+          zones: [E.fmt(_rzIso[0]), E.fmt(_rzIso[1]), E.fmt(_rzIso[2])], zonesUnit: 'mm/s', gradeIdx: dx.gi, isoClass: eq.cls,
           verdict: dx.verdict,
-          // 헤드라인용 판정 값(리포트는 재판정 없이 인쇄) — patOn=결함 패턴 켜짐 · patNa=측정 불가 · isoOnly=등급 미반영 고 ISO 존
-          judge: {
-            patOn: !!dx.patGi, patNa: !!(dx.cov && (dx.cov.missing || []).indexOf('결함 패턴') >= 0), patWhy: (dx.cov && dx.cov.patWhy) || '',
-            isoGi: dx.isoGi != null ? dx.isoGi : null, isoOnly: dx.isoOnly || 0,
-            site: (_ev && _ev.top && _ev.top.f) ? _ev.top.f : '',
+          // 심각도 패널 판정 값 — 상세 화면과 같은 값(_sevJudge)
+          judge: Object.assign(self._sevJudge(eq, det, dx, (_ev && _ev.top && _ev.top.f) ? _ev.top.f : ''), {
             score: (_ev && _ev.top && _ev.top.score != null) ? _ev.top.score : null,
             isoRms: det.isoRms != null ? E.fmt(det.isoRms) : '',
-          },
-          // 스펙트럼 시점 문장 — 화면과 같은 문구
-          anchorNote: self._anchorNote({ anchor: (_pick && _pick.at) || anchor, pick: _pick }),
+          }),
+          // 판정 기준 시각·분포 — 요약 사실 줄
+          anchorBrief: self._anchorBrief({ anchor: (_pick && _pick.at) || anchor, pick: _pick },
+            String(winFrom).slice(0, 10) === String(winTo).slice(0, 10) ? String(winFrom).slice(0, 10) : ''),
           // 커버리지 기재 — 근거보다 강한 '양호' 주장 방지
           verdictSub: dx.sub + (dx.cov && dx.cov.n < dx.cov.total
             ? ' · 판정 기준 ' + dx.cov.n + '/' + dx.cov.total + '(' + dx.cov.missing.join('·') + ' 미적용)'
             : (dx.cov && dx.cov.extra && dx.cov.extra.length ? ' · 평소 대비 판정 적용(' + dx.cov.extra.join('·') + ')' : '')),
-          sevCards: sevCards, stats: stats, statSummary: statSummary,
+          sevCards: sevCards,
           indics: det.indics,
-          opinion: opinion, opinionModel: opinion ? ((LA.llmModels || {})[LA.llmProvider] || LA.llmProvider) : null,
+          opinion: opinion, opinionModel: llmName || null,
           actions: dx.actions,
           data: Object.assign({ tz: CH.zoneName() }, data), chartLibSrc: chartSrc,
           // 재현성 도장 모델명은 소견을 실제로 낸 경우만
-          build: self._reportBuild(eq, det, docNo,
-            opinion ? String((LA.llmModels || {})[LA.llmProvider] || LA.llmProvider).replace(':', ' ').replace(/(\d+)\s*b$/i, '$1B') : ''),
+          build: self._reportBuild(eq, det, docNo, llmName),
           fftHint: det.fft.freqs.length ? '해상도 ' + det.fft.res.toFixed(2) + ' Hz' : '',
-          waveDesc: det.raw.values.length ? (det.raw.fs / 1000).toFixed(2) + ' kHz 캡처 · 분석 창 ' + (det.anaSec ? det.anaSec.toFixed(1) : '?') + '초(최신 시점 앵커) — 이 창의 지표는 3분 추세 평균과 다른 값' : '',
-          envDesc: det.envelope.hint, cepDesc: det.cepstrum.note,
+          // 포락선 복조 대역 — 고정 대역이 안 서면 빈 값(전대역 복조)
+          envBand: det.envelope.band || '',
         });
         // 파일명은 짧게(태그_생성일시) — 기간·별칭·LLM 여부는 .index.json에 기록해 보관함 컬럼 유지
         var fname = eq.name.replace(/[^A-Za-z0-9._-]/g, '-') + '_' + ts + '.html';
@@ -4605,7 +4738,8 @@ export class App extends Component {
     return {
       unit: eq.unit, dispUnit: det.dispUnit, natUnit: det.natUnit,
       wave: det.raw.values.length ? { t: det.raw.times_ms.map(function (m) { return m.toFixed(0); }), v: det.raw.values } : null,
-      fft: det.fft.freqs.length ? { freqs: det.fft.freqs, mags: det.fft.mags, markers: det.fft.markers, res: det.fft.res } : null,
+      // dispHz = 상세분석 기본 표시 범위(결함 주파수가 보이는 대역) · nyqHz = 전대역
+      fft: det.fft.freqs.length ? { freqs: det.fft.freqs, mags: det.fft.mags, markers: det.fft.markers, res: det.fft.res, dispHz: det.fft.dispHz || 0, nyqHz: det.fft.nyqHz || 0 } : null,
       spec: det.spectro.rows ? det.spectro : null,
       env: det.envelope.freqs.length ? { freqs: det.envelope.freqs, mags: det.envelope.mags, markers: det.envelope.markers, hint: det.envelope.hint } : null,
       cep: det.cepstrum.freqs.length ? { freqs: det.cepstrum.freqs, mags: det.cepstrum.mags, markers: det.cepstrum.markers } : null,
@@ -4614,7 +4748,7 @@ export class App extends Component {
       quality: (det.quality && (det.quality.issues || []).length) ? det.quality : null,
       kurtWarn: rptSat && rptSat.flag ? rptSat.msg : null,
       levels: det.levels, isoUnit: eq.unit, isoZoneBC: E.fmt(eq.zones[1]),
-      evidence: ev.conf, evidWeak: !!ev.weakTop, negatives: ev.negatives, unexplained: ev.unexplained, missing: ev.missing, acq: ev.acq,
+      evidence: ev.conf, evidWeak: !!ev.weakTop, negatives: ev.negatives, negShort: ev.negShort, negCard: ev.negCard, evidAdopt: VC.EVID_ADOPT, unexplained: ev.unexplained, missing: ev.missing, acq: ev.acq,
       // 대역 이탈도 본문에 기재 — ISO 대역 분배(1 kHz까지)·결함 대역 탐색에서 빠진 마운팅 상한 위 대역 포함
       bandDev: (ev.bandDev && ev.bandDev.length)
         ? { rows: ev.bandDev.map(function (d) { return { ko: d.ko, v: E.fmt(d.v), lim: E.fmt(d.lim), r: d.r.toFixed(2), over: d.r > 1, soft: d.soft }; }),
@@ -4632,77 +4766,16 @@ export class App extends Component {
           cands: scored.slice(0, 3).map(function (c) { return { f: c.f, score: c.score, s: c.s, why: (c.tags && c.tags.length ? c.tags[0] : c.why) }; }),
           unmeasurable: ev.conf.filter(function (c) { return c.na; }).map(function (c) { return { f: c.f, why: c.caveat || '' }; }),
           rpmTxt: det.frMeas ? Math.round(det.frMeas.rpm) + ' ± ' + Math.round(det.frMeas.rpmTol || 0) + ' rpm (' + (eq.rpmSrc === 'pulley' || eq.rpmSrc === 'measured' ? self._rpmText(eq) : '명판 ' + eq.rpm) + ')' : (eq.rpmSrc === 'pulley' || eq.rpmSrc === 'measured' ? self._rpmText(eq) : '명판 ' + eq.rpm + ' rpm') + ' (실측 피크 없음)',
-          obsTxt: Math.round(_durMinT) + '분 · ' + roll.length + '버킷',
           acqTxt: '8초 창 · 0.125 Hz · Hanning 50% 중첩 · 8회 평균',
-          // 조치 카드 1장 — 근거 줄엔 등급 대신 값·대역·평균 조건·경계까지 거리(등급으로 등급 설명은 순환)
-          action: (function () {
-            var isoOk2 = det.isoRms != null && eq.unit === 'mm/s';
-            // 게이트 = 측정 상태 — A~D 팔레트 미사용(5번째 등급 오독 방지)
-            if (det.quality && det.quality.gate) {
-              return { kind: 'gate', cls: 'hold', icon: '⏸', title: '계측 검증 후 재측정 — 기계 상태 미판정',
-                body: '센서 마운팅·케이블·커넥터를 점검하고 같은 지점에서 재측정하십시오. 이 리포트의 결함 판정은 운전 판단 근거가 아닙니다.',
-                basis: gateReasonTxt + ' — 단발 스파이크 시그니처' };
-            }
-            if (!isoOk2) return null;
-            // 결함 패턴 측정 불가 = 측정 상태 — ISO 값만으로 조치 지시 안 함
-            var _covMiss = (dx && dx.cov && dx.cov.missing) || [];
-            if (_covMiss.indexOf('결함 패턴') >= 0) {
-              var _pw = dx.cov.patWhy;
-              if (_pw === 'data') return { kind: 'nojudge', cls: 'hold', icon: '⏸', title: '판정 못 함 — 이 구간의 파형 부족',
-                body: '스펙트럼을 만들 데이터가 부족해 베어링 상태를 판정하지 않았습니다. 다른 기간으로 다시 생성하십시오.',
-                basis: 'ISO 대역제한 속도 RMS ' + E.fmt(det.isoRms) + ' mm/s — 이 값만으로는 베어링 상태를 말할 수 없습니다' };
-              if (_pw === 'sleeve') return { kind: 'nojudge', cls: 'hold', icon: '⏸', title: '결함 패턴 판정 대상 아님 — 저널 베어링',
-                body: '구름베어링 결함주파수가 없는 저널(sleeve) 베어링이라 결함 패턴으로 판정하지 않습니다. 진동 크기는 ISO 존으로 확인하십시오.',
-                basis: 'ISO 대역제한 속도 RMS ' + E.fmt(det.isoRms) + ' mm/s' };
-              return { kind: 'nojudge', cls: 'hold', icon: '⏸', title: '판정 못 함 — 회전수·베어링 정보 필요',
-                body: '결함주파수 격자를 세울 수 없어 베어링 상태를 판정하지 않았습니다. 설정 → 설비 정보에 명판 회전수와 베어링 품번을 넣고 다시 생성하십시오.',
-                basis: 'ISO 대역제한 속도 RMS ' + E.fmt(det.isoRms) + ' mm/s — 이 값만으로는 베어링 상태를 말할 수 없습니다' };
-            }
-            var x = det.isoRms, z = eq.zones;
-            var _isoG = VC.gradeFor(x, z);
-            // 카드는 화면과 같은 등급으로 선택 — ISO로 고르면 진폭만 높은 설비엔 과잉 조치, 저진폭 초기 결함엔 '계속 운전'
-            var g = (dx && dx.gi != null) ? dx.gi : _isoG;
-            var head = E.fmt(x) + ' mm/s · 10–1000 Hz · ' + (det.isoBlocks || 1) + '블록 평균 · Class ' + eq.cls;
-            var crit2 = E.fmt(0.25 * z[1]);   // ISO Criterion II: B/C 경계의 25% 변화가 유의
-            var card = [
-              { cls: 'ok', icon: '🟢', title: '계속 운전',
-                body: '현 측정 주기로 예방관리를 유지하십시오. 다음 측정에서 ' + crit2 + ' mm/s 이상 변하면 원인을 확인하십시오(ISO Criterion II).',
-                basis: head + ' · A/B 경계 ' + E.fmt(z[0]) + ' 아래' },
-              { cls: 'watch', icon: '🟡', title: '다음 정기 점검 시 확인',
-                body: '운전을 계속하되 측정 주기를 유지하고, 다음 정기 점검에 정렬·체결·윤활 육안 확인을 넣으십시오.',
-                basis: head + ' · C 경계 ' + E.fmt(z[1]) + '까지 ' + E.fmt(z[1] - x) + ' 남음(' + Math.round((z[1] - x) / z[1] * 100) + '%)' },
-              { cls: 'plan', icon: '🟠', title: '계획 정지 시 점검 · 측정 주기 단축',
-                body: '장기 운전 부적합 구간입니다. 다음 계획 정지에 점검을 배정하고, 그때까지 측정 주기를 단축해 추세를 감시하십시오.',
-                basis: head + ' · D 경계 ' + E.fmt(z[2]) + '까지 ' + E.fmt(z[2] - x) + ' 남음' },
-              { cls: 'urgent', icon: '🔴', title: '긴급 점검 · 설비 중요도에 따라 정지 검토',
-                body: '점검 일정을 앞당기십시오. 정지 여부는 설비 중요도·예비기 유무·추가 증상(베어링 온도·이음·누유)과 함께 판단하십시오.',
-                basis: head + ' · D 경계 ' + E.fmt(z[2]) + ' 초과' },
-            ][g];
-            // 다섯 번째 카드 — 등급 양호인데 ISO 존 초과(베어링 외 원인), 등급 팔레트 미사용(5번째 심각도 오독 방지)
-            if (g === 0 && _isoG > 0) {
-              var _bestR = (ev && ev.top && ev.top.score != null) ? ev.top.score : null;
-              card = { cls: 'hold', icon: '🔵', title: '베어링 외 원인 점검 — 진폭 확인 필요',
-                body: '베어링 결함주파수 자리에 근거가 서지 않아 등급을 올리지 않았습니다. 진동이 높은 것은 사실이므로'
-                  + ' 정렬·체결·불평형을 육안·실측으로 확인하고, 필요하면 위상(타코)·축방향 측정을 의뢰하십시오'
-                  + ' — 이 셋은 단일 채널·위상 없이는 원리적으로 판별할 수 없습니다.',
-                basis: head + ' · ISO 존 ' + ['A', 'B', 'C', 'D'][_isoG] + '(' + E.STATUS[_isoG].ko + ')'
-                  + (_bestR != null ? ' · 결함주파수 격자 미채택(최고 ' + _bestR.toFixed(1) + ')' : ' · 결함주파수 격자 미채택') };
-            }
-            card.kind = 'zone';
-            // 블록간 변동 크면 경계 여유가 불확도 안 → 잠정(R10)
-            if (Math.round((det.isoSpread || 1) * 100) / 100 >= 1.5) card.title += ' (잠정)';
-            // 광대역 감시 등급이 더 높을 때만 부기 — 등급 근거 아님 명시
-            if (eq.grade > g) card.aside = '광대역 감시는 ' + E.STATUS[eq.grade].ko + '(' + E.fmt(eq.rms) + ' ' + eq.unit + ') — 전체 에너지의 '
-              + Math.round((det.hfEnergyFrac || 0) * 100) + '%가 10–1000 Hz 밖입니다. 등급이 아니라 알람 임계·협대역 감시 전환 검토 사항입니다.';
-            return card;
-          })(),
+          // 지금 할 일 한 줄 — 상세분석과 같은 함수
+          action: self._todoText(eq, det, dx),
           // 게이트 편향 방향 — 가산형은 상한, 감산형은 하한 명시
           bias: (function () {
             var ks = ((det.quality && det.quality.issues) || []).map(function (i) { return i.key; });
             if (ks.indexOf('flatline') >= 0 || ks.indexOf('clip') >= 0 || ks.indexOf('sparse') >= 0)
-              return '센서 정지·포화는 진폭을 과소 표시합니다 — 이 값은 하한, 실제는 이상일 수 있습니다.';
+              return '센서 정지·포화는 진폭을 과소 표시 — 이 값은 하한, 실제는 이상일 수 있음';
             if (ks.indexOf('spike') >= 0 || ks.indexOf('kurtx') >= 0)
-              return '아티팩트는 에너지를 더하기만 합니다 — 이 값은 상한, 실제 기계 상태는 이하입니다.';
+              return '아티팩트는 에너지를 더하기만 함 — 이 값은 상한, 실제 기계 상태는 이하';
             return '';
           })(),
           // 1단계 검산 — 롤업 평균과 ISO 블록 평균이 크게 벌어지면 창 차이 명시
@@ -4710,7 +4783,7 @@ export class App extends Component {
             if (!(det.isoRms > 0) || !(wAvg > 0)) return '';
             var r = det.isoRms / wAvg;
             if (r < 1.5 && r > 0.67) return '';
-            return '롤업 평균 ' + E.fmt(wAvg) + ' 대비 ×' + r.toFixed(2) + ' — 창이 다릅니다(롤업=관측 ' + Math.round(_durMinT) + '분 전체, ISO=최신 시점 앵커 ' + (det.isoBlocks || 1) + '블록).';
+            return '롤업 평균 ' + E.fmt(wAvg) + ' 대비 ×' + r.toFixed(2) + ' — 창이 다름(롤업=관측 ' + Math.round(_durMinT) + '분 전체, ISO=최신 시점 앵커 ' + (det.isoBlocks || 1) + '블록).';
           })(),
         };
       })(),
@@ -4718,31 +4791,7 @@ export class App extends Component {
       iso: (det.isoRms != null) ? (function () { var g = VC.gradeFor(det.isoRms, self._isoZones(eq)); return { rms: E.fmt(det.isoRms), disp: self._isoDisp(eq, det), conv: !!(eq.unit && eq.unit !== 'mm/s'), gradeIdx: g, gradeKo: E.STATUS[g].ko, color: E.STATUS[g].color, anaSec: det.anaSec ? det.anaSec.toFixed(1) : '',
         blocks: det.isoBlocks || 0, spread: det.isoSpread ? det.isoSpread.toFixed(2) : '', spreadWarn: Math.round((det.isoSpread || 1) * 100) / 100 >= 1.5 }; })() : null,
       levelsOk: det.levelsOk !== false, accelFeff: det.accelFeff || 0, accelNyqFrac: det.accelNyqFrac || 0,
-      hfFrac: det.hfEnergyFrac || 0, velExHigh: det.velExHigh ? E.fmt(det.velExHigh) : '',
-      velBB: det.levels ? E.fmt(det.levels['mm/s']) : '', anaSecTxt: det.anaSec ? det.anaSec.toFixed(1) : '',
-      exHighSameZone: (det.velExHigh != null && det.isoRms != null) ? (VC.gradeFor(det.velExHigh, eq.zones) === VC.gradeFor(det.isoRms, eq.zones)) : null,
-      exHighZoneKo: det.velExHigh != null ? E.STATUS[VC.gradeFor(det.velExHigh, eq.zones)].ko : '',
       parsevalOk: !det.parseval || det.parseval.ok !== false, parsevalErr: det.parseval ? (det.parseval.relErr * 100).toFixed(1) : '',
-      // 감시 블록 — 현재 감시 판정값·근거를 리포트에 그대로 기재
-      mon: (function () {
-        var gs = (self._gradeState || {})[eq.table + ':' + eq.name] || {};
-        var gi = self._severityOf(eq);
-        // 원본 단위 표기 — 가속도·변위 설비의 gs.iso는 존 판정용 속도 환산값
-        var _vi = (eq.unit && eq.unit !== 'mm/s') ? gs.isoRaw : gs.iso;
-        var _viOk = _vi != null && isFinite(_vi);
-        var v = _viOk ? _vi : eq.rms;
-        return {
-          rms: E.fmt(v), gradeKo: E.STATUS[gi].ko, color: E.STATUS[gi].color, unit: eq.unit,
-          // 대역제한 미적용 사유 구분 — 샘플레이트 불명과 1 kHz 위 없음은 다름(불명인데 '성분 없음' 단언 방지)
-          basis: (gs.limited && _viOk) ? 'ISO 10~1000 Hz 대역제한 구간 RMS'
-            : gs.limited ? '전대역 구간 RMS(ISO 대역값 계산 전)'
-            : (eq.fs > 0 ? '전대역 구간 RMS(샘플레이트 ' + self._num(eq.fs) + ' Hz — 1 kHz 위를 측정하지 않음)'
-              : '전대역 구간 RMS(샘플레이트 불명 — 대역제한 미적용)'),
-          // 등급 원인 축 — 정본 맵(GRADE_SRC_KO), 양호면 null(report.js가 행 제외)
-          src: gi > 0 ? (GRADE_SRC_KO[gs.src] || GRADE_SRC_KO.iso) : null,
-          wide: isFinite(gs.wide) ? E.fmt(gs.wide) : null,
-        };
-      })(),
       gate: !!(det.quality && det.quality.gate),
       rpmMeas: det.frMeas ? Math.round(det.frMeas.rpm) : null,
     };
@@ -4758,8 +4807,10 @@ export class App extends Component {
         { k: 'Standard', v: 'ISO 10816 Class ' + eq.cls,
           subs: ['Thresholds ' + eq.zones.map(function (z) { return E.fmt(z); }).join(' / ') + ' ' + eq.unit] },
         { k: 'Acquisition', v: blkN ? 'FFT ' + self._num(blkN) : '—',
-          subs: det.acq ? [(det.acq.res || 0).toFixed(2) + ' Hz', 'Avg ×' + (det.acq.averages || 1) + ' · ISO ' + (det.acq.isoBlocks || 1) + '블록'] : [] },
-        { k: 'LLM', v: llmName || '미사용', subs: llmName ? [] : ['규칙 기반만'] },
+          // 평균 1회(단일 블록)만 경고 — 충격성 신호에서 진폭이 스파이크에 좌우됨
+          subs: det.acq ? [(det.acq.res || 0).toFixed(2) + ' Hz · 창 ' + (det.acq.winSec || 0).toFixed(1) + ' s', 'Avg ×' + (det.acq.averages || 1) + ' · ISO ' + (det.acq.isoBlocks || 1) + '블록']
+            .concat((det.acq.averages || 1) < 2 ? ['단일 블록 — 진폭이 스파이크에 좌우'] : []) : [] },
+        { k: 'LLM', v: llmName || '미사용', subs: [llmName ? '규칙 + LLM 소견' : '규칙 기반만'] },
         { k: 'Report ID', v: docNo, subs: [], narrow: true },
       ],
     };
@@ -4800,7 +4851,7 @@ export class App extends Component {
   _loadReports() {
     var self = this;
     var mine = reportDir(), root = REPORT_ROOT;
-    // 계정 폴더 선생성 — 없는 경로 조회 시 콘솔 404 잔류 방지(ensureDir은 세션당 1회)
+    // 계정 폴더 선생성 — 없는 경로 조회 시 콘솔 404 잔류 방지(ensureDir은 페이지 로드당 1회)
     ensureDir(mine).catch(function () { });   // 실패해도 목록 조회 계속(사유는 저장 때 표시)
     function readIdx(d) {
       return readFileBlob(d + '/.index.json').then(function (b) { return b.text(); })
@@ -4975,6 +5026,7 @@ export class App extends Component {
   }
   renderVals() {
     var self = this, S = this.state, E = this.E, isL = S.theme === 'light';
+    if (E && E.setGradeTheme) E.setGradeTheme(isL);   // 등급색 테마 — 이번 렌더·캔버스 드로우 공용
     var AC = this._ac();   // 헤더·모니터링은 적용 설정 표시(폼 미저장 변경 배제)
     var base = {
       rootClass: isL ? 'theme-light' : '',
@@ -5006,7 +5058,9 @@ export class App extends Component {
       onToggleMonitor: function () { self._toggleMonitorNow(); },
       toggleTheme: function () { self.toggleTheme(); },
       settingsActiveStyle: S.tab === 'settings' ? 'border-color: var(--primary-light); color: var(--text-primary);' : '',
-      navTabs: [{ id: 'monitor', label: '모니터링', icon: 'dashboard' }, { id: 'detail', label: '상세분석', icon: 'graph-line' }, { id: 'report', label: '리포트 생성', icon: 'file' }].map(function (t) {
+      // 준비 전엔 탭·알람 버튼 없음 — 설정(유저 정보)만
+      monPillShow: this._appReady(),
+      navTabs: (this._appReady() ? [{ id: 'monitor', label: '모니터링', icon: 'dashboard' }, { id: 'detail', label: '상세분석', icon: 'graph-line' }, { id: 'report', label: '리포트 생성', icon: 'file' }] : []).map(function (t) {
         var a = S.tab === t.id;
         return { label: t.label, icon: t.icon, onClick: function () { self._navTo(t.id); }, style: 'display: inline-flex; align-items: center; gap: 7px; height: 52px; padding: 0 14px; background: transparent; border: none; border-bottom: 2px solid ' + (a ? 'var(--primary-light)' : 'transparent') + '; color: ' + (a ? 'var(--text-primary)' : 'var(--text-tertiary)') + '; font-size: 13px; font-weight: ' + (a ? '600' : '500') + '; cursor: pointer;' };
       }),
@@ -5040,7 +5094,7 @@ export class App extends Component {
     base.sumTotal = eqs.length;
     base.onTotalClick = function () { self.setState({ gradeFilter: null }); };
     base.totalStyle = 'flex: 1 1 0; min-width: 118px; padding: 14px 18px; border: none; border-right: 1px solid var(--border-default); background: transparent; text-align: left; cursor: pointer; font-family: inherit;';
-    var kpiDef = [{ g: 0, label: '양호', color: '#3aa76d' }, { g: 1, label: '주의', color: '#d99a2b' }, { g: 2, label: '위험', color: '#e07b39' }, { g: 3, label: '심각', color: '#e5484d' }];
+    var kpiDef = [0, 1, 2, 3].map(function (g) { return { g: g, label: E.STATUS[g].ko, color: E.STATUS[g].color }; });
     // 판정 보류 칸 — 클릭 시 해당 태그만 필터, 심각도 팔레트 미사용(감시 상태 ≠ 설비 상태)
     kpiDef.push({ g: 'hold', label: '판정 보류', color: 'var(--text-muted)' });
     base.kpiCells = kpiDef.map(function (k) {
@@ -5430,11 +5484,13 @@ export class App extends Component {
     var _bandHas = _tr && (_tr.bands || []).some(function (s) { return (s.vals || []).some(function (v) { return v != null; }); });
     base.bandNote = _bandHas ? '' : _trEmpty(_tr && _tr.bandNote);
     base.detTitle = eq.alias || eq.name; base.detName = eq.name; base.detUnit = eq.unit;
+    // 사양 한 줄 — 구간은 짧게, 전체 시각은 hover
+    var _rangeFull = this._rangeText(_roll, _dtTxt(S.from) + ' ~ ' + _dtTxt(S.to), _rf);
     base.detSpec = [
-      { k: '데이터 건수', v: this._num(_wCount) + ' 건' },
-      { k: '표시 구간', v: this._rangeText(_roll, S.from + ' ~ ' + S.to, _rf) },
+      { k: '데이터', v: this._num(_wCount) + '건' },
+      { k: '구간', v: this._rangeShort(_roll, _rf) || _rangeFull, t: _rangeFull },
       { k: '샘플레이트', v: (det.raw.fs / 1000).toFixed(2) + ' kHz' },
-      { k: '롤업 단위', v: _rf.label }
+      { k: '롤업', v: this._stepText(_rf.stepSec) + (_rf.raw ? ' · 원본 집계' : '') }
     ];
     // 롤업 없는 테이블 — 원본 집계·구간 축소 사실을 사양 칸 아래에 안내
     base.rollupNote = !_rf.raw ? ''
@@ -5446,84 +5502,138 @@ export class App extends Component {
     base.sevHoldWhy = _held ? _held.label : '';
     base.sevHoldDetail = _held ? (_held.detail || '') : '';
     base.sevHoldNote = _held
-      ? (_held.src === 'mon' ? '감시가 이 사유로 판정을 동결했습니다 — 모니터링 카드도 같은 상태입니다'
-        : '분석 창에서 계측 이상이 보입니다 — 계측 확인 후 재평가하십시오')
+      ? (_held.src === 'mon' ? '감시가 이 사유로 판정 동결 — 모니터링 카드도 같은 상태'
+        : '분석 창에서 계측 이상 관측 — 계측 확인 후 재평가')
       : '';
-    base.sevLabel = _held ? ('마지막 판정 · ' + E.ago(eq.lastSeen, this.data.now)) : '종합 위험도';
-    base.sevGradeKo = g.ko;
-    base.sevColor = _held ? '#8a8f99' : g.color;
-    base.sevSoft = _held ? 'rgba(138,143,153,0.16)' : g.soft;
-    // 판정 문구가 충격성 지적 시 권고도 동조 — Crest로는 결함·계측 구분 불가라 둘을 가르는 행동 기재
-    var _imp = !_held && _gi === 0 && !!(_m.crest && _m.crest.grade > 0);
-    base.sevReco = _held ? '센서·케이블·마운팅 점검 후 재측정'
-      : _imp ? '포락선에서 베어링 결함 주파수 대조 · 센서·케이블·마운팅 점검'
-      : { 0: '정상 운전 유지 · 예방관리 지속', 1: '모니터링 강화 권고', 2: '조기 점검 권고 · 측정 주기 단축', 3: '긴급 점검 · 중요도 따라 정지 검토' }[_gi];
-    // 필수 축 누락은 등급 옆에 명시(근거보다 강한 '양호' 방지), 보강 축(학습 필요)은 '더해진 것'으로 표기
-    if (!_held && dx.cov) {
-      if (dx.cov.n < dx.cov.total) {
-        base.sevReco = '판정 기준 ' + dx.cov.n + '/' + dx.cov.total
-          + '(' + dx.cov.missing.join('·') + ' 미적용) · ' + base.sevReco;
-      } else if (dx.cov.extra && dx.cov.extra.length) {
-        base.sevReco = '평소 대비 판정 적용(' + dx.cov.extra.join('·') + ') · ' + base.sevReco;
-      }
-    }
+    base.sevHoldAgo = _held ? ('마지막 판정 · ' + E.ago(eq.lastSeen, this.data.now)) : '';
+    // 지금 할 일 · 근거 사실 — 리포트 판정 카드와 같은 함수·같은 줄(계산 중엔 비움)
+    base.sevTodo = base.detBusy ? '' : this._todoText(eq, det, dx, _held);
+    // 필수 축 누락은 명시(근거보다 강한 '양호' 방지), 보강 축(학습 필요)은 '더해진 것'으로 표기
+    var _cov = (_held || !dx.cov) ? ''
+      : dx.cov.n < dx.cov.total ? '판정 기준 ' + dx.cov.n + '/' + dx.cov.total + '(' + dx.cov.missing.join('·') + ' 미적용)'
+        : (dx.cov.extra && dx.cov.extra.length) ? '평소 대비 판정 적용(' + dx.cov.extra.join('·') + ')' : '';
+    var _ab = this._anchorBrief(this._detailCache[S.selTag], '');
+    base.sevFacts = base.detBusy ? [] : [
+      dx.topScore != null ? { k: '근거 점수', v: dx.topScore + '/100', t: _held ? '잠정' : Report.evidLevel(dx.topScore) } : null,
+      _ab ? { k: '판정 기준', v: _ab.at, t: _ab.note } : null,
+      _cov ? { k: _cov } : null,
+    ].filter(Boolean);
     base.sevMachine = eq.name + ' · Class ' + eq.cls + ' · ' + self._rpmText(eq);
-    // 존 막대는 ISO 속도(mm/s) 눈금, 종합 등급 한 칸만 채움
+    /* 심각도 패널 — 리포트와 같은 모델(Report.sevModel)
+       · 머리 = 등급 상자·판정문·판정식·단계, 아래 = 결함 패턴(등급 발동) | ISO 존(등급 수준)
+       · 존 막대는 현재 존만 강조색(등급색 아님), 등급색은 결과 줄에만 */
     var _isoZ = this._isoZones(eq);
-    base.sevZoneUnit = 'mm/s';
-    base.sevZones = [
-      { ko: '양호', color: '#3aa76d', range: '< ' + E.fmt(_isoZ[0]) },
-      { ko: '주의', color: '#d99a2b', range: E.fmt(_isoZ[0]) + '–' + E.fmt(_isoZ[1]) },
-      { ko: '위험', color: '#e07b39', range: E.fmt(_isoZ[1]) + '–' + E.fmt(_isoZ[2]) },
-      // 카드 값은 원본 단위(g·μm)라 존 눈금에 단위 명시
-      { ko: '심각', color: '#e5484d', range: '> ' + E.fmt(_isoZ[2]) + ' mm/s' }
-    // 보류 중이면 해당 칸 테두리만(채운 칸은 '지금 여기'로 읽힘)
-    ].map(function (z, i) {
-      var a = i === _gi, hold = a && base.sevHold;
-      return { ko: z.ko, range: z.range,
-        cellStyle: 'flex: 1; display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 600; box-sizing: border-box; color: '
-          + (hold ? '#8a8f99' : a ? '#fff' : 'var(--text-muted)')
-          + '; background: ' + (a && !hold ? z.color : 'var(--bg-elevated)')
-          + '; border-right: 1px solid var(--border-light);'
-          + (hold ? ' box-shadow: inset 0 0 0 1.5px #8a8f99;' : ''),
-        labStyle: 'flex: 1; text-align: center; font-size: 10px; color: var(--text-muted);' };
-    });
-    base.sevCards = this._sevCards(_m, eq.unit, _held, _rf.stepSec).map(function (c) {
-      var gg = E.STATUS[c.grade];
-      // 배지 색 3부류 — 등급어는 등급색, '판정에 쓰지 마라'(잠정·참고·아티팩트)는 회색, 관측 사실(note — 충격성 강함)은 앰버
-      var _bc = c.note ? '#d99a2b' : c.override ? '#8a8f99' : gg.color;
-      // 등급 없는 카드(참고·잠정)는 색 막대·배지 채움 없음(구조로 구분), 관측 사실(note)은 앰버 유지
-      var _plain = !!c.override && !c.note;
-      return Object.assign({}, c, {
-        badgeColor: _plain ? 'var(--text-muted)' : _bc,
-        badgeSoft: _plain ? 'transparent' : (c.note ? 'rgba(217,154,43,0.16)' : gg.soft),
-        badgeBorder: _plain ? 'var(--border-medium)' : 'transparent',
-        arrowColor: c.over ? '#e5484d' : '#3aa76d',
-        style: _plain ? '' : 'border-left: 3px solid ' + _bc + ';' });
-    });
-    /* 통계 요약 — 리포트와 같은 지표(중앙값·P95·Crest 기대치 √(2·ln N)·B/C 초과 빈도)
-       · ISO 판정값 행 포함, 나머지는 원본 단위 광대역(B/C 초과는 원본 단위 존 기준)
-       · 칸엔 값만, 산출 조건은 hover */
-    var _rP95 = _m.p95.value, _cP95 = _m.crest.value;
+    var _sj = this._sevJudge(eq, det, dx, dx.site);
+    var _zi = det.isoRms != null ? VC.gradeFor(det.isoRms, _isoZ) : -1;
+    var _zk = _zi >= 0 ? ['A', 'B', 'C', 'D'][_zi] : '';
+    var _zr = ['< ' + E.fmt(_isoZ[0]), E.fmt(_isoZ[0]) + ' – ' + E.fmt(_isoZ[1]), E.fmt(_isoZ[1]) + ' – ' + E.fmt(_isoZ[2]), '> ' + E.fmt(_isoZ[2])];
+    var _sm = Report.sevModel({ gi: _gi, gradeKo: g.ko, judge: _sj,
+      iso: _zi >= 0 ? { idx: _zi, val: this._isoDisp(eq, det) } : null,
+      zones: [E.fmt(_isoZ[0]), E.fmt(_isoZ[1]), E.fmt(_isoZ[2])], unit: 'mm/s' });
+    // 등급색 칠 — 테두리 불투명(바탕과 섞여 탁해짐 방지) · 미측정(-1)·보류는 중립
+    var _GS = E.STATUS;
+    var _tone = function (t) {
+      var c = (t >= 0 && !_held) ? _GS[t].color : '';
+      return c ? 'color: ' + c + '; background: ' + _GS[t].soft + '; border: 1px solid ' + c + ';'
+        : 'color: var(--text-secondary); background: var(--bg-input); border: 1px solid var(--border-medium);';
+    };
+    base.sevGradeKo = _sm.ko;
+    base.sevBadgeStyle = _tone(_sm.tone);
+    base.sevBadgeIcon = (_held || _sm.tone < 0) ? '' : _sm.tone > 0 ? 'codicon-warning' : 'codicon-pass';
+    // 단계 막대 — 네 등급 중 위치(판정 불가는 생략, 보류는 회색)
+    base.sevSteps = _sm.step ? [1, 2, 3, 4].map(function (k) {
+      return 'width: 22px; height: 4px; border-radius: 2px; background: ' + (k > _sm.step ? 'var(--border-medium)' : _held ? '#8a8f99' : _GS[_gi].color) + ';';
+    }) : null;
+    base.sevStepText = _sm.step ? _sm.step + '/4' : '';
+    // 배지가 이미 '판정 보류'면 보류 표지 생략
+    base.sevHoldTag = !!_held && _sm.ko !== '판정 보류';
+    // 판정식 — 두 축이 등급을 만든 방식 한 줄
+    base.sevFormula = base.detBusy ? ''
+      : _sj.patNa ? '결함 패턴 미측정 → ' + _sm.ko
+        : _sj.patOn ? '결함 패턴 있음' + (_zk ? ' + ISO ' + _zk + ' 구간' : '') + ' → ' + _sm.ko
+          : '결함 패턴 없음 → ' + _sm.ko + (_zk && _sj.isoOnly > 0 ? ' · ISO ' + _zk + ' 구간은 등급에 반영 안 함' : '');
+    // 사유 문장은 판정식이 못 담는 경우만 — 미측정 사유·패턴 없는 고진동·ISO 미계산
+    base.sevWhy = (base.detBusy || (_sj.patOn && _zi >= 0)) ? null : _sm.why;
+    base.sevPat = {
+      pills: _sm.pat.pills.map(function (q) {
+        return { label: (q.on && q.tone >= 0 ? '✓ ' : '') + q.label, style: 'padding: 3px 10px; border-radius: 4px; font-size: 12.5px; '
+          + (q.on ? 'font-weight: 700; ' + _tone(q.tone) : 'color: var(--text-muted); border: 1px solid var(--border-medium);') };
+      }),
+      fact: base.detBusy ? '스펙트럼 계산이 끝나면 확정' : _sm.pat.fact,
+    };
+    var _pos = _sm.iso.pos;
+    var _resOn = _sm.iso.res.some(function (r) { return r.on; });
+    base.sevIso = {
+      title: 'ISO 10816 Class ' + eq.cls,
+      val: _sm.iso.val,
+      segs: [0, 1, 2, 3].map(function (k) {
+        return 'height: 6px; border-radius: 3px; background: ' + (k === _zi ? 'var(--primary-base);' : 'var(--border-medium); opacity: 0.6;');
+      }),
+      knobStyle: _pos != null ? 'left: ' + _pos.toFixed(1) + '%;' : '',
+      zones: _sm.iso.zones.map(function (z, k) {
+        return { k: z.k, ko: z.ko, range: _zr[k], style: 'padding-right: 6px; font-size: 11.5px; line-height: 1.5; ' + (z.cur ? 'color: var(--text-primary); font-weight: 700;' : 'color: var(--text-muted);') };
+      }),
+      resCap: _sm.iso.resCap,
+      // 결과 줄에 '현재'가 없을 때만 사유 캡션(결함 패턴 없음·미측정)
+      resNote: _resOn ? '' : _sm.iso.resCap,
+      res: _sm.iso.res.map(function (r) {
+        var st = _GS[r.gi];
+        return { label: r.on ? r.ko + ' · 현재' : r.ko,
+          style: 'grid-column: span ' + r.span + '; padding: 7px 0 6px; border-radius: 5px; text-align: center; font-size: 12px; color: ' + st.color + '; '
+            + (r.on ? 'font-weight: 800; background: ' + st.soft + '; border: 1px solid ' + st.color + ';' : 'font-weight: 600; border: 1px solid var(--border-default);') };
+      }),
+    };
+    /* 기간 통계 표 — 리포트와 같은 지표(VC.sevMetrics·_sevCards 각주)
+       · 상태어는 기준 대비 사실(이내·초과)만 — 광대역 값에 등급어 금지, 등급 근거는 ISO 행뿐
+       · 산출 조건 전문은 비고 hover */
+    var _cards = this._sevCards(_m, eq.unit, _held, _rf.stepSec), _br = this._sevBrief(_m, _rf.stepSec);
+    var _OK = _GS[0].color, _OVER = _GS[1].color, _MUTE = 'var(--text-muted)';
+    var _u = eq.unit, _zBC = eq.zones[1], _stepTxt = this._stepText(_rf.stepSec);
+    // 카드 배지(잠정·충격성 강함·계측 아티팩트 의심·×2 초과)가 있으면 그것, 없으면 기준 대비
+    var _stOf = function (c, within) {
+      if (c && c.badgeKo) return { st: c.badgeKo, c: (c.note || /초과/.test(c.badgeKo)) ? _OVER : _MUTE };
+      return within ? { st: '이내', c: _OK } : { st: '초과', c: _OVER };
+    };
+    var _row = function (k, v, thr, s, note, t) {
+      return { k: k, v: v, thr: thr || '–', st: s.st, stColor: s.c, vColor: s.c === _OVER ? _OVER : '', note: note || '', t: t || note || '' };
+    };
     var _isoNat = !!(eq.unit && eq.unit !== 'mm/s');
-    var _isoTxt = det.isoRms != null
-      ? this._isoDisp(eq, det) + ' · Class ' + eq.cls + ' ' + ['A 양호', 'B 주의', 'C 위험', 'D 심각'][VC.gradeFor(det.isoRms, _isoZ)]
-      : '계산 전';
-    var _isoFull = det.isoRms != null
-      ? _isoTxt + (det.isoBlocks > 1 ? ' (' + det.isoBlocks + '블록 평균)' : '')
+    var _isoFull = _zi >= 0
+      ? this._isoDisp(eq, det) + ' · Class ' + eq.cls + ' ' + _zk + ' 구간' + (det.isoBlocks > 1 ? ' (' + det.isoBlocks + '블록 평균)' : '')
         + (_isoNat ? ' — 10~1000 Hz 원본 단위 RMS, 존 판정은 속도 환산' : '')
       : '계산 전 — 원시 파형 조회 후 확정';
-    // 문장형 근거는 제목 아래 한 줄 요약(statSummary), 타일은 값만(6칸)
-    var _bcPct = _n.buckets ? (_n.overBC / _n.buckets * 100).toFixed(1) : '0';
-    base.statSummary = this._statSummary(eq, det, dx, _roll, _gi);
-    base.statRows = [
-      { k: 'ISO 판정값 (등급 근거)', v: _isoTxt, t: _isoFull },
-      { k: '광대역 RMS (등급 없음)', v: '중앙 ' + E.fmt(_n.rMed) + ' · P95 ' + E.fmt(_rP95) + ' ' + eq.unit },
-      { k: 'Crest P95', v: _cP95.toFixed(2) + ' (기준 ' + _n.cThr.toFixed(1) + ')' },
-      { k: '변화율', v: '×' + _n.wTrend.toFixed(2) + this._trendTag(_m.trend) },
-      { k: '관측 창', v: Math.round(_n.durMin) + '분 · ' + _n.buckets + '버킷' },
-      { k: '광대역 B/C 초과', v: _n.overBC + ' (' + _bcPct + '%) · 기준 ' + E.fmt(eq.zones[1]) + ' ' + eq.unit },
-    ];
+    var _isoRow = _row('ISO 판정값', _zi >= 0 ? this._isoDisp(eq, det) : '계산 전',
+      _zi >= 0 ? _zr[_zi] + (_isoNat ? ' mm/s' : '') : '',
+      { st: _zk || '—', c: (_zi >= 0 && !_held) ? _GS[_zi].color : _MUTE },
+      _zi >= 0 ? '등급 근거 · 10–1000 Hz ' + (_isoNat ? 'RMS · 존은 속도 환산' : '속도 RMS')
+        + (det.isoBlocks > 1 ? ' · ' + det.isoBlocks + '블록 평균' : '') + (det.anaSec ? ' · ' + det.anaSec.toFixed(1) + ' s' : '')
+        : '원시 파형 조회 후 확정', _isoFull);
+    _isoRow.strong = true;
+    _isoRow.vColor = '';
+    var _cm = _m.crest;
+    var _crestRow = _row('Crest Factor P95', _cm.value.toFixed(2), '< ' + _n.cThr.toFixed(2),
+      (!_cards[2].badgeKo && !_cm.impOk) ? { st: '판단 안 함', c: _MUTE } : _stOf(_cards[2], _cm.value <= _n.cThr),
+      _br.crest, _cards[2].foot2);
+    var _p95Row = _row('광대역 RMS P95', E.fmt(_m.p95.value) + ' ' + _u, '< ' + E.fmt(_zBC),
+      _stOf(_cards[1], _m.p95.value <= _zBC),
+      _br.p95, _cards[0].foot2 + ' / ' + _cards[1].foot2);
+    var _ax = dx.bandAx, _axR = _ax ? Math.max(_ax.freqR || 0, _ax.envR || 0) : 0;
+    var _bandRow = _axR > 0 ? _row('평소 대비 대역', '×' + _axR.toFixed(2), '< ×1.00', _stOf(null, _axR <= 1),
+      this._bandAxText(dx).join(' · '), '학습한 정상 대역 에너지 한계 대비 배수') : null;
+    var _tm = _m.trend;
+    var _trendRow = _row('변화율', '×' + _n.wTrend.toFixed(2), _tm.cmp ? '< ×2.00' : '',
+      !_tm.winOk ? { st: '비교 안 함', c: _MUTE } : !_tm.cmp ? { st: '비교 불가', c: _MUTE } : _stOf(_cards[3], !_tm.over),
+      _br.trend, '최근 1/4 구간 평균 ÷ 직전 1/4 구간 평균 · ' + _cards[3].thrText);
+    var _dwo = this._dwellOf(det, _roll), _dw = _dwo.dw;
+    var _dwRow = _dw
+      ? _row('지속 최악 RMS', E.fmt(_dw.v) + ' ' + _u, '< ' + E.fmt(_zBC),
+        _held ? { st: '잠정', c: _MUTE } : _stOf(null, _dw.v <= _zBC),
+        this._durText(_dw.durMs / 60000) + ' 지속 · 끝 ' + E.fmtDT(_dw.ms).slice(5) + (_dwo.worse ? ' · 판정 기준 시각보다 나쁨 — 기간을 좁혀 확인' : ''),
+        '연속 ' + VC.DWELL_MIN_N + '개 이상 · ' + Math.round(SENSOR_HOLD_MS / 60000) + '분 이상 유지된 수준 중 최대(광대역)')
+      : _row('지속 최악 RMS', '–', '', { st: '—', c: _MUTE }, '표본 부족(연속 ' + VC.DWELL_MIN_N + '개 이상 필요)');
+    var _winRow = _row('관측 창', this._durText(_n.durMin), '', { st: '—', c: _MUTE },
+      this._num(_n.buckets) + ' 버킷 · ' + _stepTxt + ' 롤업 · 이 창을 넘는 추세는 판단 불가');
+    base.statRows = [_isoRow, _crestRow, _p95Row, _bandRow, _trendRow, _dwRow, _winRow].filter(Boolean);
     base.fftMarkers = det.fft.markers.filter(function (m) { return m.kind !== 'h'; }).map(function (m) { return { label: m.label, freq: m.freq.toFixed(1) + ' Hz', color: m.kind === 'f' ? '#e5646a' : (m.kind === 'x' ? 'var(--text-tertiary)' : 'var(--text-muted)') }; });
     // FFT·스펙트로그램 주파수 범위 토글 (연동) — 전대역으로 펼칠 여지가 있을 때만 노출
     base.fftRangeShow = det.fft.nyqHz > det.fft.dispHz * 1.05;
@@ -5575,9 +5685,9 @@ export class App extends Component {
     base.envHint = det.envelope.hint; base.envFault = det.envelope.fault;
     base.envMarkers = det.envelope.markers.map(function (m) { return { label: m.label, freq: m.freq.toFixed(1) + ' Hz', color: m.kind === 'f' ? '#e5646a' : 'var(--text-muted)' }; });
     base.cepNote = det.cepstrum.note;
-    base.dxVerdict = dx.verdict; base.dxSub = dx.sub; base.dxGradeKo = dx.gradeKo; base.dxColor = dx.color; base.dxSoft = dx.soft;
+    base.dxVerdict = Report.sevTitle(_gi, _sj, _held, dx.verdict); base.dxSub = dx.sub; base.dxGradeKo = dx.gradeKo; base.dxColor = dx.color; base.dxSoft = dx.soft;
     // 계산 전 판정은 빈 스펙트럼 기반 → 결론 대신 진행 중 표시
-    if (base.detBusy) { base.dxVerdict = '분석 중…'; base.dxSub = '스펙트럼·계측 검증 계산이 끝나면 판정이 확정됩니다'; }
+    if (base.detBusy) { base.dxVerdict = '분석 중…'; base.dxSub = '스펙트럼·계측 검증 계산이 끝나면 판정 확정'; }
     base.dxEvidence = dx.evidence; base.dxActions = dx.actions;
     base.dxAiIdle = !S.dxAiText || S.dxAiText === '__fallback__'; base.dxAiLoading = S.dxAiText === '__loading__'; base.dxAiFallback = S.dxAiText === '__fallback__';
     var llmOk = !!LLM.createLLM(this._llmCfg());
@@ -5646,8 +5756,6 @@ export class App extends Component {
     base.dxOpen = !!S.dxOpen;
     var _snap = this._detailCache[S.selTag];
     base.dxStamp = this.live ? (E.fmtDT((_snap && _snap.anchor) || (_snap && _snap.snapNow) || this.data.now) + ' 시점 스냅샷 · 새로고침 시 갱신') : (E.fmtDT(this.data.now).slice(0, 10) + ' 측정 스냅샷 (0.4 s 캡처) 기준 자동 판정');
-    // 등급 산정 시점 명시 — 기간 통계 카드와 등급의 범위 차이 표시
-    base.anchorNote = this._anchorNote(_snap);
     base.dxToggleLabel = S.dxOpen ? '종합 분석 접기' : '종합 분석 펼치기';
     base.onToggleDx = function () { self.setState({ dxOpen: !self.state.dxOpen }); };
     base.evtRows = fEvs.map(function (e) {
@@ -5812,11 +5920,15 @@ export class App extends Component {
     });
     base.blOldCnt = _blOldCnt;
     base.equipUnsetDot = _unsetCnt > 0 || _blkCnt > 0 || _blUnCnt > 0 || _blOldCnt > 0; // 헤더 ⚙ 표시등
-    base.setNav = [{ id: 'source', label: '데이터 소스', icon: 'database' }, { id: 'equip', label: '설비 정보', icon: 'settings-gear' }, { id: 'criteria', label: '판정 기준', icon: 'dashboard' }, { id: 'monitor', label: '알람 설정', icon: 'pulse' }, { id: 'llm', label: 'LLM 연동', icon: 'sparkle' }, { id: 'data', label: '데이터 관리', icon: 'trash' }].map(function (n) { var a = S.setSection === n.id; var bd = (n.id === 'equip' && _blkCnt > 0) ? '판정 불가 ' + _blkCnt : (n.id === 'equip' && _unsetCnt > 0) ? '미설정 ' + _unsetCnt
+    var _ready = this._appReady();
+    base.appReady = _ready;
+    // 준비 전엔 유저 정보(토큰 입력·저장소 안내) 하나만
+    base.setNav = (_ready ? [{ id: 'source', label: '데이터 소스', icon: 'database' }, { id: 'equip', label: '설비 정보', icon: 'settings-gear' }, { id: 'criteria', label: '판정 기준', icon: 'dashboard' }, { id: 'monitor', label: '알람 설정', icon: 'pulse' }, { id: 'llm', label: 'LLM 연동', icon: 'sparkle' }, { id: 'data', label: '데이터 관리', icon: 'trash' }]
+      : [{ id: 'source', label: '유저 정보', icon: 'account' }]).map(function (n) { var a = S.setSection === n.id; var bd = (n.id === 'equip' && _blkCnt > 0) ? '판정 불가 ' + _blkCnt : (n.id === 'equip' && _unsetCnt > 0) ? '미설정 ' + _unsetCnt
         : (n.id === 'criteria' && _blUnCnt > 0) ? '미학습 ' + _blUnCnt
           : (n.id === 'criteria' && _blOldCnt > 0) ? '재학습 ' + _blOldCnt : ''; return { label: n.label, icon: n.icon, badge: bd, onClick: function () { self.setState({ setSection: n.id }); if (n.id === 'criteria') self._refreshBandCov(); if (n.id === 'data') self._refreshUsage(); }, style: 'display: flex; align-items: center; gap: 9px; padding: 9px 12px; border-radius: 6px; cursor: pointer; font-size: 13px; border-left: 2px solid ' + (a ? 'var(--primary-light)' : 'transparent') + '; background: ' + (a ? 'var(--overlay-hover)' : 'transparent') + '; color: ' + (a ? 'var(--text-primary)' : 'var(--text-tertiary)') + '; font-weight: ' + (a ? '600' : '500') + ';' }; });
-    base.secSource = S.setSection === 'source'; base.secEquip = S.setSection === 'equip'; base.secCriteria = S.setSection === 'criteria'; base.secMonitor = S.setSection === 'monitor'; base.secLlm = S.setSection === 'llm';
-    base.secData = S.setSection === 'data';
+    base.secSource = S.setSection === 'source'; base.secEquip = _ready && S.setSection === 'equip'; base.secCriteria = _ready && S.setSection === 'criteria'; base.secMonitor = _ready && S.setSection === 'monitor'; base.secLlm = _ready && S.setSection === 'llm';
+    base.secData = _ready && S.setSection === 'data';
     if (base.secSource) this._userVals(base);
     if (base.secData) this._dataVals(base);
     base.mcOptions = ['I', 'II', 'III', 'IV'].map(function (c) { var a = S.machineClass === c; return { label: 'Class ' + c, onClick: function () { self.setState({ machineClass: c, dirty: true }); }, style: 'flex: 1; text-align: center; padding: 10px 6px; border-radius: 6px; cursor: pointer; font-size: 13px; font-weight: ' + (a ? '600' : '500') + '; border: 1px solid ' + (a ? 'var(--primary-base)' : 'var(--border-default)') + '; background: ' + (a ? 'rgba(0,108,210,.1)' : 'var(--bg-elevated)') + '; color: ' + (a ? 'var(--primary-light)' : 'var(--text-secondary)') + ';' }; });
@@ -5825,7 +5937,7 @@ export class App extends Component {
     var md = MC_DESC[S.machineClass];
     base.mcDescTitle = md ? md[0] : '머신 클래스 미선택';
     base.mcDescBody = md ? md[1] : '클래스를 선택하세요 — 미선택 시 Class II 기준으로 판정합니다.';
-    base.mcZones = [{ ko: '양호 A/B', color: '#3aa76d', range: '< ' + mz[0] }, { ko: '주의 B/C', color: '#d99a2b', range: mz[0] + '–' + mz[1] }, { ko: '위험 C/D', color: '#e07b39', range: mz[1] + '–' + mz[2] }, { ko: '심각 D', color: '#e5484d', range: '> ' + mz[2] }].map(function (z) { return { ko: z.ko, range: z.range + ' mm/s', barStyle: 'height: 6px; border-radius: 3px; background: ' + z.color + ';', dot: z.color }; });
+    base.mcZones = [{ ko: '양호 A/B', color: self.E.STATUS[0].color, range: '< ' + mz[0] }, { ko: '주의 B/C', color: self.E.STATUS[1].color, range: mz[0] + '–' + mz[1] }, { ko: '위험 C/D', color: self.E.STATUS[2].color, range: mz[1] + '–' + mz[2] }, { ko: '심각 D', color: self.E.STATUS[3].color, range: '> ' + mz[2] }].map(function (z) { return { ko: z.ko, range: z.range + ' mm/s', barStyle: 'height: 6px; border-radius: 3px; background: ' + z.color + ';', dot: z.color }; });
     base.srcTables = (self.liveTables || []).map(function (name) {
       var on = S.srcSel.indexOf(name) >= 0, blk = self._srcBlock(name);
       return { name: name, kind: 'TAG', checked: on, kindColor: '#005fb8', blocked: !!blk, blockReason: blk,
@@ -6143,9 +6255,9 @@ export class App extends Component {
       '피치경 Pd': '전동체들의 중심을 잇는 원의 지름(mm)입니다. 카탈로그의 pitch diameter 항목이며, 대략 (내경+외경)÷2입니다.',
       '접촉각 φ': '전동체가 궤도면과 닿는 각도입니다. 깊은홈 볼베어링은 0°, 앵귤러 콘택트는 15~40°입니다. 모르면 0으로 두세요.',
       // 판정 기준 — 존 경계(ISO 10816)·베이스라인 통계, 잘못 바꿔도 에러 없이 판정만 변하므로 의미·영향 명시
-      'A/B': 'A(양호)와 B(주의)를 가르는 경계입니다. A는 신품 수준의 진동, B는 제한 없이 장기 운전할 수 있는 수준입니다. 측정값이 이 값을 넘으면 ISO 존이 B로 표시됩니다. 등급은 결함 패턴이 잡혀야 켜지고 켜지면 최소 주의라, 이 경계는 등급을 바꾸지 않습니다.',
-      'B/C': 'B(주의)와 C(위험)를 가르는 경계입니다. C부터는 장기 운전에 부적합한 수준이라 조치 권고가 여기서 갈립니다. 결함 패턴이 잡힌 설비가 이 값을 넘으면 등급이 위험으로 올라갑니다. 세 경계 중 실무에서 가장 중요한 값입니다.',
-      'C/D': 'C(위험)와 D(심각)를 가르는 경계입니다. D는 기계에 손상을 일으킬 수 있는 수준으로, 긴급 점검 대상입니다. 결함 패턴이 잡힌 설비가 이 값을 넘으면 등급이 심각으로 올라갑니다.',
+      'A/B': 'ISO 존 A와 B를 가르는 경계입니다. A는 신품 수준의 진동, B는 제한 없이 장기 운전할 수 있는 수준입니다. 측정값이 이 값을 넘으면 ISO 존이 B로 표시됩니다. 등급은 결함 패턴이 잡혀야 켜지고 켜지면 최소 주의라, 이 경계는 등급을 바꾸지 않습니다.',
+      'B/C': 'ISO 존 B와 C를 가르는 경계입니다. C부터는 장기 운전에 부적합한 수준이라 조치 권고가 여기서 갈립니다. 결함 패턴이 잡힌 설비가 이 값을 넘으면 등급이 위험으로 올라갑니다. 세 경계 중 실무에서 가장 중요한 값입니다.',
+      'C/D': 'ISO 존 C와 D를 가르는 경계입니다. D는 기계에 손상을 일으킬 수 있는 수준으로, 긴급 점검 대상입니다. 결함 패턴이 잡힌 설비가 이 값을 넘으면 등급이 심각으로 올라갑니다.',
       '임계 초기화': '수정한 임계값을 ISO 10816 기본값으로 되돌립니다. 값을 직접 수정하면 그때부터는 규격이 아니라 사용자 정의 기준으로 판정한다는 점을 유의하세요.',
       '정상 학습 기간': '이 구간의 데이터를 "정상 상태"로 간주해 중심(μ)과 평소 변동(σ)을 학습합니다. 정지·기동 구간과 순간 스파이크는 자동으로 걸러지지만, 결함이 이미 진행 중인 기간으로 학습하면 그 결함이 정상 기준이 됩니다 — 정상 운전이 확실한 기간을 고르세요. 길수록 다양한 운전 상태가 포함돼 기준이 견고해집니다.',
       'k (σ 배수)': '평소 변동(σ)의 몇 배까지를 정상으로 볼지 정하는 값입니다. k=3이면 정상 데이터의 약 99.7%가 한계 안에 들어옵니다. 낮추면 민감해져 급증을 일찍 잡는 대신 오탐이 늘고, 높이면 그 반대입니다. 확신이 없으면 3을 그대로 두세요.',
@@ -6399,7 +6511,7 @@ export class App extends Component {
     /* 심각도별 알림 — 방식(즉시/알림 안 함)과 재알림 주기를 한 표에
        - 재알림은 '알림 안 함'이어도 유지(sustained 이벤트는 이력에 기록)
        - 감시 이상 행은 등급 팔레트 미사용·재알림 칸 비활성(상태 유지 중 이벤트 없음) */
-    var ROUTE_META = [{ ko: '주의', color: '#d99a2b' }, { ko: '위험', color: '#e07b39' }, { ko: '심각', color: '#e5484d' },
+    var ROUTE_META = [{ ko: '주의', color: self.E.STATUS[1].color }, { ko: '위험', color: self.E.STATUS[2].color }, { ko: '심각', color: self.E.STATUS[3].color },
       { ko: HEALTH_ROUTE, color: 'var(--text-muted)', health: true }];
     var _routes = routesWithDefaults(S.routes); // 화면 상태 = 실제 발송 판정과 동일 소스
     base.alertRows = ROUTE_META.map(function (mt) {
@@ -6424,7 +6536,7 @@ export class App extends Component {
     // 웹훅 도착 시점 요약 — 2회 연속 확정이라 주기의 2배
     base.confirmSumKo = durKo(_cIv * 2);
     // 회차별 동작 표 — 등급 표시 칸은 카드 실제 문구 그대로, 악화·복귀 대칭 두 묶음
-    var _AMBER = '#d99a2b', _GREEN = '#3aa76d';
+    var _AMBER = self.E.STATUS[1].color, _GREEN = self.E.STATUS[0].color;
     base.confirmSteps = [
       { head: '이상 진입', color: _AMBER },
       { when: '1회차', what: '등급 표시 · 이력에 관찰로 남김', chip: '표시', sent: false, color: _AMBER, first: true },

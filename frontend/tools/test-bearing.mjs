@@ -23,6 +23,7 @@ const geoOf = (g) => [g.n, g.Bd, g.Pd, g.phi].join('/');
 function mkApp(state) {
   const app = new App({ seed: 7, equipmentCount: 3 });
   app.setState = function (st) { Object.assign(this.state, st); };
+  app.state.user = 'TESTER';   // 토큰·계정 확인을 마친 상태
   app._toast = () => {};
   app.E = Object.assign({}, CH, Mock);
   app.data = Mock.generateData(42, 3);

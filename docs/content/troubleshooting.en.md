@@ -7,9 +7,24 @@ weight: 60
 
 The app's screens are in Korean; messages are quoted here in English with the Korean label where it helps.
 
+## An "API 토큰이 없습니다" (no API token) or "token is not valid" notice appears
+
+This browser has no API token for the account, or the saved token was revoked or expired. Issue a new token with **New token** in the Neo console's shield icon (Security) panel and enter it on the **User info** (유저 정보) card in the settings screen — see [Entering the API token]({{< relref "first-setup#entering-the-api-token" >}}).
+
+- If the page switched to this screen while you were using it, the token was revoked or expired, or **Remove token** (토큰 지우기) was pressed in another tab. Entering a new token reloads the page and carries on.
+- If it also says the token check API is missing (이 Neo에는 토큰 확인 API가 없습니다), Neo is older than 8.7.3. Upgrade Neo and open the app again.
+
+## A "this is a token of account ○○" or "the token account differs from the console login" notice appears
+
+The account the token was issued for differs from the account currently signed in to the Neo console. Enter a token of the signed-in account, or sign in to the console as the token's account.
+
+## A "Neo 콘솔에 로그인되어 있지 않습니다" (not signed in to the Neo console) notice appears
+
+The app keeps tokens per console login account. Sign in to the Neo console and open the app again.
+
 ## Only a "cannot reach the database" notice appears
 
-The signed-in account has not been granted the store (`NEO_BEARING_STORE`). An administrator (SYS) can fix
+This account has not been granted the store (`NEO_BEARING_STORE`). An administrator (SYS) can fix
 this from Settings → Data Source → **Package account permissions** (패키지 사용 계정 권한): press **Grant** (권한 주기) on that account's row; the row's status (권한 있음) confirms it. Afterwards,
 press `Check status` (상태 확인) and the app resumes without a reload.
 
@@ -124,7 +139,7 @@ Another tab or PC has the app open with the same account, and that page is doing
 
 The Neo console login in this browser switched to a different account. This page belongs to the old account, so it has stopped all saving, evaluation and queries.
 
-- To use the new account, click **새로고침** (Reload).
+- To use the new account, click **새로고침** (Reload). If this browser has no API token for the new account, the token entry screen comes first.
 - To keep using the old account, log back in as that account — the notice disappears and the page carries on.
 
 ## Detail analysis warns that the entered speed differs from the measured one
@@ -156,7 +171,7 @@ If there is no warning, check the following.
 - **Intermediate steps while still bad** (Critical → Danger, for instance) are not recorded separately; one "improved" event represents them.
 - **A grade needs two consecutive cycles to confirm.** A single-cycle hit is recorded only as `observation`.
 - **With RPM or bearing model empty, no grade events fire at all.** The axis that switches the grade on is the fault-frequency grid, and without shaft speed or geometry that grid cannot be built. The card reads **On hold** (cannot judge).
-- **High vibration on its own produces no event.** Bearing-fault evidence must stand for the grade to rise. Imbalance, misalignment and looseness are only reported in detail analysis as "no bearing-fault signs · vibration level … range — checking non-bearing causes such as imbalance, misalignment and looseness is recommended" (베어링 결함 징후 없음 · 진동 수준 … 구간 — 불평형·정렬불량·풀림 등 베어링 외 원인 점검 권장).
+- **High vibration on its own produces no event.** Bearing-fault evidence must stand for the grade to rise. Imbalance, misalignment and looseness are only reported in detail analysis as "no bearing-fault signs · vibration magnitude in ISO zone … — checking non-bearing causes such as imbalance, misalignment and looseness is recommended" (베어링 결함 징후 없음 · 진동 크기 ISO … 구간 — 불평형·정렬불량·풀림 등 베어링 외 원인 점검 권장).
 - **Baseline and band produce no events.** A breach appears only in the evidence table.
 - **Grades are judged once per extraction interval (10 minutes by default).** A machine that just deteriorated has to wait for the next cycle.
 

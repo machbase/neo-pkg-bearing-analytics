@@ -1,7 +1,7 @@
 // 페르소나 판정 규칙(R1~R12) 기계 검사 — 진단 로직(calc/live/app) 수정 시 회귀 확인
 // · 라이브(Neo + 로그인 계정의 BEARING 테이블 데이터 필요) · npm run verify:live 포함
-//   NEO_USER=… NEO_PASSWORD=… node tools/verify-persona.mjs [테이블]
-await import('./_liveauth.mjs');   // 로그인(NEO_USER·NEO_PASSWORD) — 없으면 건너뜀
+//   NEO_TOKEN=nt_… node tools/verify-persona.mjs [테이블]
+await import('./_liveauth.mjs');   // 신원(NEO_TOKEN) — 없으면 건너뜀
 
 const VC = (await import('../../cgi-bin/calc/calc.js')).default;
 const CH = (await import('../../cgi-bin/chart/chart.js')).default;
@@ -36,8 +36,8 @@ console.log(`  (컨텍스트: gate=${gate} · 베어링=${hasBearing ? eq.bearin
 // R1: 규격은 정의된 물리량·대역·평균화로만 — ISO 판정은 대역제한 값
 chk('R1', det.isoRms != null && /ISO 10816 판정/.test(pack) && /10–1000 Hz|10-1000 Hz/.test(pack),
   'ISO 판정에 대역제한(10-1000Hz) 값 사용');
-chk('R1b', /실시간 감시/.test(pack) && /규격 판정 아님|알람 기준/.test(pack),
-  '광대역 감시 등급을 규격 판정과 분리 표기');
+chk('R1b', !/실시간 감시|감시 등급/.test(pack),
+  '광대역 감시 등급(알람용)은 LLM 입력에서 제외 — 리포트 등급과 섞임 방지');
 
 // R2: 상관 증거 1회 가점 — 임펄스성은 단일항
 const bearing = ev.conf.find(c => /베어링/.test(c.f)) || {};

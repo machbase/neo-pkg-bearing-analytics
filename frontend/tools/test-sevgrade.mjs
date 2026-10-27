@@ -79,8 +79,8 @@ const mkRoll = (n, f, cnt = 25600, stepMs = 1000) =>
   const start = VC.sevMetrics(mkRoll(120, (i) => ({ rms: i < 90 ? 0.02 : 1.0, crest: 4 }), 25600, 60000), { zones: ZONES, fs: 25600 });
   chk(!start.trend.cmp && !start.trend.over && start.trend.badge === '', '정지→기동 구간은 비교 불가(예전: ×50 "심각")', 'x' + start.n.wTrend.toFixed(0));
   const app1 = new App({ seed: 5, equipmentCount: 1 }); app1.E = CH;
-  chk(/운전 상태 변화 포함 — 비교 불가/.test(app1._sevCards(start, 'mm/s')[3].thrText) && app1._trendTag(start.trend) === ' · 비교 불가(운전 상태 변화)',
-    '카드·리포트 행에 비교 불가 사유');
+  chk(/운전 상태 변화 포함 — 비교 불가/.test(app1._sevCards(start, 'mm/s')[3].thrText) && app1._sevBrief(start, 60).trend === '운전 상태 변화 포함 — 정지·기동 구간이 섞임',
+    '카드·표 비고에 비교 불가 사유', app1._sevBrief(start, 60).trend);
 }
 
 // ── 계측 게이트: RMS 계열은 잠정 ───────────────────────────────────────────
@@ -164,7 +164,7 @@ const mkRoll = (n, f, cnt = 25600, stepMs = 1000) =>
   chk(cards.every((c) => c.override), '네 장 모두 등급어가 아닌 배지', cards.map((c) => c.badgeKo).join(' · '));
   chk(cards[2].badgeKo === '잠정', 'Crest의 초록 양호가 사라진다 — 클리핑 신호에서 제일 위험한 배지', cards[2].badgeKo);
   chk(/클리핑은 꼭대기를 잘라/.test(cards[2].foot2), 'Crest가 왜 낮은지 각주로 적는다', cards[2].foot2);
-  chk(/진폭이 과소/.test(cards[1].foot2), 'RMS도 과소일 수 있음을 밝힌다', cards[1].foot2);
+  chk(/진폭 과소/.test(cards[1].foot2), 'RMS도 과소일 수 있음을 밝힌다', cards[1].foot2);
 
   const dc = app._sevCards(VC.sevMetrics(roll, { zones: ZONES, fs: 2048, gate: true }), 'mm/s',
     { key: 'dc', label: 'DC 드리프트' });
@@ -267,8 +267,8 @@ const mkRoll = (n, f, cnt = 25600, stepMs = 1000) =>
   chk(dxIso.gi === 0 && dxIso.isoOnly === 3,
     'ISO가 D존이어도 결함 패턴이 없으면 등급을 안 올린다 — 대신 isoOnly로 사실을 남긴다',
     JSON.stringify({ gi: dxIso.gi, isoOnly: dxIso.isoOnly }));
-  chk(/베어링 결함 징후 없음/.test(dxIso.verdict) && /진동 수준/.test(dxIso.verdict),
-    '판정문이 "양호"로 끝내지 않고 진동 수준을 밝힌다 — 원인이 베어링 밖일 수 있다', dxIso.verdict);
+  chk(/베어링 결함 징후 없음/.test(dxIso.verdict) && /진동 크기 ISO D 구간/.test(dxIso.verdict),
+    '판정문이 "양호"로 끝내지 않고 진동 크기(ISO 구간)를 밝힌다 — 원인이 베어링 밖일 수 있다', dxIso.verdict);
   /* 결함 패턴이 켜지면 ISO가 높이 결정 — max(1, isoGi) */
   app._evidence = () => ({ top: { f: '베어링 외륜(BPFO)', score: 80 }, gate: false, conf: [], block: '', confLines: '' });
   const dxBoth = app._dx(eq, Object.assign({}, detF, { isoRms: 8.0, sideband: sbOn }), calm);

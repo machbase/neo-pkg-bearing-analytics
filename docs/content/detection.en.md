@@ -144,9 +144,9 @@ The screen does not hide it. Monitoring cards show **On hold** (cannot judge) in
 
 ## ISO zone — the axis that sets the height
 
-The vibration severity zones defined by ISO 10816 (A Good → D Critical). The boundaries depend on the equipment class (Equipment).
+The vibration severity zones defined by ISO 10816 (A new-machine level → B long-term operation OK → C restricted operation → D damage likely). Zones are a scale of vibration magnitude, so they are not named with grade words (Good / Warning / Danger / Critical). The boundaries depend on the equipment class (Equipment).
 
-| Class | Good↔Warning | Warning↔Danger | Danger↔Critical |
+| Class | A↔B | B↔C | C↔D |
 | :--- | ---: | ---: | ---: |
 | Class I (small ≤15 kW) | 0.71 | 1.8 | 4.5 |
 | Class II (medium 15–75 kW) | 1.12 | 2.8 | 7.1 |
@@ -227,7 +227,7 @@ When an instrumentation fault (clipping, DC drift) is active, that warning's wor
 
 ```
 grade = did the fault pattern fire?  →  no  : Good
-                                     →  yes : max(Warning, ISO zone grade)
+                                     →  yes : ISO zone A·B → Warning / C → Danger / D → Critical
 ```
 
 If the pattern fires but ISO is in zone A the grade is **Warning**. Naming a cause while leaving the grade Good would make the screen contradict itself.
@@ -236,9 +236,9 @@ Axes that did not raise the grade **are still reported.** A screen that only say
 
 | Situation | Grade | What the screen conveys (gist) |
 | :--- | :--- | :--- |
-| Pattern ○ · ISO Danger | Danger | outer-race evidence · amplitude in the danger zone |
-| Pattern ○ · ISO Good | **Warning** | outer-race evidence · amplitude still low |
-| Pattern ✕ · ISO Danger | **Good** | **no bearing-fault signs · vibration level in the danger range** — checking non-bearing causes such as imbalance, misalignment and looseness is recommended |
+| Pattern ○ · ISO C | Danger | outer-race evidence · vibration magnitude in zone C |
+| Pattern ○ · ISO A | **Warning** | outer-race evidence · vibration magnitude still in zone A |
+| Pattern ✕ · ISO C | **Good** | **no bearing-fault signs · vibration magnitude in ISO zone C** — checking non-bearing causes such as imbalance, misalignment and looseness is recommended |
 | Pattern ✕ · baseline breach | Good | no bearing-fault signs · sharp rise versus normal |
 | Pattern ✕ · band breach | Good | no bearing-fault signs · band breach |
 | Speed/geometry missing | not graded | **On hold (cannot judge)** |

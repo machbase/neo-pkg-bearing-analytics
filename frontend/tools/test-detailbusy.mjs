@@ -47,6 +47,7 @@ const mk = (state) => {
   chk(/확정/.test(v.detBusyText), '판정이 아직 확정이 아님을 밝힌다 — 이 문장이 오독을 막는다');
   chk(/분석 중/.test(v.dxVerdict), '결론 자리에 결론 대신 진행 중임을 적는다', v.dxVerdict);
   chk(v.detWarn === '', '조회 중에는 실패·빈 구간 배너를 함께 띄우지 않는다', JSON.stringify(v.detWarn));
+  chk(v.sevTodo === '' && v.sevFacts.length === 0, '조회 중에는 지금 할 일·근거 사실을 띄우지 않는다(계산 전 조치 지시 금지)');
   const html = renderToString(view(v));
   chk(html.indexOf(v.detBusyText) >= 0, '배너가 실제로 렌더된다(htm은 런타임 파싱이라 값만 봐선 부족)');
   chk(/vspin/.test(html), '진행 중임이 보이게 회전 표시가 붙는다');
@@ -59,6 +60,9 @@ const mk = (state) => {
   chk(!/분석 중/.test(v.dxVerdict), '끝나면 실제 판정이 결론 자리에 온다', v.dxVerdict);
   const html = renderToString(view(v));
   chk(html.indexOf('분석 중 — 파형') < 0, '완료 화면에 진행 배너가 남지 않는다');
+  chk(!!v.sevTodo && html.indexOf('지금 할 일') >= 0 && html.indexOf(v.sevTodo) >= 0 && /codicon-tools/.test(html), '끝나면 리포트와 같은 지금 할 일 상자가 선다', v.sevTodo);
+  chk(v.sevTodo === app._todoText(app._eq(app.state.selTag), app._detailCache[app.state.selTag].det, app._dx(app._eq(app.state.selTag), app._detailCache[app.state.selTag].det), null)
+    || /계측 검증/.test(v.sevTodo), '지금 할 일 문구는 리포트와 같은 함수(_todoText)', v.sevTodo);
 }
 // ── 실패 ──────────────────────────────────────────────────────────────────
 {

@@ -45,9 +45,13 @@ export const insertEvent = DB.insertEvent;
 export const insertBandPoint = DB.insertBandPoint;
 export const loadMonState = DB.loadMonState;
 export const saveMonState = DB.saveMonState;
-// 신원 — JWT sub는 식별용, 실제 실행 계정은 whoami()로 확인
-export const jwtUser = DB.jwtUser;
-export const sessionJwt = DB.sessionJwt;
+// 신원 — API 토큰으로 인증, 콘솔 계정은 식별용, 실제 실행 계정은 whoami()로 확인
+export const consoleUser = DB.consoleUser;
+export const apiToken = DB.apiToken;
+export const setApiToken = DB.setApiToken;
+export const clearApiToken = DB.clearApiToken;
+export const tokenHint = DB.tokenHint;
+export const validateToken = DB.validateToken;
 export const whoami = DB.whoami;
 export const setUser = DB.setUser;
 export const getUser = DB.getUser;
@@ -660,7 +664,7 @@ export async function liveDetail(E, eq, anchorMs, viewUnit, fromMs) {
     const envDx = env.freqs.length ? VC.diagnoseDominant(env.freqs, env.mags, fr, bf) : null;
     const bandTxt = demod
       ? ' · 복조 대역 ' + fmtHz(demod.loHz) + '–' + fmtHz(demod.hiHz) + '(고정)'
-      : ' · 복조 대역 없음 — 샘플레이트 ' + fmtHz(fs) + '로는 고정 대역(1–5 kHz)이 성립하지 않아 전대역으로 복조합니다';
+      : ' · 복조 대역 없음 — 샘플레이트 ' + fmtHz(fs) + '로는 고정 대역(1–5 kHz) 불성립 — 전대역으로 복조';
     det.envelope = {
       freqs: env.freqs, mags: env.mags, res: env.res,   // res: 결함주파수 대조 허용오차의 하한
       markers: liveMarkers(eq, envMax).filter(m => m.kind === 'fq' || m.label === '1×'),
@@ -668,6 +672,7 @@ export async function liveDetail(E, eq, anchorMs, viewUnit, fromMs) {
       hint: (envDx && envDx.hit
         ? '포락선 지배 주파수 ' + envDx.domF.toFixed(1) + ' Hz — ' + envDx.hit + ' (' + (envDx.cause || '') + ')'
         : '해석 신호(|z|) 포락선의 저주파 스펙트럼 · 충격 반복 주파수 복조') + bandTxt,
+      band: demod ? fmtHz(demod.loHz) + '–' + fmtHz(demod.hiHz) : '',
     };
     // 포락선 정량 — 반복주파수·하모닉 수·1× 측대역. 하모닉≥2 = 일관된 반복 충격
     det.envQ = VC.envelopeQuant(env.freqs, env.mags, fr);
@@ -793,15 +798,15 @@ export async function loadTrendChunks(E, eq, roll) {
   const winSec = chunkSec + 1; // rawWindow 창 = [at-chunkSec, at+1s]
   const kurtNote = kurt.length ? ''
     : cErr >= n / 2
-      ? '원시 데이터 조회에 실패했습니다 (' + cErr + '/' + n + ' 지점) — 잠시 후 새로고침하세요.'
+      ? '원시 데이터 조회 실패 (' + cErr + '/' + n + ' 지점) — 잠시 후 새로고침'
       : cEmpty >= cFew
         /* 대부분 지점이 빔 = 데이터가 구간 일부에만 있음 → 구간 좁히기 안내 */
-        ? '선택 구간의 ' + cEmpty + '/' + n + ' 지점에 원시 파형이 없습니다 — 데이터가 있는 구간으로 좁혀 보세요.'
-        : '표본이 부족해 계산할 수 없습니다 — 분석 창(' + winSec.toFixed(1) + '초)당 64샘플이 필요한데 이 태그는 약 ' + fsTxt + '입니다.';
+        ? '선택 구간의 ' + cEmpty + '/' + n + ' 지점에 원시 파형 없음 — 데이터가 있는 구간으로 좁혀 확인'
+        : '표본 부족으로 계산 불가 — 분석 창(' + winSec.toFixed(1) + '초)당 64샘플 필요, 이 태그는 약 ' + fsTxt;
   const bandHas = bandVals.some((a) => a.some((v) => v != null));
   const bandNote = (bandHas || envBands.length) ? ''
     : (kurt.length
-      ? '샘플레이트가 낮아 대역 분석을 할 수 없습니다 — 대역 FFT에는 분석 창당 256샘플이 필요한데 이 태그는 약 ' + fsTxt + '입니다(최소 128 Hz).'
+      ? '샘플레이트가 낮아 대역 분석 불가 — 대역 FFT에는 분석 창당 256샘플 필요, 이 태그는 약 ' + fsTxt + '(최소 128 Hz)'
       : kurtNote);
   return {
     kurtNote, bandNote,

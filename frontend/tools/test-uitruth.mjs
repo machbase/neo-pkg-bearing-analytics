@@ -132,10 +132,10 @@ function mkApp(patch) {
   const sleeve = Object.assign({}, base, { bearing: { model: 'sleeve', n: 0, Bd: 0, Pd: 0, phi: 0 } });
   const dx3 = app._dxLive(sleeve, Mock.buildDetail(sleeve));
   chk(dx3.cov.patWhy === 'sleeve' && /저널\(sleeve\) 베어링/.test(dx3.verdict) && !/품번을 입력/.test(dx3.verdict), '저널 베어링은 품번을 넣으라고 하지 않는다', dx3.verdict);
-  // 다른 축 소견(진동 수준 높음)이 있으면 판정문을 지우지 않고 사유만 덧붙임
+  // 다른 축 소견(진동 크기 높음)이 있으면 판정문을 지우지 않고 사유만 덧붙임
   const detHi = Object.assign(Mock.buildDetail(noGeo), { isoRms: 20 });
   const dx4 = app._dxLive(noGeo, detHi);
-  chk(/진동 수준/.test(dx4.verdict) && /결함 패턴 판정 불가\(베어링 품번 미지정\)/.test(dx4.verdict), '진동 수준 소견은 남기고 사유만 덧붙인다', dx4.verdict);
+  chk(/진동 크기 ISO [BCD] 구간/.test(dx4.verdict) && /결함 패턴 판정 불가\(베어링 품번 미지정\)/.test(dx4.verdict), '진동 크기 소견은 남기고 사유만 덧붙인다', dx4.verdict);
 }
 
 // ── 7. RMS 구간 직접 입력 값 유지 ─────────────────────────────────────────

@@ -25,6 +25,7 @@ const SCHEMAS = {
 const mk = (schemas, sel) => {
   const a = new App({ defaultTab: 'settings', seed: 1, equipmentCount: 1 });
   a.setState = function (s) { Object.assign(this.state, s); };
+  a.state.user = 'TESTER';   // 토큰·계정 확인을 마친 상태
   a._scheduleDraw = () => {}; a._ensureTags = () => {};
   a.E = CH; a.live = true; a.forceUpdate = () => {};
   a.toasts = []; a._toast = function (m, k) { this.toasts.push({ m, k }); };

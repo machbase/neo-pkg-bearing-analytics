@@ -307,7 +307,7 @@
   //  반환 { ok, issues:[{key,label,detail,info?}], severe(판정 신뢰 불가), gate(판정 보류) }
   function signalQuality(values, fs, fr) {
     var n = values.length, issues = [];
-    if (n < 32) return { ok: false, issues: [{ key: 'sparse', label: '데이터 부족', detail: '샘플이 너무 적어 분석 신뢰도가 낮습니다' }], severe: true, gate: true };
+    if (n < 32) return { ok: false, issues: [{ key: 'sparse', label: '데이터 부족', detail: '샘플 부족 — 분석 신뢰도 낮음' }], severe: true, gate: true };
     var mn = Infinity, mx = -Infinity, sum = 0, i;
     for (i = 0; i < n; i++) { var v = values[i]; if (v < mn) mn = v; if (v > mx) mx = v; sum += v; }
     var mean = sum / n, range = mx - mn;
@@ -315,7 +315,7 @@
     var std = Math.sqrt(ss / n), peak = Math.max(Math.abs(mn), Math.abs(mx));
     // flatline: 표준편차가 피크 대비 극히 작음(거의 상수)
     if (peak === 0 || std < 1e-9 || (peak > 0 && std < 0.002 * peak)) {
-      issues.push({ key: 'flatline', label: '플랫라인', detail: '값이 거의 변하지 않습니다 — 센서 정지·케이블 탈락 의심' });
+      issues.push({ key: 'flatline', label: '플랫라인', detail: '값이 거의 변하지 않음 — 센서 정지·케이블 탈락 의심' });
       return { ok: false, issues: issues, severe: true, gate: true }; // 나머지 검사 무의미
     }
     // clip: 최고치 밴드가 바로 아래 밴드보다 과밀 = 평평한 꼭대기(사인은 밀도비 ≈2.4라 미해당)
@@ -326,11 +326,11 @@
     var topMin = inBand(mn - 1e-9, mn + b), nextMin = inBand(mn + b, mn + 2 * b);
     var clipMax = topMax > 0.03 * n && topMax > 4 * (nextMax + 1);
     var clipMin = topMin > 0.03 * n && topMin > 4 * (nextMin + 1);
-    if (clipMax || clipMin) issues.push({ key: 'clip', label: '클리핑(포화)', detail: '파형 꼭대기가 잘렸습니다 — 측정범위 초과, 진폭 과소·가짜 고주파 위험' });
+    if (clipMax || clipMin) issues.push({ key: 'clip', label: '클리핑(포화)', detail: '파형 꼭대기 잘림 — 측정범위 초과, 진폭 과소·가짜 고주파 위험' });
     // 일정한 DC — 참고만(MEMS 가속도계 중력축·근접 변위센서의 갭 전압)
     if (Math.abs(mean) > 3 * std) {
       issues.push({ key: 'dcoff', info: true, label: 'DC 성분', detail: '평균이 진동 σ의 ' + (Math.abs(mean) / std).toFixed(0)
-        + '배 — DC 결합 센서(MEMS 가속도계 중력축·근접 변위센서)면 정상입니다. 판정값은 DC를 뺀 값입니다' });
+        + '배 — DC 결합 센서(MEMS 가속도계 중력축·근접 변위센서)면 정상 · 판정값은 DC를 뺀 값' });
     }
     // DC 드리프트 — 구간 평균의 흔들림 > 구간 안 σ의 0.5배(RMS 12% 이상 과대), gateFromBuckets와 같은 규칙
     var nSeg = fr > 0 && fs >= 4 * fr ? Math.min(8, Math.floor(n / fs * fr / 10)) : 0;
@@ -351,7 +351,7 @@
     // 계측 아티팩트: 극단 Crest/첨도 = 단발 스파이크(ESD·케이블·커넥터) 시그니처(베어링 결함은 통상 Crest<10)
     var peakAC = Math.max(Math.abs(mx - mean), Math.abs(mn - mean));
     var crest = std > 1e-12 ? peakAC / std : 0, kurt = kurtosis(values), gate = false;
-    if (crest > 15) { issues.push({ key: 'spike', label: '단발 스파이크 의심', detail: 'Crest ' + crest.toFixed(1) + ' — 결함 신호(통상 <10)보다 스파이크성 잡음(ESD·케이블·접촉) 시그니처에 가깝습니다' }); }
+    if (crest > 15) { issues.push({ key: 'spike', label: '단발 스파이크 의심', detail: 'Crest ' + crest.toFixed(1) + ' — 결함 신호(통상 <10)보다 스파이크성 잡음(ESD·케이블·접촉) 시그니처에 가까움' }); }
     if (kurt > 25) { issues.push({ key: 'kurtx', label: '극단 첨도', detail: 'Kurtosis ' + kurt.toFixed(1) + ' — 소수 샘플이 지배하는 신호, 계측 아티팩트 가능성 — 센서·마운팅 확인 필요' }); }
     /* 판정 차단 사유 — GATE_BLOCK과 같은 목록 유지(다르면 감시·상세 판정 불일치)
        ⚠서버 TQL 임베드용 — 배열은 함수 안에 둘 것(바깥 이름 참조 불가) */
@@ -373,7 +373,7 @@
     if (k.length < 6) return { flag: false };
     if (spanMin != null && spanMin < SAT_MIN_SPAN_MIN) {
       return { flag: false, short: true, spanMin: spanMin,
-        note: '관측 구간 ' + Math.round(spanMin) + '분 — 첨도 하락의 결함 해석(말기 확산)은 주·월 단위 추세에서만 성립합니다. 이 창에서는 운전조건 변화로 읽으세요.' };
+        note: '관측 구간 ' + Math.round(spanMin) + '분 — 첨도 하락의 결함 해석(말기 확산)은 주·월 단위 추세에서만 성립 · 이 창에서는 운전조건 변화로 해석' };
     }
     var pi = 0, pk = -Infinity;
     for (var i = 0; i < k.length; i++) if (k[i] > pk) { pk = k[i]; pi = i; }
@@ -387,7 +387,7 @@
       var rPeak = r[Math.round(pi / (k.length - 1) * (r.length - 1))], rCur = r[r.length - 1];
       if (rCur < rPeak * 0.9) return { flag: false }; // RMS도 내렸으면 진짜 회복(일시 스파이크 등)
     }
-    return { flag: true, msg: '첨도가 고점(' + pk.toFixed(1) + ')에서 ' + cur.toFixed(1) + '로 하락했으나 RMS는 유지·상승 — "회복"이 아니라 결함 확산(말기)일 수 있습니다. 포락선·RMS를 함께 확인하세요.' };
+    return { flag: true, msg: '첨도가 고점(' + pk.toFixed(1) + ')에서 ' + cur.toFixed(1) + '로 하락했으나 RMS는 유지·상승 — "회복"이 아니라 결함 확산(말기) 가능성 · 포락선·RMS 함께 확인' };
   }
 
   // 물리량 변환 — 가속도(g)↔속도(mm/s)↔변위(μm). 주파수 영역에서 (iω)^Δorder 적용 → 역FFT

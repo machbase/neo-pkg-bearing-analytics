@@ -6,13 +6,22 @@
 })(typeof self !== 'undefined' ? self : this, function () {
   'use strict';
 
-  /* ---------------- 등급 색(양호·주의·위험·심각) — 화면·리포트 공용 ---------------- */
+  /* ---------------- 등급 색(양호·주의·위험·심각) — 화면 공용, 리포트 팔레트(--k-ok·warn·risk·crit)와 같은 값 ----------------
+     · 테마별 두 벌 — 다크는 어두운 바탕용 고채도, 라이트는 흰 바탕 대비용 저명도
+     · STATUS는 setGradeTheme이 제자리 교체(참조 보관한 쪽도 같은 값) */
+  var GRADE_TONES = {
+    dark: [['#71e071', 'rgba(113,224,113,0.14)'], ['#ffd23f', 'rgba(255,210,63,0.14)'], ['#ff8c1a', 'rgba(255,140,26,0.14)'], ['#ff4060', 'rgba(255,64,96,0.14)']],
+    light: [['#2a8f3a', 'rgba(42,143,58,0.12)'], ['#b58900', 'rgba(181,137,0,0.12)'], ['#d44a00', 'rgba(212,74,0,0.12)'], ['#9f1239', 'rgba(159,18,57,0.12)']],
+  };
   var STATUS = [
-    { key: 'Good', ko: '양호', color: '#3aa76d', soft: 'rgba(58,167,109,0.14)' },
-    { key: 'Warning', ko: '주의', color: '#d99a2b', soft: 'rgba(217,154,43,0.15)' },
-    { key: 'Danger', ko: '위험', color: '#e07b39', soft: 'rgba(224,123,57,0.15)' },
-    { key: 'Critical', ko: '심각', color: '#e5484d', soft: 'rgba(229,72,77,0.15)' }
+    { key: 'Good', ko: '양호' }, { key: 'Warning', ko: '주의' },
+    { key: 'Danger', ko: '위험' }, { key: 'Critical', ko: '심각' }
   ];
+  function setGradeTheme(light) {
+    var t = GRADE_TONES[light ? 'light' : 'dark'];
+    for (var i = 0; i < STATUS.length; i++) { STATUS[i].color = t[i][0]; STATUS[i].soft = t[i][1]; }
+  }
+  setGradeTheme(false);
 
 
   /* ---------------- number/time format ---------------- */
@@ -398,7 +407,7 @@
   }
 
   return {
-    STATUS: STATUS, SERIES: SERIES,
+    STATUS: STATUS, SERIES: SERIES, setGradeTheme: setGradeTheme,
     fmt: fmt, fmtClock: fmtClock, fmtMD: fmtMD, fmtDT: fmtDT, fmtFull: fmtFull, ago: ago,
     setZone: setZone, getZone: getZone, zoneName: zoneName, zoneOk: zoneOk, parts: parts, offsetMs: offsetMs, offsetLabel: offsetLabel,
     makeTime: makeTime, parseDT: parseDT, startOfDay: startOfDay, fmtTick: fmtTick,

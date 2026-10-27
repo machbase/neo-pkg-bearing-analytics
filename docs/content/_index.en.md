@@ -21,13 +21,13 @@ Every analysis is **deterministic**. Grading, diagnosis, and reporting need no L
 
 In the Machbase Neo left side panel, select `neo-pkg-bearing-analytics` from the package list and press `Install`. Wait for the installation to finish.
 
-Before first use, an administrator (SYS) has to create the dedicated database and grant each account — see [First setup]({{< relref "first-setup#before-you-start--storage-and-grants" >}}).
+Before first use, an administrator (SYS) has to create the dedicated database and grant each account — see [First setup]({{< relref "first-setup#before-you-start--storage-and-grants" >}}). Each account that uses the app also needs an API token issued in Neo — see [Entering the API token]({{< relref "first-setup#entering-the-api-token" >}}). Requires Machbase Neo 8.7.3 or later.
 
 ### Uninstall
 
 Select `neo-pkg-bearing-analytics` in the left panel and press **Uninstall** to remove the package. Accumulated settings, events, baselines, and reports are preserved.
 
-The timers this package registers (server monitoring, band extraction, and so on) stay outside the package in Neo's timer list, so uninstall stops and deletes that account's timers **using the login of the account that pressed Uninstall**. Timers are registered per account, so **timers of other accounts are not removed** — before uninstalling, turn alarms off in the app under each account, also turn off **Criteria → Band & fault-pattern extraction**, and save, which deletes that account's timers. If the package is already gone, stop and then delete `NEO_BEARING_*` in Neo's timer screen. The uninstall log lists the timers it deleted and repeats this guidance.
+The timers this package registers (server monitoring, band extraction, and so on) stay outside the package in Neo's timer list. A timer can only be managed with its own account's API token, so **uninstall does not delete timers** — before uninstalling, turn alarms off in the app under each account, also turn off **Criteria → Band & fault-pattern extraction**, and save, which deletes that account's timers. If you uninstall without doing so, the remaining timers have no file left to run, so they stop at their next run with `STOP, not found` and never run again. Delete `NEO_BEARING_*` for each account in Neo's timer screen. The uninstall log repeats this guidance.
 
 ## How it works
 

@@ -1,7 +1,7 @@
 // 메타데이터 A/B — 같은 데이터에 메타(마운팅·구동·날개수)만 바꿔 판정 경로 변화 확인(메타 입력 무반영 회귀 검사)
 // · 라이브(Neo + 로그인 계정의 BEARING 테이블 데이터 필요) · npm run verify:live 포함
-//   NEO_USER=… NEO_PASSWORD=… node tools/verify-meta.mjs [테이블]
-await import('./_liveauth.mjs');   // 로그인(NEO_USER·NEO_PASSWORD) — 없으면 건너뜀
+//   NEO_TOKEN=nt_… node tools/verify-meta.mjs [테이블]
+await import('./_liveauth.mjs');   // 신원(NEO_TOKEN) — 없으면 건너뜀
 
 const E = (await import('../../cgi-bin/chart/chart.js')).default;
 const L = await import('../src/data/live.js');

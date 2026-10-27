@@ -4,10 +4,10 @@
    · 생성된 TQL 원문을 떼어내 실행(옮겨 적지 않음)
    오프라인(Neo 불필요) · npm run smoke 포함 */
 globalThis.window = globalThis;
-// 앱 판정 루프 실행용 — 세션·DB 응답 흉내, 보낸 SQL 기록
+// 앱 판정 루프 실행용 — 콘솔 계정·토큰·DB 응답 흉내, 보낸 SQL 기록
 globalThis.atob = (s) => Buffer.from(s, 'base64').toString('binary');
 const b64 = (o) => Buffer.from(JSON.stringify(o)).toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
-const ls = { accessToken: `h.${b64({ sub: 'joy' })}.sig` };
+const ls = { accessToken: `h.${b64({ sub: 'alpha' })}.sig`, 'neo-pkg-bearing-analytics.token.ALPHA': 'nt_a_' + 'A'.repeat(43) };
 globalThis.localStorage = { getItem: (k) => (k in ls ? ls[k] : null), setItem: (k, v) => { ls[k] = String(v); }, removeItem: (k) => { delete ls[k]; } };
 const sent = [];
 globalThis.fetch = async (p) => { sent.push(decodeURIComponent(String(p))); return { ok: true, status: 200, json: async () => ({ success: true, data: { rows: [] } }), text: async () => '' }; };
@@ -185,10 +185,10 @@ const T = spec.tags[0], KEY = 'T:A', NOW = 1700000000000;
 
 // 앱 모드 판정 — 실제 판정 루프가 저장하는 이벤트 행
 {
-  DB.setUser('JOY');
+  DB.setUser('ALPHA');
   const app = new App({ seed: 7, equipmentCount: 1 });
   app.setState = function (st) { Object.assign(this.state, st); }; app.forceUpdate = () => {}; app._toast = () => {};
-  app.E = CH; app.live = true; app.user = 'JOY';
+  app.E = CH; app.live = true; app.user = 'ALPHA';
   const eq = { id: 'T:A', table: 'T', name: 'A', alias: 'A', unit: 'mm/s', zones: Ziso, fs: FS, rpm: RPM, secBuckets: [], lastSeen: Date.now() };
   app.data = { now: Date.now(), equipment: [eq], events: [], reports: [] };
   app._applied = Object.assign({}, app.state, { monitorOn: true, monMode: 'app', monitorInterval: '3s', renotify: { '주의': '0', '위험': '0', '심각': '0' } });

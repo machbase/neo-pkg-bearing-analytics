@@ -14,7 +14,7 @@ const CFG = new Set([...BLOCK.matchAll(/'([A-Za-z_$][\w$]*)'/g)].map((m) => m[1]
      _initEmpty   : DB 불통 시 빈 상태로 시작(저장하면 일시 장애만으로 소스가 지워짐)
      _initNoAuth  : 신원 불명 상태(저장하면 남의 설정에 씀)
      _initCfgFail : 설정 읽기 실패 상태(저장하면 실제 설정을 덮음, 저장 자체도 잠김) */
-const EXEMPT = [/_loadSchemas\(\)/, /_initEmpty\(msg\)/, /_initNoAuth\(why\)/, /_initCfgFail\(err\)/];
+const EXEMPT = [/_loadSchemas\(\)/, /_initEmpty\(msg\)/, /_initNoAuth\(why[,)]/, /_initCfgFail\(err\)/];
 
 let pass = 0, fail = 0;
 const chk = (ok, msg, got) => { console.log((ok ? 'PASS ' : 'FAIL ') + msg + (got ? ' — ' + got : '')); ok ? pass++ : fail++; };

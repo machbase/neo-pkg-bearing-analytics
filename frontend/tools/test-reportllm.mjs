@@ -79,13 +79,16 @@ const run = (a) => a._reportOpinion({}, {}, {}, null, '2026-08-01', '2026-08-02'
   await run(a);
   chk(!!a._genLlmErr, '네트워크 차단도 사유를 남긴다', a._genLlmErr);
 }
-// ── 6. 빈 응답 — 예외 없이 지나가는 조용한 경로 ──────────
+// ── 6. 빈 응답 — Claude는 클라이언트가 사유로 실패, 다른 공급자는 예외 없이 지나가는 조용한 경로 ──────────
 {
   stubFetch('ok', '   \n  ');
   const a = mk();
   const op = await run(a);
   chk(op === null, '공백만 온 응답은 소견으로 치지 않는다');
-  chk(!!a._genLlmErr && /빈 응답/.test(a._genLlmErr), '빈 응답도 사유를 남긴다', a._genLlmErr);
+  chk(!!a._genLlmErr && /본문 없이 응답이 끝났습니다/.test(a._genLlmErr), 'Claude 빈 응답은 끝난 사유를 남긴다', a._genLlmErr);
+  globalThis.fetch = async () => ({ ok: true, status: 200, json: async () => ({ choices: [{ message: { content: '  ' } }] }) });
+  const b = mk({ llmProvider: 'openai', llmKeys: { openai: 'sk-test' }, llmModels: { openai: 'gpt-test' } });
+  chk(await run(b) === null && !!b._genLlmErr && /빈 응답/.test(b._genLlmErr), '예외 없는 빈 응답도 사유를 남긴다', b._genLlmErr);
 }
 // ── 7. 중단(사용자 취소)은 실패 아님 ───────────────────────────────────
 {
@@ -99,8 +102,8 @@ const run = (a) => a._reportOpinion({}, {}, {}, null, '2026-08-01', '2026-08-02'
 {
   const { readFile } = await import('node:fs/promises');
   const src = await readFile(new URL('../src/app.js', import.meta.url), 'utf8');
-  chk(/build: self\._reportBuild\(eq, det, docNo,\s*\n\s*opinion \?/.test(src),
-    '모델명은 opinion이 있을 때만 — 실패했는데 적으면 없는 근거를 주장하게 된다');
+  chk(/var llmName = opinion \?/.test(src) && /build: self\._reportBuild\(eq, det, docNo, llmName\)/.test(src) && /opinionModel: llmName \|\| null/.test(src),
+    '모델명은 opinion이 있을 때만(측정 정보·LLM 소견 절 공용) — 실패했는데 적으면 없는 근거를 주장하게 된다');
   chk(/llm: !!opinion/.test(src), '보관함 유형도 실제 소견 유무로 정한다');
   // 수집한 사유가 생성 끝에 사용자에게 도달하는지
   chk(/if \(self\._genLlmErr\) self\._toast\(/.test(src), '수집한 사유를 생성 완료 시 알린다');

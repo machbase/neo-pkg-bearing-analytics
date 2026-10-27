@@ -36,7 +36,8 @@ Things to know:
 
 - **Changed settings take effect only after saving again.** The timer runs with the settings as of the last save.
 - **Only tables with ROLLUP are evaluated.** Tags in tables without rollups are excluded from server monitoring. When you choose server monitoring, this screen warns which tables are excluded; check those tags with in-app monitoring.
-- **Turning server mode off deletes the timer.** Removing the package cleans up only the timers of the account that clicked Uninstall; for another account's timer, turn alarms off in the app as that account, or stop it on the Neo timer screen and then delete it.
+- **Turning server mode off deletes the timer.** Removing the package does not delete timers, so turn alarms off in the app for each account before uninstalling. If the package is already gone, delete the timers on the Neo timer screen (the remaining timers have already stopped because their file is gone).
+- **A timer runs with the permissions of the account that saved it (the API token's account).** Other accounts' timers are neither listed nor reachable.
 - **No timer is created when there are no tags to monitor.**
 - If the timer stops by itself, the app **re-registers it automatically** while it is open (up to three times). A notice then reminds you that the gap was not actually confirmed as "no anomaly".
 
@@ -52,7 +53,7 @@ However many places the same account opens the app, only **one of them (the lead
 
 If the Neo console login in the same browser switches to a different account, any app page already open belongs to the old account, so it **stops all saving, evaluation and queries** and shows a full-screen "logged in as another account" (다른 계정으로 로그인되었습니다) notice.
 
-- Click **새로고침** (Reload) to reopen the app as the new account. It never reloads by itself.
+- Click **새로고침** (Reload) to reopen the app as the new account. It never reloads by itself. If this browser has no API token for the new account, the token entry screen comes first.
 - Logging back in as the original account dismisses the notice and the page carries on.
 - The old account's server monitoring runs as a Neo timer and continues unaffected. With in-app monitoring, that tab's evaluation stops; if another PC has the app open as the old account, that page takes over.
 

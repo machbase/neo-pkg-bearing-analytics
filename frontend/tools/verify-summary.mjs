@@ -1,8 +1,8 @@
 // 요약 모드 리포트 렌더 검증 — 라이브 데이터 + 실제 설비 설정으로 _genOne과 같은 data를 조립해 문구·구조·블록 순서 검사
 // · data 조립은 app.js _reportMeta()/_reportBuild() 단일 소스(앱 필드 추가 시 자동 반영)
 // · 라이브(Neo + 로그인 계정의 BEARING 테이블 데이터 필요) · npm run verify:live 포함
-//   NEO_USER=… NEO_PASSWORD=… node tools/verify-summary.mjs [테이블]
-await import('./_liveauth.mjs');   // 로그인(NEO_USER·NEO_PASSWORD) — 없으면 건너뜀
+//   NEO_TOKEN=nt_… node tools/verify-summary.mjs [테이블]
+await import('./_liveauth.mjs');   // 신원(NEO_TOKEN) — 없으면 건너뜀
 
 const E = (await import('../../cgi-bin/chart/chart.js')).default;
 const VC = (await import('../../cgi-bin/calc/calc.js')).default;
@@ -49,7 +49,7 @@ const html = Report.buildReportHTML({
   indics: det.indics, opinion: null, actions: dx.actions,
   data, chartLibSrc: '/* chart engine omitted in harness */', build,
   fftHint: det.fft.freqs.length ? '해상도 ' + det.fft.res.toFixed(2) + ' Hz' : '',
-  waveDesc: '', envDesc: det.envelope.hint, cepDesc: det.cepstrum.note,
+  envBand: det.envelope.band || '',
 });
 
 // 리팩터링 전후 리포트 바이트 비교용 — VERIFY_DUMP=before.html node tools/verify-summary.mjs
@@ -62,17 +62,17 @@ const txt = html.replace(/<script[\s\S]*?<\/script>/g, '').replace(/<style[\s\S]
 console.log('\n=== 요약 모드 검사 (' + eq.name + ' · 베어링 ' + ((eq.bearing && eq.bearing.model) || '미지정') + ' · gate=' + gate + ' · verdict="' + dx.verdict + '") ===');
 // ⚠ 리포트 문구 변경 시 이 목록도 함께 수정 — 옛 문구 기준이면 실제와 다른 것을 통과시킴
 const checks = [
-  ['[1] 헤드라인(판정 or 보류)', /계측 검증 필요 — 결함 진단 보류|이상 진동|주의 관찰|정상 범위/],
-  ['[1] 조치 카드 1장', /계측 검증 후 재측정 — 기계 상태 미판정|계속 운전|다음 정기 점검 시 확인|계획 정지 시 점검|긴급 점검/],
-  ['[1] 조치 근거는 값·대역(등급 순환 금지)', /근거 · .*(Crest P95|10–1000 Hz)/],
-  ['[2] 판정 기준 — 패턴이 켜고 ISO(대역제한)가 높이', /등급은 결함 패턴이 켜질 때만 오르고, 그 높이를 ISO 존 ?\(10–1000 Hz 대역제한/],
-  ['[2] 감시는 참고로 격하', /알람 기준|감시 참고|규격 판정 아님/],
+  ['[1] 등급 배지 · 단계', /단계 .*\d\/4|판정 보류|판정 못 함|판정 대상 아님/],
+  ['[1] 지금 할 일 한 줄', /지금 할 일 (계측 검증 후 재측정|운전 유지|계획 정지 시 베어링 점검|긴급 점검|베어링 외 원인 점검|다른 기간으로 재생성|진동 크기는 ISO 존으로 확인|명판 회전수·베어링 품번 입력)/],
+  ['[2] 판정 기준 — 패턴이 발동하고 진동 크기가 높이', /결함 패턴이 등급을 발동하고, 진동 크기가 높이를 결정/],
+  // 하네스는 sevCards를 비워 넘김 — 표에서 확인 가능한 건 ISO 행뿐(나머지 행은 test-reportjudge)
+  ['[2] 지표 표 ISO 행 — 등급 근거 · 대역', /ISO 판정값 .*등급 근거 · 10–1000 Hz/],
   ['[3] 지금 할 일', /지금 할 일/],
-  ['[4] 잠정 후보', /잠정 후보/],
-  ['[5] 이 측정으론 볼 수 없음', /이 측정으론 볼 수 없음/],
+  ['[4] 후보', gate ? /잠정 후보/ : /결함 후보/],
+  ['[5] 측정 불가', /측정 불가/],
   ['[6] 확인했으나 미검출', /확인했으나 미검출/],
-  ['[7] 아직 설명 못 한 성분', /아직 설명 못 한 성분/],
-  ['[8] 상세로 가는 바로가기', /자세히|상세 분석|전체 보기/],
+  ['[7] 미설명 성분', /미설명 성분/],
+  ['[8] 전체 분석 탭', /전체 분석/],
   ['메타 · Analysis Engine', /Analysis Engine/],
   ['메타 · Ruleset/Fingerprint', /Ruleset .+Fingerprint/],
   ['메타 · Acquisition', /Acquisition/],
@@ -88,7 +88,7 @@ checks.forEach(([n, re]) => { const ok = re.test(txt); if (!ok) bad++; console.l
 console.log('\n=== 구조 ===');
 console.log('  전체보기 접기(details) 제거:', /class="adv"/.test(html) ? '✗ 남음' : '✓');
 console.log('  인쇄 시 요약+상세 동시:', /beforeprint/.test(html) ? '✓' : '✗');
-console.log('  통합 경고 박스:', (html.match(/class="sum-alert/g) || []).length + '개' + (gate ? ' (게이트 시 1)' : ''));
+console.log('  통합 경고 박스:', (html.match(/class="alert /g) || []).length + '개' + (gate ? ' (게이트 시 1)' : ''));
 console.log('  HTML 크기:', (html.length / 1024).toFixed(0), 'KB');
 let unbal = 0;
 ['div', 'table', 'tbody', 'thead', 'tr', 'td', 'th', 'span', 'ol', 'ul', 'li', 'details'].forEach(t => {
@@ -98,7 +98,7 @@ let unbal = 0;
 });
 console.log('  태그 균형:', unbal ? '✗ ' + unbal + '종' : '✓');
 
-const ORDER = ['등급은 결함 패턴이 켜질 때만','지금 할 일', '잠정 후보', '이 측정으론 볼 수 없음', '확인했으나 미검출', '아직 설명 못 한 성분'];
+const ORDER = ['지금 할 일', 'ISO 판정값', gate ? '잠정 후보' : '결함 후보', '판단의 한계', '확인했으나 미검출', '미설명 성분', '세부 조치'];
 const pos = ORDER.map(k => txt.indexOf(k));
 const ord = pos.map((v, i) => (v < 0 ? ORDER[i] + '(없음)' : (i && v < pos[i - 1] ? ORDER[i] + '(순서역전)' : null))).filter(Boolean);
 console.log('\n요약 블록 순서:', ord.length ? '✗ ' + ord.join(', ') : '✓ 사양 순서대로');

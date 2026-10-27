@@ -32,7 +32,7 @@ const eqG = sorted.find((e) => e.unit === 'g') || eq0;   // 가속도 설비 —
 const gradedAll = (patOk) => Object.fromEntries(sorted.map((e) => [e.table + ':' + e.name, { gi: 0, patOk: patOk, patOn: false }]));
 app._detailCache[eq0.id] = { state: 'ready', det: Mock.buildDetail(eq0) };
 Object.assign(app.state, {
-  ready: true, srcSel: app.liveTables.slice(), selTag: eq0.id, diagTag: eq0.id,
+  ready: true, user: 'TESTER', srcSel: app.liveTables.slice(), selTag: eq0.id, diagTag: eq0.id,   // 토큰·계정 확인을 마친 상태
   events: d.events.slice(), reports: d.reports.slice(),
   genTags: sorted.slice(0, 3).map(e => e.id),
   genPeriod: 'all', genFrom: E.fmtDT(d.now - 86400000), genTo: E.fmtDT(d.now),
@@ -213,11 +213,16 @@ const cases = [
       [sorted[2].table + ':' + sorted[2].name]: { lost: false, run: false, age: 1000 },
     } },
     ['판정 보류', '계측 이상 1대', '신호 두절 1대', '정지 1대']],
-  /* 상세 통계 요약 — 리포트와 같은 지표(중앙값·P95 등), COUNT/AVG/MIN/MAX 없음
+  /* 상세 기간 통계 표 — 리포트와 같은 지표(중앙값·P95 등), COUNT/AVG/MIN/MAX 칸 없음
      · MIN=정지 구간, MAX=스파이크 좌우, AVG=간헐 고진동 평탄화라 오해 유발 */
-  ['detail 통계 요약(중앙값·P95)', { tab: 'detail' },
-    ['광대역 RMS', '중앙 ', 'P95 ', '지속 최악', 'Crest P95', '변화율', '관측 창', 'B/C 초과',
-      '!건수 (COUNT)', '!평균 (AVG)', '!최솟값 (MIN)', '!최댓값 (MAX)']],
+  /* 심각도 패널 — 결함 패턴(발동 여부) | ISO 존(진동 크기)
+     · 존은 규격 뜻(A~D), 등급어는 결과 줄에만 · A·B는 결과 줄 한 칸 · 종합 분석 토글은 머리줄 */
+  ['detail 심각도 패널 두 열', { tab: 'detail' },
+    ['결함 패턴', '발동 여부', '진동 크기', '신규 설비 수준', '손상 우려', '결함 패턴이 있을 때의 판정 등급',
+      'grid-column: span 2', '!권장 조치 <b', 'codicon-chevron-down', '!종합 위험도', '!A 양호', '!종합 분석 펼치기</button>']],
+  ['detail 기간 통계 표(중앙값·P95)', { tab: 'detail' },
+    ['기간 통계', 'ISO 판정값', '광대역 RMS P95', '중앙 ', '지속 최악', 'Crest Factor P95', '변화율', '관측 창', 'B/C 초과',
+      '!통계 요약', '!건수 (COUNT)', '!평균 (AVG)', '!최솟값 (MIN)', '!최댓값 (MAX)']],
   /* 카드 숫자 = 판정값(ISO 대역제한) — 라벨은 측정 대역 주파수
      · 베이스라인·대역 축 값은 카드 본문에 없음(미학습이면 "—"만 늘어 잡음), 값 호버에만 */
   ['monitor 카드 판정값·대역 라벨', { tab: 'monitor',
@@ -338,11 +343,12 @@ const cases = [
   // 베이스라인 상태 툴팁은 학습된 태그에만 렌더 → 학습 상태를 주입해 그 경로까지 검사
   ['settings criteria', { tab: 'settings', setSection: 'criteria',
     baselines: { [eq0.table + ':' + eq0.name]: { mu: 2.1, sigma: 0.3, k: 3, n: 60, spanMin: 60, ex: { idle: 8, ramp: 4 } } } },
-    ['A(양호)와 B(주의)를 가르는', '조치 권고가 여기서 갈립니다', '긴급 점검 대상', '그 결함이 정상 기준이 됩니다',
+    ['ISO 존 A와 B를 가르는', '조치 권고가 여기서 갈립니다', '긴급 점검 대상', '그 결함이 정상 기준이 됩니다',
       '정지·기동 구간과 순간 스파이크는 자동으로 걸러지지만', '99.7%가 한계 안', '사용자 정의 기준으로 판정',
       '스파이크에 흔들리지 않는 중앙값 방식', '최소 μ의 1.2배',
-      'σ 0.30 (k=3)', '절대값이 양호 존이라도', '학습은 선택 사항이며', '절대 임계</b>(존 경계) —',
-      '등급은 결함 패턴이 잡혀야 켜지고', '카드와 근거표에 베이스라인 이탈로 표시됩니다', 'D 심각', '!D 위험']],
+      'σ 0.30 (k=3)', '절대값이 ISO A 구간이라도', '학습은 선택 사항이며', '절대 임계</b>(존 경계) —',
+      // 존은 규격 뜻으로 — 등급어(양호~심각)와 섞지 않음
+      '등급은 결함 패턴이 잡혀야 켜지고', '카드와 근거표에 베이스라인 이탈로 표시됩니다', 'D 손상 우려', '!A(양호)', '!D 심각']],
   // 과거 채우기 진행 중 — 진행바·남은시간·"학습 가능" 표시가 렌더되는 경로
   ['settings criteria 과거채우기 진행중', { tab: 'settings', setSection: 'criteria', bandOn: true,
     bandFill: { done: 312, total: 864, eta: 690000, learnable: true } },

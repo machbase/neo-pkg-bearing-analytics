@@ -1,6 +1,6 @@
 /* 라이브 경로 스모크 — 라이브(Neo 필요) · npm run smoke:live 포함
    · 실제 Neo에 붙여 buildLiveData/liveDetail/렌더/저장소 왕복 검증
-   · 로그인: NEO_USER·NEO_PASSWORD 환경변수(_liveauth.mjs), 없으면 건너뜀
+   · 신원: NEO_TOKEN 환경변수(_liveauth.mjs), 없으면 건너뜀
    · 계정마다 테이블 구성이 다름 — 기준 데이터 BEARING(C1)은 필수(없으면 건너뜀), VIBE_DATA는 있으면 함께 조립
    · 저장소 왕복은 그 계정에 시험 행·파일을 쓰고 지움 — 설정은 끝나면(실패해도) 원래 값으로 복구 */
 import renderToString from 'preact-render-to-string';
@@ -90,7 +90,7 @@ app._detailCache['BEARING:C1'] = { state: 'ready', det };
 const sorted = data.equipment.slice().sort((a, b) => b.grade - a.grade);
 sorted.forEach((e, i) => { e.order = i; });
 Object.assign(app.state, {
-  ready: true, srcSel: SRC, selTag: 'BEARING:C1', diagTag: sorted[0].id,
+  ready: true, user: AuthDB.getUser(), srcSel: SRC, selTag: 'BEARING:C1', diagTag: sorted[0].id,   // 토큰·계정 확인을 마친 상태
   events: [], reports: [], genTags: sorted.slice(0, 3).map(e => e.id),
   from: E.fmtDT(data.now - 7 * 86400000).slice(0, 10), to: E.fmtDT(data.now).slice(0, 10),
 });
@@ -119,10 +119,10 @@ ok(SRC.every((t) => so.includes(t)), '설정탭 실제 테이블 목록', SRC.jo
     stats: [{ k: '평균', v: '1.5' }], indics: [{ k: 'RMS', v: '1.5', hint: '', desc: 'd' }],
     opinion: null, actions: [{ txt: 'a' }],
     data: { rms: [1, 2], xL: ['a', 'b'], xT: ['a', 'b'], refs: [], unit: 'mm/s', kxl: [] },
-    chartLibSrc: '/*chartlib*/', fftHint: '', waveDesc: '', envDesc: '', cepDesc: '',
+    chartLibSrc: '/*chartlib*/', fftHint: '', envBand: '',
   });
   ok(!html.includes('<script>x') && html.includes('&lt;script&gt;'), '리포트 XSS 이스케이프');
-  ok(html.includes('Content-Security-Policy') && html.includes('진동 심각도 평가') && html.includes('theme-btn'), '리포트 양식(프로토타입 고정판)+CSP');
+  ok(html.includes('Content-Security-Policy') && html.includes('id="severity"') && html.includes('theme-btn'), '리포트 양식(요약·전체 분석)+CSP');
   ok(html.includes('window.RPT') && html.includes('id="cRms"') && html.includes('/*chartlib*/'), '리포트 캔버스 렌더(엔진+데이터 내장)');
   // 계정 폴더(앱과 같은 경로) — 시험 파일은 끝나면(실패해도) 지움
   const fn = 'RPT_SMOKETEST_20260101-20260102_20260101_000000.html', dir = L.reportDir();

@@ -18,6 +18,7 @@ function match(w, r) {
   if ((m = /ETYPE='([^']*)'/.exec(w)) && r[3] !== m[1]) return false;
   return true;
 }
+import './_faketoken.mjs';   // db.js 관문용 토큰 칸
 globalThis.fetch = async (url) => {
   const sql = decodeURIComponent(String(url).replace(/^[^?]*\?q=/, '').replace(/&.*$/, ''));
   sqls.push(sql);

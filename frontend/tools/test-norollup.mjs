@@ -7,6 +7,7 @@ import renderToString from 'preact-render-to-string';
 
 // 롤업 없는 table(HI*)은 ROLLUP 조회에 ERR-2685, ERR_TBL은 다른 오류
 const sqls = [];
+import './_faketoken.mjs';   // db.js 관문용 토큰 칸
 globalThis.fetch = async (url) => {
   const sql = decodeURIComponent((String(url).match(/q=([^&]*)/) || [])[1] || '');
   sqls.push(sql);
@@ -67,6 +68,7 @@ const NOW = Date.UTC(2026, 7, 13, 9, 0, 0);
 const mk = (tab, st) => {
   const a = new App({ defaultTab: tab, seed: 42, equipmentCount: 3 });
   a.setState = function (s) { Object.assign(this.state, s); };
+  a.state.user = 'TESTER';   // 토큰·계정 확인을 마친 상태
   a._scheduleDraw = () => {}; a._toast = () => {}; a._ensureTags = () => {};
   a.E = CH; a.live = true; a.forceUpdate = () => {};
   return a;
@@ -122,7 +124,7 @@ const mkDetail = (rf) => {
   chk(/최근 2시간만/.test(v.rollupNote) && /ROLLUP을 만들면/.test(v.rollupNote), '줄였으면 줄였다고, 푸는 방법까지 적는다', v.rollupNote);
   const html = renderToString(view(v));
   chk(html.indexOf('최근 2시간만 표시합니다') >= 0, '사양 칸 아래에 렌더된다');
-  chk(html.indexOf('초별 (1s) · 원본 집계') >= 0, '롤업 단위 칸에 원본 집계 표기');
+  chk(html.indexOf('1초 · 원본 집계') >= 0, '롤업 칸에 원본 집계 표기');
   const v2 = mkDetail({ label: '초별 (1s) · 원본 집계', raw: true, capped: false }).renderVals();
   chk(/2시간보다 긴 기간/.test(v2.rollupNote), '안 줄였으면 긴 기간의 동작만 알린다', v2.rollupNote);
   const v3 = mkDetail({ label: '시간별 (1h)', raw: false, capped: false }).renderVals();

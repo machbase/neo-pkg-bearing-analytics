@@ -10,15 +10,10 @@
   'use strict';
 
   /* ---------------- REST ----------------
-     · 인증 헤더는 여기서만 붙임 — 하나라도 빠지면 서버가 기본 신원(SYS)으로 조용히 통과(권한 확대)
-     · 신원 = Neo 콘솔 로그인 세션(JWT)
-     · auth: 'jwt'(기본) 콘솔 세션 / 'service' 호출측 Bearer 그대로(타이머용) / 'none' 없음 */
-  var JWT_STORE_KEY = 'accessToken';       // Neo 콘솔이 쓰는 localStorage 키
-  var REFRESH_STORE_KEY = 'refreshToken';  // 갱신용 토큰(로그인 때 함께 발급)
-  // 캐시 안 함 — 토큰 수명 5분, 매 요청마다 저장소에서 읽음
-  function sessionJwt() {
-    try { return (localStorage.getItem(JWT_STORE_KEY) || '').trim(); } catch (e) { return ''; }
-  }
+     · 인증 헤더는 여기서만 붙임 — 헤더 없는 /db/* 요청은 서버 설정에 따라 기본 신원(SYS)으로 통과(권한 확대)
+     · 신원 = 계정별 API 토큰(nt_), 토큰 없으면 요청 자체를 보내지 않음
+     · 콘솔 로그인(JWT)은 계정 이름만 읽음 — 토큰 칸 구분·계정 불일치 차단용, 인증엔 안 씀 */
+  var TOKEN_KEY = 'neo-pkg-bearing-analytics.token.';   // + 계정명(대문자)
   function jwtPayload(tok) {
     try {
       var parts = String(tok || '').split('.');
@@ -26,99 +21,94 @@
       return JSON.parse(atob(parts[1].replace(/-/g, '+').replace(/_/g, '/')));
     } catch (e) { return null; }
   }
-  // JWT payload의 sub — 서버 조회 없는 식별용(검증 아님). 실제 실행 계정은 whoami()로 대조
-  function jwtUser() {
-    var o = jwtPayload(sessionJwt());
+  // Neo 콘솔 로그인 계정 — JWT payload의 sub(서명 검증 없음, 식별용)
+  function consoleUser() {
+    var jwt = '';
+    try { jwt = localStorage.getItem('accessToken') || ''; } catch (e) { jwt = ''; }
+    var o = jwtPayload(jwt);
     return String((o && (o.sub || o.username || o.name)) || '').toUpperCase();
   }
 
-  // TQL 호출 헤더 — 구버전 Neo는 없으면 TQL을 서버 커넥션(SYS)으로 실행(권한 확대) → 항상 붙임
-  var CONSOLE_HEADERS = {
-    'X-Console-Id': 'neo-pkg-bearing-analytics, console-log-level=NONE',
-    'X-Console-Log-Level': 'NONE',
-  };
+  /* 토큰 칸 — 계정별(공용 브라우저에서 앞사람 토큰 재사용 방지)
+     · 부팅 뒤엔 이 탭의 계정 칸 고정, 부팅 전엔 콘솔 계정 칸 */
+  function tokenSlot() {
+    var u = _user || consoleUser();
+    return u ? TOKEN_KEY + u : '';
+  }
+  // 캐시 안 함 — 다른 탭의 교체·삭제를 다음 요청에 반영
+  function apiToken() {
+    var k = tokenSlot();
+    if (!k) return '';
+    try { return (localStorage.getItem(k) || '').trim(); } catch (e) { return ''; }
+  }
+  function setApiToken(tok) {
+    var k = tokenSlot();
+    if (!k) return false;
+    try { localStorage.setItem(k, String(tok || '').trim()); return true; } catch (e) { return false; }
+  }
+  function clearApiToken() {
+    var k = tokenSlot();
+    if (!k) return;
+    try { localStorage.removeItem(k); } catch (e) { /* 저장소 차단 환경 */ }
+  }
+  // 화면 표시용 — 앞 형식부·끝 4자만
+  function tokenHint() {
+    var t = apiToken();
+    if (!t) return '';
+    var m = /^(nt_[^_]*_)/.exec(t);
+    return (m ? m[1] : '') + '…' + t.slice(-4);
+  }
 
-  // 인증 끊김(갱신 실패한 401) 통지 — 호출측이 401을 삼키면 세션 만료가 "데이터 없음"으로 보임
+  // 인증 끊김(401·토큰 사라짐) 통지 — 호출측이 실패를 삼키면 "데이터 없음"으로 보임
   var _onAuthFail = null;
   function onAuthFail(fn) { _onAuthFail = fn; }
 
-  // 모든 fetch의 단일 통로(갱신 요청 포함)
+  // 모든 fetch의 단일 통로(토큰 확인 요청 포함)
   function send(path, init) { return fetch(path, init); }
 
-  /* 세션 갱신(relogin) — 앱만 띄운 탭은 콘솔이 갱신해 주지 않음.
-     진행 중인 약속을 공유해 동시 갱신 방지 */
-  var REFRESH_SKEW_MS = 60000;   // 만료 1분 전부터 미리 갱신
-  var _refreshing = null;
-  // 갱신이 거부된 토큰 — 같은 토큰으로 relogin 반복 방지, 토큰이 바뀌면 해제
-  var _refreshDeadFor = '';
-  function refreshSession() {
-    if (_refreshing) return _refreshing;
-    var cur = sessionJwt();
-    if (_refreshDeadFor && _refreshDeadFor === cur) return Promise.resolve(false);
-    var rt = '';
-    try { rt = (localStorage.getItem(REFRESH_STORE_KEY) || '').trim(); } catch (e) { rt = ''; }
-    if (!rt) return Promise.resolve(false);
-    // relogin도 현재 accessToken 헤더 필수(없으면 401 missing authorization header) — 콘솔과 같은 방식
-    var rh = { 'Content-Type': 'application/json' };
-    if (cur) rh.Authorization = 'Bearer ' + cur;
-    _refreshing = send('/web/api/relogin', {
-      method: 'POST',
-      headers: rh,
-      body: JSON.stringify({ refreshToken: rt }),
-    }).then(function (r) { return r.ok ? r.json() : null; }).then(function (j) {
-      if (!j || j.success === false || !j.accessToken) return false;
-      try {
-        localStorage.setItem(JWT_STORE_KEY, j.accessToken);
-        if (j.refreshToken) localStorage.setItem(REFRESH_STORE_KEY, j.refreshToken);
-      } catch (e) { return false; }
-      return true;
-    }).catch(function () { return false; })
-      .then(function (ok) { _refreshing = null; _refreshDeadFor = ok ? '' : cur; return ok; });
-    return _refreshing;
-  }
-  // 곧 만료되는지 — exp를 못 읽으면 false
-  function expiringSoon() {
-    var o = jwtPayload(sessionJwt());
-    if (!o || !o.exp) return false;
-    return (o.exp * 1000) - Date.now() < REFRESH_SKEW_MS;
+  /* 토큰 → 계정명(대문자) — 무효면 null, 서버·네트워크 오류는 throw
+     · 이 토큰 하나만 실어 보냄(저장된 토큰과 무관) */
+  function validateToken(tok) {
+    tok = String(tok || '').trim();
+    if (!tok) return Promise.resolve(null);
+    return send('/db/token/validate', { method: 'POST', headers: { Authorization: 'Bearer ' + tok } })
+      .then(function (r) {
+        if (r.status === 401) return null;
+        if (r.status === 404) throw new Error('이 Neo에는 토큰 확인 API가 없습니다 — Neo 8.7.3 이상이 필요합니다');
+        if (!r.ok) throw new Error('토큰 확인 실패 HTTP ' + r.status);
+        return r.json().then(function (j) {
+          return (j && j.valid === true && j.user) ? String(j.user).toUpperCase() : null;
+        });
+      });
   }
 
   function request(path, opts) {
     opts = opts || {};
-    var mode = opts.auth || 'jwt';
-    function fire() {
-      var h = Object.assign({}, opts.headers || {});
-      if (mode === 'jwt') {
-        // 이 탭을 연 계정과 세션 계정이 다르면 보내지 않음 — 옛 계정 화면의 작업이 다른 계정 권한으로 실행되지 않게
-        var who = jwtUser();
-        if (_user && who && who !== _user) {
-          var err = new Error('다른 계정(' + who + ')으로 로그인되어 요청을 보내지 않았습니다 — 새로고침하세요');
-          err.idSwitch = who;
-          return Promise.reject(err);
-        }
-        var tok = sessionJwt();
-        if (tok) h.Authorization = 'Bearer ' + tok;
-        if (path.indexOf('/web/api/tql') === 0) Object.assign(h, CONSOLE_HEADERS);
-      }
-      var init = { method: opts.method || 'GET' };
-      for (var k in h) { init.headers = h; break; }
-      if (opts.body !== undefined) init.body = opts.body;
-      if (opts.cache) init.cache = opts.cache;
-      return send(path, init);
+    // 이 탭을 연 계정과 콘솔 로그인 계정이 다르면 보내지 않음 — 옛 계정 화면의 작업이 섞이지 않게
+    var who = consoleUser();
+    if (_user && who && who !== _user) {
+      var err = new Error('다른 계정(' + who + ')으로 로그인되어 요청을 보내지 않았습니다 — 새로고침하세요');
+      err.idSwitch = who;
+      return Promise.reject(err);
     }
-    var pre = (mode === 'jwt' && expiringSoon()) ? refreshSession() : Promise.resolve(false);
-    return pre.then(fire).then(function (r) {
-      // 401이면 갱신 후 1회 재시도(시계 어긋남·다른 탭의 토큰 교체), 실패 시 세션 만료 통지
-      if (r.status !== 401 || mode !== 'jwt') return r;
-      return refreshSession().then(function (ok) {
-        if (ok) return fire();
-        if (_onAuthFail) _onAuthFail(path);
-        return r;
-      });
+    var tok = apiToken();
+    if (!tok) {
+      var none = new Error('API 토큰이 없어 요청을 보내지 않았습니다');
+      none.noToken = true;
+      if (_user && _onAuthFail) _onAuthFail(path);
+      return Promise.reject(none);
+    }
+    var init = { method: opts.method || 'GET', headers: Object.assign({}, opts.headers || {}, { Authorization: 'Bearer ' + tok }) };
+    if (opts.body !== undefined) init.body = opts.body;
+    if (opts.cache) init.cache = opts.cache;
+    return send(path, init).then(function (r) {
+      // 401 = 토큰 무효·폐기
+      if (r.status === 401 && _onAuthFail) _onAuthFail(path);
+      return r;
     });
   }
 
-  /* 실제 실행 계정 — JWT sub와 다를 수 있음(SYS로 실행돼도 응답은 정상).
+  /* 실제 실행 계정 — 토큰 계정 대조용(다른 계정으로 실행돼도 응답은 정상).
      난수를 심은 쿼리가 자기 자신을 V$STMT에 남기는 점 이용 */
   function whoami() {
     var nonce = 'v' + Math.random().toString(36).slice(2, 12) + 'z';
@@ -133,7 +123,7 @@
   function q(sql, opts) {
     opts = opts || {};
     var p = 'q=' + encodeURIComponent(sql) + '&format=json&timeformat=' + (opts.timeformat || 'ms');
-    return request('/web/machbase?' + p).then(function (r) {
+    return request('/db/query?' + p).then(function (r) {
       // HTTP 500도 본문 reason 유지 — 호출측 폴백 판정(ROLLUP 미지원 등)용
       return r.json().catch(function () { throw new Error('조회 실패 HTTP ' + r.status); });
     }).then(function (j) {
@@ -143,7 +133,7 @@
   }
 
   function tql(script) {
-    return request('/web/api/tql', { method: 'POST', headers: { 'Content-Type': 'text/plain' }, body: script })
+    return request('/db/tql', { method: 'POST', headers: { 'Content-Type': 'text/plain' }, body: script })
       .then(function (r) {
         return r.text().then(function (text) {
           if (!r.ok) throw new Error('TQL 실패 HTTP ' + r.status + ': ' + text.slice(0, 160));
@@ -259,7 +249,7 @@
      대량 행이라 JSON 대신 CSV */
   function rawWindow(table, tag, fromMs, toMs, maxPts) {
     var sql = SQL.rawWindow(table, tag, fromMs, toMs);
-    var url = '/web/machbase?q=' + encodeURIComponent(sql) + '&format=csv&timeformat=ms&heading=false';
+    var url = '/db/query?q=' + encodeURIComponent(sql) + '&format=csv&timeformat=ms&heading=false';
     return request(url).then(function (r) {
       if (!r.ok) throw new Error('조회 실패 HTTP ' + r.status);
       return r.text();
@@ -312,7 +302,7 @@
      실패 시 빈 배열 */
   function sampleTimes(table, tag, fromMs, toMs, limit) {
     var sql = SQL.sampleTimes(table, tag, fromMs, toMs, limit);
-    var url = '/web/machbase?q=' + encodeURIComponent(sql) + '&format=csv&timeformat=us&heading=false';
+    var url = '/db/query?q=' + encodeURIComponent(sql) + '&format=csv&timeformat=us&heading=false';
     return request(url).then(function (r) {
       if (!r.ok) throw new Error('조회 실패 HTTP ' + r.status);
       return r.text();
@@ -348,7 +338,7 @@
 
   // 영역(옛 파일 이름) → state 키 목록. 영역 이름(.json 뗀 것)이 조각 키 cfg:<영역>#N의 <영역>
   var CONFIG_FILES = {
-    'source.json': ['srcSel', 'displayTz'], // 접속 정보는 설정이 아닌 콘솔 세션에서 옴
+    'source.json': ['srcSel', 'displayTz'], // 접속 토큰은 설정이 아닌 브라우저 토큰 칸에 둠
     'equipment.json': ['equipCls', 'equipRpm', 'equipBearing', 'equipGeo', 'equipUnit', 'equipMeta', 'lineHz', 'aliases', 'cardOrder', 'knownTags', 'revived'],
     'criteria.json': ['machineClass', 'classThresh', 'unitThresh'],
     'monitor.json': ['monitorOn', 'evalWindow', 'notifCh', 'notifTo', 'routes', 'monitorInterval', 'monMode', 'renotify', 'bandOn', 'bandInterval', 'bandWin'],
@@ -470,11 +460,11 @@
     return '/public/neo-pkg-bearing-analytics'; // node 스모크·폴백용 — 실제 설치 폴더명과 같아야 타이머 TQL 경로가 맞음
   }
 
-  /* 파일 API(콘솔 세션 JWT) — ⚠ 계정 격리 없음(남의 폴더·워크스페이스 루트가 보임).
+  /* 파일 API — ⚠ 계정 격리 없음(남의 폴더·워크스페이스 루트가 보임).
      계정별 경로는 덮어쓰기 방지용일 뿐 권한 경계 아님 → 설정·시크릿은 계정 소유 표에 둠 */
   function authedFetch(path, opts) {
     opts = opts || {};
-    return Promise.resolve(request('/web/api/files' + path, {
+    return Promise.resolve(request('/db/files' + path, {
       method: opts.method,
       headers: opts.headers,
       body: opts.body,
@@ -929,15 +919,15 @@
   /* ---------------- 서버 상시감시 타이머 (Neo JSON-RPC) ----------------
      · 앱이 판정 TQL을 패키지 파일로 저장, Neo 타이머가 주기 실행(앱 없이도 감시)
      · 타이머 command 경로 = 파일 API 경로(pkgBase/cgi-bin/tql/<계정>/<이름>.tql)
-     · 타이머는 등록 계정 권한으로 실행 */
+     · 타이머는 등록한 토큰 계정 권한으로 실행, 남의 타이머는 id를 알아도 not found */
   var MON_TIMER = 'NEO_BEARING_MONITOR';
   function monTimer() { return timerName(MON_TIMER); }
   function monTqlPath() { return userTqlPath('monitor'); }
-  /* Neo 타이머 API = JSON-RPC 2.0(POST /web/api/rpc, REST /web/api/timers 없음).
+  /* Neo 타이머 API = JSON-RPC 2.0(POST /db/rpc).
      ⚠ params는 배열(객체면 Parse error) · 필드명 spec(스케줄)·command(경로) · stop/delete는 이름이 아닌 id(int) */
   var _rpcId = 0;
   function rpc(method, params) {
-    return request('/web/api/rpc', {
+    return request('/db/rpc', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ jsonrpc: '2.0', id: ++_rpcId, method: method, params: params || [] }),
     }).then(function (r) { return r.json(); }).then(function (j) {
@@ -1062,7 +1052,8 @@
 
   return {
     q: q, tql: tql, SQL: SQL, pkgBase: pkgBase, rpc: rpc,
-    jwtUser: jwtUser, sessionJwt: sessionJwt, whoami: whoami, onAuthFail: onAuthFail,
+    consoleUser: consoleUser, apiToken: apiToken, setApiToken: setApiToken, clearApiToken: clearApiToken, tokenHint: tokenHint,
+    validateToken: validateToken, whoami: whoami, onAuthFail: onAuthFail,
     setUser: setUser, getUser: getUser, configDir: configDir, configRoot: configRoot,
     createMonitorTimer: createMonitorTimer, deleteMonitorTimer: deleteMonitorTimer,
     timerStates: timerStates, monTimer: monTimer, bandTimer: bandTimer, wdTimer: wdTimer,

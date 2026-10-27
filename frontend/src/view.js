@@ -5,15 +5,15 @@ import { DateRange } from './daterange.js';
 export function view(v) {
   const {
     confirmIvKo, confirmSumKo, confirmSteps, onGoBandIv,
-    activeCount, revPending, onKeepAllRevived, bandIvHint, bandLegend, bandNorm, bandNormLabel, bandNormNote, bandNormReady, onBandNorm, aliasRows, aliasCountText, aliasEmpty, aliasMoreText, onAliasScroll, tagQuery, onTagQuery, blEmpty, blK, blRows, blWin, blOldCnt, capShow, capText, capHint, capRows, cardSize, cards, cardDrag, cepNote, csvRange, delRepOpen, delRepName, delRepDate, onDelRepCancel, onDelRepDo, detBearing, detSpec, detWarn, detStale, detBusy, detBusyText, anchorNote, detailEmptyShow, detailShow, dlFmt, dlOpen, dxActions, dxAiFallback, dxAiIdle, dxAiLoading, dxAiSections, dxAiText, dxEvidence, dxLlmModel, dxOpen, dxStamp, dxToggleLabel, dxVerdict, envHint, envMarkers, equipRows, equipFilters, equipFilterEmpty, onEquipFilterAll, equipUnsetDot, evalBasisText, evalWinBad, evalWindowSel, evalWinCustom, evalWinCustomMin, onEvalWinMin, evalLoadText, evalLoadWarn, evalWindow, evalWindowOptions, evtCapped, evtCount, evtEmpty, evtEmptyText, evtRows, evtScopeChips, evtTagFilter, evtTagOptions, evtTypeFilter, evtTypeOptions, fftMarkers, fftRangeChips, fftRangeShow, filterNotice, tblFilterShow, tblOpen, tblOptions, tblChips, tblSelCount, tblTotal, tblAllOn, tblCaption, tblTip, tblNoneShow, tblQuery, tblNoMatch, tblMore, onTblQuery, onTblOpen, onTblClose, onTblMore, onTblSelectAll, onTblClearAll, genBtnLabel, genBtnStyle, genCancelLabel, genCancelStyle, genKnobStyle, genLLMNotice, genPeriodCustomShow, genPeriodNone, genPeriodNote, genPeriodPresets, genPeriodShow, genRange, genRunning, genSelAllLabel, genSteps, genTagsCount, genNoDataShow, genNoDataText, genToggleStyle, goSettings, gridCols, indicsDesc, indicsTitle, isMonitor, isOllama, isSettings, kpiCells, kurtWarn, kurtWarnShow, kurtNote, bandNote, kurtogramHint, kurtogramShow, lastEventText, lineHz, lineHzHint, lineHzShow, helpTip, healthWarns, bandOn, bandNoTargetWarn, bandInterval, bandFillNone, bandIntervalKo, onBandIvOpen, bandFill, bandFillDesc, bandFillShort, bandFillBtnStyle, bandFillBarStyle, bandFillEta, onBandFill, onBandFillStop, bandIvOpen, bandIvNext, bandIvSame, onBandIvCancel, onBandIvPick, bandIvFacts, bandIvChoices, bandIvApplyStyle, onBandIvApply, bandToggleStyle, bandKnobStyle, bandRows, bandEmpty, bandLearnedN, bandTotalN, bandFillTargets, bandFillSkipTip, bandIvOptions, onBandIvPickDirect, bandSampleText, bandSampleWarn, bandWin, bandWinOptions, onBandWin, blSampleText, llmApiKey, llmModel, llmModelPh, llmProvOptions, llmProviderSel, llmProviders, llmProvsAvail, llmStatusColor, llmStatusText, llmTestColor, llmTestIcon, llmTestMsg, llmTestShow, llmTesting, logoFilter, mcDescBody, mcDescTitle, mcOptions, mcZones, monBlNotice, monBlUnlearned, monEmpty, monEventsShow, monKnobStyle, monModeBadgeShow, monModeBadgeStyle, monModeBadgeText, monModeOptions, monPillTitle, monToggleStyle, monitorDotColor, monitorDotRing, monitorInterval, monitorText, navTabs, notReady, notifChannels, ollamaUrl, onBlK, onBlLearnAll, onBlWin, onCancelGen, onCardSize, onClearFilter, onCloseDownload, onConfirmCancel, onConfirmDiscard, onConfirmSave, onDlFmt, onDoDownload, onDxExplain, onEvalAgg, onEvalWindow, onEvtTag, onEvtType, onFormChange, onGenReport, onGenSelectAll, onGoSource, onBandToggle, onBandInterval, onBandLearnAll, onLineHz, onLlmKey, onLlmModel, onLlmProvPick, onMonToggle, onMonitorInterval, onOllamaUrl, onOpenDownload, onRefresh, onResetThresh, onRpNext, onRpPrev, onSaveSettings, onSrcDismiss, onSrcReload, onSrcSelectAll, onTagChange, onTestLLM, onToggleDx, onToggleGenLLM, onToggleMonitor, onTotalClick, pendingNavOpen, periodPresets, periodRange, qualityShow, qualityText, qualityNote, rollupNote, srcNoRollNote, srvNoRollWarn, rpmWarn, rpmWarnAct, onRpmWarnAct, renotifyOptions, alertRows, reportEmpty, reportEmptyShow, reportRows, reportShow, reportTags, rootClass, routeNoneWarn, routeTimings, rpBtnStyle, rpPageText, rpPagerShow, secCriteria, secData, secEquip, secLlm, secMonitor, secSource, selTag,
+    activeCount, revPending, onKeepAllRevived, bandIvHint, bandLegend, bandNorm, bandNormLabel, bandNormNote, bandNormReady, onBandNorm, aliasRows, aliasCountText, aliasEmpty, aliasMoreText, onAliasScroll, tagQuery, onTagQuery, blEmpty, blK, blRows, blWin, blOldCnt, capShow, capText, capHint, capRows, cardSize, cards, cardDrag, cepNote, csvRange, delRepOpen, delRepName, delRepDate, onDelRepCancel, onDelRepDo, detBearing, detSpec, detWarn, detStale, detBusy, detBusyText, detailEmptyShow, detailShow, dlFmt, dlOpen, dxActions, dxAiFallback, dxAiIdle, dxAiLoading, dxAiSections, dxAiText, dxEvidence, dxLlmModel, dxOpen, dxStamp, dxToggleLabel, dxVerdict, envHint, envMarkers, equipRows, equipFilters, equipFilterEmpty, onEquipFilterAll, equipUnsetDot, evalBasisText, evalWinBad, evalWindowSel, evalWinCustom, evalWinCustomMin, onEvalWinMin, evalLoadText, evalLoadWarn, evalWindow, evalWindowOptions, evtCapped, evtCount, evtEmpty, evtEmptyText, evtRows, evtScopeChips, evtTagFilter, evtTagOptions, evtTypeFilter, evtTypeOptions, fftMarkers, fftRangeChips, fftRangeShow, filterNotice, tblFilterShow, tblOpen, tblOptions, tblChips, tblSelCount, tblTotal, tblAllOn, tblCaption, tblTip, tblNoneShow, tblQuery, tblNoMatch, tblMore, onTblQuery, onTblOpen, onTblClose, onTblMore, onTblSelectAll, onTblClearAll, genBtnLabel, genBtnStyle, genCancelLabel, genCancelStyle, genKnobStyle, genLLMNotice, genPeriodCustomShow, genPeriodNone, genPeriodNote, genPeriodPresets, genPeriodShow, genRange, genRunning, genSelAllLabel, genSteps, genTagsCount, genNoDataShow, genNoDataText, genToggleStyle, goSettings, gridCols, indicsDesc, indicsTitle, isMonitor, isOllama, isSettings, kpiCells, kurtWarn, kurtWarnShow, kurtNote, bandNote, kurtogramHint, kurtogramShow, lastEventText, lineHz, lineHzHint, lineHzShow, helpTip, healthWarns, bandOn, bandNoTargetWarn, bandInterval, bandFillNone, bandIntervalKo, onBandIvOpen, bandFill, bandFillDesc, bandFillShort, bandFillBtnStyle, bandFillBarStyle, bandFillEta, onBandFill, onBandFillStop, bandIvOpen, bandIvNext, bandIvSame, onBandIvCancel, onBandIvPick, bandIvFacts, bandIvChoices, bandIvApplyStyle, onBandIvApply, bandToggleStyle, bandKnobStyle, bandRows, bandEmpty, bandLearnedN, bandTotalN, bandFillTargets, bandFillSkipTip, bandIvOptions, onBandIvPickDirect, bandSampleText, bandSampleWarn, bandWin, bandWinOptions, onBandWin, blSampleText, llmApiKey, llmModel, llmModelPh, llmProvOptions, llmProviderSel, llmProviders, llmProvsAvail, llmStatusColor, llmStatusText, llmTestColor, llmTestIcon, llmTestMsg, llmTestShow, llmTesting, logoFilter, mcDescBody, mcDescTitle, mcOptions, mcZones, monBlNotice, monBlUnlearned, monEmpty, monEventsShow, monKnobStyle, monModeBadgeShow, monModeBadgeStyle, monModeBadgeText, monModeOptions, monPillTitle, monToggleStyle, monitorDotColor, monitorDotRing, monitorInterval, monitorText, navTabs, notReady, notifChannels, ollamaUrl, onBlK, onBlLearnAll, onBlWin, onCancelGen, onCardSize, onClearFilter, onCloseDownload, onConfirmCancel, onConfirmDiscard, onConfirmSave, onDlFmt, onDoDownload, onDxExplain, onEvalAgg, onEvalWindow, onEvtTag, onEvtType, onFormChange, onGenReport, onGenSelectAll, onGoSource, onBandToggle, onBandInterval, onBandLearnAll, onLineHz, onLlmKey, onLlmModel, onLlmProvPick, onMonToggle, onMonitorInterval, onOllamaUrl, onOpenDownload, onRefresh, onResetThresh, onRpNext, onRpPrev, onSaveSettings, onSrcDismiss, onSrcReload, onSrcSelectAll, onTagChange, onTestLLM, onToggleDx, onToggleGenLLM, onToggleMonitor, onTotalClick, pendingNavOpen, periodPresets, periodRange, qualityShow, qualityText, qualityNote, rollupNote, srcNoRollNote, srvNoRollWarn, rpmWarn, rpmWarnAct, onRpmWarnAct, renotifyOptions, alertRows, reportEmpty, reportEmptyShow, reportRows, reportShow, reportTags, rootClass, routeNoneWarn, routeTimings, rpBtnStyle, rpPageText, rpPagerShow, secCriteria, secData, secEquip, secLlm, secMonitor, secSource, selTag,
     usageBusy, usageReady, onUsageRefresh, dataRows, dataFootnote, onGoCriteria,
     idSwitchShow, idSwitchTo, idSwitchFrom, idSwitchMon, onIdReload,
     orphanOpen, orphanRows, orphanTotalText, orphanBusy, onOrphanClose, onOrphanAll,
     purgePickShow, purgePickTitle, purgeRange, purgeHaveText, purgePickReady, onPurgePickCancel, onPurgePickNext,
     purgeShow, purgeTitle, purgeSub, purgeWhen, purgeCounting, purgeN, purgeKeep, purgeNone,
-    userName, userAuthMsg, needsDb, dbExists, dbReady, dbAdmin, dbName, dbGrantSql, grantRows, grantLoading, grantBusy, grantMsg, onGrantRefresh, dbWhy, dbBusy, onMakeDb, onCheckDb, appDbName, purgeAsk, purgeBullets, purgeTable, purgeTyped, purgeTypeOk, onPurgeType, purgeReady, purgeBtnLabel, purgeRunning, onPurgeCancel, onPurgeConfirm, serverMon, setNav, settingsActiveStyle, settingsDirty, sevCards, sevColor, sevGradeKo, sevHold, sevHoldDetail, sevHoldNote, sevHoldWhy, sevLabel, sevMachine, sevReco, sevZones,showAdvanced, specIndics, srcNotice, srcSelAllLabel, srcSelCount, srcTables, srcTotal, statSummary, statRows, stopClick, sumTotal, tagOptions, themeIcon, threshRows, toast, toastIcon, toastMsg, toastStyle, toggleTheme, totalStyle, unitChips, unitOptions,
+    userName, userAuthMsg, tokenHintText, tokenFormShow, tokenFor, tokenInput, tokenBusy, tokenMsg, tokenCancelShow, onTokenInput, onTokenChange, onTokenKey, onTokenSubmit, onTokenEdit, onTokenCancel, onTokenClear, needsDb, dbExists, dbReady, dbAdmin, dbName, dbGrantSql, grantRows, grantLoading, grantBusy, grantMsg, onGrantRefresh, dbWhy, dbBusy, onMakeDb, onCheckDb, appDbName, purgeAsk, purgeBullets, purgeTable, purgeTyped, purgeTypeOk, onPurgeType, purgeReady, purgeBtnLabel, purgeRunning, onPurgeCancel, onPurgeConfirm, serverMon, setNav, settingsActiveStyle, settingsDirty, sevFormula, sevGradeKo, sevHold, sevHoldDetail, sevHoldNote, sevHoldWhy, sevHoldAgo, sevHoldTag, sevBadgeStyle, sevBadgeIcon, sevSteps, sevStepText, sevWhy, sevPat, sevIso, sevTodo, sevFacts, sevMachine,showAdvanced, specIndics, srcNotice, srcSelAllLabel, srcSelCount, srcTables, srcTotal, statRows, stopClick, sumTotal, tagOptions, themeIcon, threshRows, toast, toastIcon, toastMsg, toastStyle, toggleTheme, totalStyle, unitChips, unitOptions,
     cfgFailShow, cfgFailTitle, cfgFailText, cfgFailWhy, cfgRepairShow, cfgRepairLabel, onCfgRetry, onCfgRepair, monEmptyFresh, monEmptyFail,
-    tzValue, tzOptions, tzNow, onTzChange,
+    tzValue, tzOptions, tzNow, onTzChange, appReady, monPillShow,
   } = v;
   return html`
 <div class=${rootClass} style="height: 100vh; display: flex; flex-direction: column; background: var(--bg-primary); color: var(--text-primary); font-family: var(--font-sans); font-size: 13px; overflow: hidden;">
@@ -33,9 +33,9 @@ export function view(v) {
       `)}
     </nav>
     <div style="margin-left: auto; display: flex; align-items: center; gap: 9px;">
-      <button onClick=${onToggleMonitor} title=${monPillTitle} style="display: flex; align-items: center; gap: 7px; padding: 5px 11px; background: var(--bg-elevated); border: 1px solid var(--border-default); border-radius: 6px; font-size: 12px; color: var(--text-secondary); cursor: pointer;">
+      ${(monPillShow) ? html`<button onClick=${onToggleMonitor} title=${monPillTitle} style="display: flex; align-items: center; gap: 7px; padding: 5px 11px; background: var(--bg-elevated); border: 1px solid var(--border-default); border-radius: 6px; font-size: 12px; color: var(--text-secondary); cursor: pointer;">
         <span style="width: 8px; height: 8px; border-radius: 50%; background: ${monitorDotColor}; box-shadow: 0 0 0 3px ${monitorDotRing};"></span>알람 ${monitorText}${(monModeBadgeShow) ? html`<span style=${monModeBadgeStyle}>${monModeBadgeText}</span>` : null}
-      </button>
+      </button>` : null}
       <button onClick=${goSettings} title="설정" style="position: relative; display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px; border-radius: 6px; border: 1px solid var(--border-default); background: var(--bg-elevated); color: var(--text-secondary); cursor: pointer; ${settingsActiveStyle}"><span class="codicon codicon-gear" style="font-size: 16px;"></span>${(equipUnsetDot) ? html`<span title="설정이 필요한 항목 있음 (설비 정보 미설정 또는 베이스라인 미학습)" style="position: absolute; top: 4px; right: 4px; width: 7px; height: 7px; border-radius: 50%; background: #d99a2b;"></span>` : null}</button>
       <button onClick=${toggleTheme} title="테마 전환" style="display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px; border-radius: 6px; border: 1px solid var(--border-default); background: var(--bg-elevated); color: var(--text-secondary); cursor: pointer;"><span class="codicon codicon-${themeIcon}" style="font-size: 16px;"></span></button>
     </div>
@@ -269,12 +269,9 @@ export function view(v) {
             <span class="codicon codicon-info" style="font-size: 13px; margin-top: 1px; flex-shrink: 0;"></span><span>${qualityNote}</span>
           </div>
         ` : null}
-        <div style="display: flex; flex-wrap: wrap; background: var(--bg-secondary); border: 1px solid var(--border-default); border-radius: 8px; overflow: hidden; margin-bottom: 14px;">
+        <div style="display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 22px; padding: 2px 2px 14px; font-size: 12.5px;">
           ${(detSpec || []).map((s) => html`
-            <div style="flex: 1 1 0; min-width: 160px; padding: 14px 18px; border-right: 1px solid var(--border-default);">
-              <div style="font-size: 10px; font-weight: 600; letter-spacing: .5px; text-transform: uppercase; color: var(--text-muted);">${s.k}</div>
-              <div style="margin-top: 8px; font-size: 15px; font-weight: 600; color: var(--text-primary); font-family: var(--font-mono);">${s.v}</div>
-            </div>
+            <span title=${s.t || null} style="display: inline-flex; align-items: baseline; gap: 7px; white-space: nowrap;"><span style="color: var(--text-muted);">${s.k}</span><b style="font-weight: 600; color: var(--text-primary); font-family: var(--font-mono);">${s.v}</b></span>
           `)}
         </div>
         ${(rollupNote) ? html`
@@ -283,56 +280,72 @@ export function view(v) {
           </div>
         ` : null}
 
-        <div style="background: var(--bg-secondary); border: 1px solid var(--border-default); border-radius: 8px; padding: 18px; margin-bottom: 14px;">
-          <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px;">
-            <div style="display: flex; align-items: center; gap: 9px; font-size: 15px; font-weight: 600; color: var(--text-primary);"><span style="width: 3px; height: 15px; border-radius: 2px; background: ${sevColor};"></span>진동 심각도 평가</div>
-            <div style="font-size: 12px; color: var(--text-muted); font-family: var(--font-mono);">${sevMachine}</div>
+        <div style="display: flex; align-items: center; flex-wrap: wrap; gap: 6px 12px; margin: 6px 0 14px; padding-bottom: 12px; border-bottom: 1px solid var(--border-light);">
+          <span style="font-size: 17px; font-weight: 700; color: var(--text-primary); letter-spacing: -0.3px;">진동 심각도 평가</span>
+          <span style="font-size: 12px; color: var(--text-muted);">결함 패턴이 등급을 발동하고, 진동 크기가 높이를 결정</span>
+          <div style="margin-left: auto; display: flex; align-items: center; gap: 10px; min-width: 0;">
+            <span style="font-size: 12px; color: var(--text-muted); font-family: var(--font-mono); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${sevMachine}</span>
+            <button onClick=${onToggleDx} title=${dxToggleLabel} class="vhov3" style="flex-shrink: 0; display: inline-flex; align-items: center; gap: 4px; height: 26px; padding: 0 8px; border-radius: 5px; border: 1px solid transparent; background: transparent; color: var(--text-secondary); font-size: 12px; font-weight: 600; cursor: pointer;">종합 분석<span class=${'codicon ' + (dxOpen ? 'codicon-chevron-up' : 'codicon-chevron-down')} style="font-size: 13px;"></span></button>
           </div>
-          <div style="border: 1px solid var(--border-light); border-radius: 10px; padding: 18px 20px 12px; margin-bottom: 14px;">
-            <div style="display: flex; align-items: flex-end; justify-content: space-between; margin-bottom: 14px;">
-              <div style="min-width: 0;">
-                <div style="font-size: 11px; color: var(--text-muted); margin-bottom: 3px;">${sevLabel}</div>
-                <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
-                  <span style="font-size: 38px; font-weight: 800; color: ${sevColor}; line-height: 1; letter-spacing: -0.5px;">${sevGradeKo}</span>
-                  ${(sevHold) ? html`<span data-tip=${sevHoldDetail || null} style="padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 700; color: #8a8f99; background: rgba(138,143,153,0.16); border: 1px solid rgba(138,143,153,0.4); ${sevHoldDetail ? 'cursor: help;' : ''}">판정 보류</span>` : null}
+        </div>
+        <div style="background: var(--bg-secondary); border: 1px solid var(--border-default); border-radius: 10px; overflow: hidden; margin-bottom: 22px;">
+          <!-- 머리 — 등급 상자 + 판정문·판정식 + 단계 -->
+          <div style="display: flex; align-items: center; gap: 18px; flex-wrap: wrap; padding: 18px 20px; border-bottom: 1px solid var(--border-light);">
+            <div style=${'flex-shrink: 0; display: inline-flex; align-items: center; gap: 8px; box-sizing: border-box; padding: 10px 18px; border-radius: 6px; font-size: 26px; font-weight: 800; line-height: 1.15; letter-spacing: -0.5px; white-space: nowrap; ' + (sevBadgeStyle || '')}>${(sevBadgeIcon) ? html`<span class=${'codicon ' + sevBadgeIcon} style="font-size: 20px;"></span>` : null}${sevGradeKo}</div>
+            <div style="flex: 1 1 320px; min-width: 0;">
+              <div style="display: flex; align-items: center; flex-wrap: wrap; gap: 4px 10px;">
+                <span style="font-size: 17px; font-weight: 700; color: var(--text-primary); letter-spacing: -0.3px; line-height: 1.4;">${dxVerdict}</span>
+                ${(sevHoldTag) ? html`<span data-tip=${sevHoldDetail || null} style="padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 700; color: #8a8f99; background: rgba(138,143,153,0.16); border: 1px solid rgba(138,143,153,0.4); ${sevHoldDetail ? 'cursor: help;' : ''}">판정 보류</span>` : null}
+              </div>
+              ${(sevFormula) ? html`<div style="margin-top: 3px; font-size: 12.5px; color: var(--text-muted); line-height: 1.55;">${sevFormula}</div>` : null}
+              <!-- 판정 동결 사유를 판정문 바로 아래 표시 -->
+              ${(sevHold) ? html`<div style="font-size: 12.5px; color: var(--text-secondary); margin-top: 5px; line-height: 1.6;"><b style="color: #d99a2b;">${sevHoldWhy}</b> — ${sevHoldNote} <span style="color: var(--text-muted);">· ${sevHoldAgo}</span></div>` : null}
+              ${(sevWhy) ? html`<div style="margin-top: 5px; font-size: 13px; color: var(--text-secondary); line-height: 1.6;">${sevWhy.text}</div>` : null}
+              ${(sevWhy && sevWhy.note) ? html`<div style="margin-top: 3px; font-size: 12px; color: var(--text-muted); line-height: 1.55;">${sevWhy.note}</div>` : null}
+            </div>
+            ${(sevSteps) ? html`<div style="flex-shrink: 0; align-self: flex-start; display: flex; align-items: center; gap: 4px; margin-top: 6px; font-size: 12px; color: var(--text-muted);"><span style="margin-right: 6px;">단계</span>${sevSteps.map((s) => html`<i style=${s}></i>`)}<span style="margin-left: 6px; font-family: var(--font-mono); color: var(--text-secondary);">${sevStepText}</span></div>` : null}
+          </div>
+          <!-- 지금 할 일 · 근거 사실 — 리포트 판정 카드와 같은 줄 -->
+          ${(sevTodo) ? html`<div style="display: flex; flex-direction: column; gap: 10px; padding: 14px 20px 16px; border-bottom: 1px solid var(--border-light);">
+            <div style="display: flex; align-items: center; gap: 10px; padding: 10px 14px; background: var(--bg-elevated); border-radius: 6px;">
+              <span class="codicon codicon-tools" style="font-size: 16px; color: var(--primary-light);"></span>
+              <span style="flex-shrink: 0; font-size: 12px; color: var(--text-muted);">지금 할 일</span>
+              <b style="font-size: 13px; font-weight: 700; color: var(--text-primary);">${sevTodo}</b>
+            </div>
+            ${(sevFacts && sevFacts.length) ? html`<div style="display: flex; flex-wrap: wrap; gap: 6px 20px; font-size: 12px; color: var(--text-muted);">${sevFacts.map((f) => html`<span>${f.k}${(f.v) ? html` <span style="font-family: var(--font-mono); color: var(--text-primary);">${f.v}</span>` : null}${(f.t) ? ' · ' + f.t : ''}</span>`)}</div>` : null}
+          </div>` : null}
+          <!-- 두 열 — 결함 패턴(등급 발동) | 진동 크기(등급 수준) -->
+          ${(sevPat && sevIso) ? html`
+          <div style="display: flex; flex-wrap: wrap;">
+            <div style="flex: 1 1 260px; min-width: 0; padding: 16px 20px;">
+              <div style="display: flex; align-items: baseline; gap: 8px; margin-bottom: 12px;"><b style="font-size: 13px; color: var(--text-primary);">결함 패턴</b><span style="margin-left: auto; font-size: 12px; color: var(--text-muted); white-space: nowrap;">발동 여부</span></div>
+              <div style="display: flex; flex-wrap: wrap; gap: 6px;">${sevPat.pills.map((q) => html`<span style=${q.style}>${q.label}</span>`)}</div>
+              <div style="margin-top: 10px; font-size: 12.5px; color: var(--text-secondary); line-height: 1.6;">${sevPat.fact}</div>
+            </div>
+            <div style="flex: 2 1 420px; min-width: 0; padding: 16px 20px; border-left: 1px solid var(--border-light);">
+              <div style="display: flex; align-items: baseline; gap: 8px; margin-bottom: 14px;"><b style="font-size: 13px; color: var(--text-primary);">진동 크기</b><span style="font-size: 12px; color: var(--text-muted);">${sevIso.title}</span><span style="margin-left: auto; white-space: nowrap;">${(sevIso.val) ? html`<b style="font-size: 14px; color: var(--text-primary); font-family: var(--font-mono);">${sevIso.val}</b>` : html`<span style="font-size: 12px; color: var(--text-muted);">계산 전 — 원시 파형 조회 후 확정</span>`}</span></div>
+              <!-- 존 막대 — 현재 존 강조 + 값 눈금 -->
+              <div style="position: relative; display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px;">
+                ${sevIso.segs.map((s) => html`<div style=${s}></div>`)}
+                ${(sevIso.knobStyle) ? html`<span style=${'position: absolute; top: -4px; width: 3px; height: 14px; margin-left: -1.5px; border-radius: 2px; background: var(--text-primary); box-shadow: 0 0 0 2px var(--bg-secondary); ' + sevIso.knobStyle}></span>` : null}
+              </div>
+              <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; margin-top: 9px;">
+                ${sevIso.zones.map((z) => html`<div style=${z.style}><b>${z.k}</b> ${z.ko}<div style="margin-top: 2px; font-family: var(--font-mono);">${z.range}</div></div>`)}
+              </div>
+              <!-- 결과 줄 — 같은 등급이 이어지는 존은 한 칸(A·B → 주의) -->
+              ${(sevIso.res.length) ? html`
+                ${(sevIso.resNote) ? html`<div style="margin-top: 14px; font-size: 11px; color: var(--text-muted);">${sevIso.resNote}</div>` : null}
+                <div title=${sevIso.resCap} style=${'display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; margin-top: ' + (sevIso.resNote ? '6px' : '14px') + ';'}>
+                  ${sevIso.res.map((r) => html`<div style=${r.style}>${r.label}</div>`)}
                 </div>
-                <!-- 판정 동결 사유를 등급 바로 아래 표시 -->
-                ${(sevHold) ? html`<div style="font-size: 12px; color: var(--text-secondary); margin-top: 7px;"><b style="color: #d99a2b;">${sevHoldWhy}</b> — ${sevHoldNote}</div>` : null}
-              </div>
-            </div>
-            <div style="display: flex; height: 30px; border-radius: 6px; overflow: hidden; border: 1px solid var(--border-light);">
-              ${(sevZones || []).map((z) => html`<div style=${z.cellStyle}>${z.ko}</div>`)}
-            </div>
-            <div style="display: flex; margin-top: 4px;">
-              ${(sevZones || []).map((z) => html`<div style=${z.labStyle}>${z.range}</div>`)}
-            </div>
-            <div style="display: flex; align-items: center; gap: 12px; margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--border-light); flex-wrap: wrap;">
-              <div style="flex: 1 1 240px; min-width: 0; display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap;">
-                <span style="font-size: 13px; font-weight: 600; color: var(--text-primary);">${dxVerdict}</span>
-                <span style="font-size: 12px; color: var(--text-tertiary);">${sevReco}</span>
-                ${anchorNote ? html`<span style="font-size: 11px; color: var(--text-muted); font-family: var(--font-mono);">${anchorNote}</span>` : null}
-              </div>
-              <button onClick=${onToggleDx} style="flex-shrink: 0; height: 28px; padding: 0 12px; border-radius: 5px; border: 1px solid var(--border-medium); background: transparent; color: var(--text-secondary); font-size: 11px; font-weight: 600; cursor: pointer;" class="vhov3">${dxToggleLabel}</button>
+              ` : null}
             </div>
           </div>
-          <div style="font-size: 11px; color: var(--text-muted); margin-bottom: 7px;">기간 통계 — 선택한 기간 전체의 롤업 버킷에서 냅니다. 등급이 아닙니다(등급은 위 종합 판정)</div>
-          <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px;">
-            ${(sevCards || []).map((c) => html`
-              <div style="padding: 13px 14px; border: 1px solid var(--border-light); border-radius: 9px; ${c.style}">
-                <div style="margin-bottom: 8px; font-size: 12px; font-weight: 500; color: var(--text-secondary);">${c.label}${c.badgeKo ? html`<span style="display: inline-block; padding: 1px 6px; border-radius: 3px; font-size: 9px; font-weight: 700; letter-spacing: .3px; color: ${c.badgeColor}; background: ${c.badgeSoft}; border: 1px solid ${c.badgeBorder}; margin-left: 4px; vertical-align: middle;">${c.badgeKo}</span>` : null}</div>
-                <div style="font-size: 26px; font-weight: 700; color: var(--text-primary); letter-spacing: -0.5px; margin-bottom: 8px; font-variant-numeric: tabular-nums;">${c.valueText}<span style="font-size: 12px; font-weight: 500; color: var(--text-muted); margin-left: 2px;">${c.unit}</span></div>
-                <div style="display: flex; justify-content: space-between; align-items: center; font-size: 11px;">
-                  <span style="color: var(--text-muted);">${c.thrText}</span>
-                  <span style="color: ${c.arrowColor}; font-weight: 600;">${c.arrow} ${c.deltaText}</span>
-                </div>
-                ${(c.foot2) ? html`<div style="margin-top: 6px; font-size: 10.5px; color: var(--text-muted); line-height: 1.45;">${c.foot2}</div>` : null}
-              </div>
-            `)}
-          </div>
+          ` : null}
         </div>
 
         ${(dxOpen) ? html`
-        <div id="dx-card" style="background: var(--bg-secondary); border: 1px solid var(--border-default); border-radius: 8px; padding: 18px; margin: -4px 0 14px;">
+        <div id="dx-card" style="background: var(--bg-secondary); border: 1px solid var(--border-default); border-radius: 8px; padding: 18px; margin: -8px 0 22px;">
           <div style="display: flex; align-items: center; gap: 9px; font-size: 15px; font-weight: 600; color: var(--text-primary); margin-bottom: 14px;"><span style="width: 3px; height: 15px; border-radius: 2px; background: var(--primary-base);"></span>종합 분석 <span style="font-size: 12px; font-weight: 500; color: var(--text-muted); font-family: var(--font-mono);">${dxStamp}</span><button onClick=${onToggleDx} title="접기" style="margin-left: auto; width: 28px; height: 28px; border-radius: 5px; border: 1px solid var(--border-default); background: transparent; color: var(--text-muted); cursor: pointer;"><span class="codicon codicon-chevron-up" style="font-size: 14px;"></span></button></div>
           <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 18px;">
             <div>
@@ -347,10 +360,10 @@ export function view(v) {
               </div>
             </div>
             <div>
-              <div style="font-size: 11px; font-weight: 700; letter-spacing: .5px; text-transform: uppercase; color: var(--text-muted); margin-bottom: 8px;">권고 조치</div>
+              <div style="font-size: 11px; font-weight: 700; letter-spacing: .5px; text-transform: uppercase; color: var(--text-muted); margin-bottom: 8px;">세부 조치</div>
               <div style="display: flex; flex-direction: column; gap: 7px;">
                 ${(dxActions || []).map((a) => html`
-                  <div style="display: flex; align-items: flex-start; gap: 8px; font-size: 12px; line-height: 1.5;"><span style="color: var(--primary-light); font-weight: 700; font-family: var(--font-mono);">${a.no}</span><span style="color: var(--text-secondary);">${a.txt}</span></div>
+                  <div style="display: flex; align-items: flex-start; gap: 8px; font-size: 12px; line-height: 1.5;"><span style="color: var(--primary-light); font-weight: 700; font-family: var(--font-mono);">${a.no}</span><span style="color: var(--text-secondary);">${a.txt}${(a.why) ? html`<span style="display: block; margin-top: 1px; font-size: 11.5px; color: var(--text-muted);">${a.why}</span>` : null}</span></div>
                 `)}
               </div>
             </div>
@@ -365,22 +378,33 @@ export function view(v) {
         </div>
         ` : null}
 
-        <div style="background: var(--bg-secondary); border: 1px solid var(--border-default); border-radius: 8px; padding: 16px 18px; margin-bottom: 14px;">
-          <div style="display: flex; align-items: center; gap: 9px; font-size: 15px; font-weight: 600; color: var(--text-primary); margin-bottom: 12px;"><span style="width: 3px; height: 15px; border-radius: 2px; background: var(--primary-base);"></span>통계 요약</div>
-          ${(statSummary) ? html`<div title=${statSummary} style="font-size: 12px; color: var(--text-muted); margin: -4px 0 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${statSummary}</div>` : null}
-          <!-- 한 칸 한 줄·스크롤 없음 — 폭 부족 시 넓은 칸부터 말줄임(전문은 hover) -->
-          <div style="display: flex; flex-direction: column; gap: 1px; background: var(--border-light); border: 1px solid var(--border-light); border-radius: 6px; overflow: hidden;">
-            ${[(statRows || []).filter((r) => r.wide), (statRows || []).filter((r) => !r.wide)].map((grp, gi) => (grp.length ? html`
-              <div style="display: flex; gap: 1px;">
-                ${grp.map((r) => html`
-                  <div style="flex: 1 1 auto; min-width: 0; background: ${gi === 0 ? 'var(--bg-elevated)' : 'var(--bg-secondary)'}; padding: 13px 16px;">
-                    <div title=${r.k} style="font-size: 11px; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${r.k}</div>
-                    <div title=${r.t || r.v} style="margin-top: 5px; font-size: 15px; font-weight: 600; line-height: 1.45; color: var(--text-primary); font-family: var(--font-mono); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${r.v}</div>
-                  </div>
-                `)}
-              </div>
-            ` : null))}
-          </div>
+        <div style="display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 12px; margin: 0 2px 10px;">
+          <span style="font-size: 15px; font-weight: 700; color: var(--text-primary);">기간 통계</span>
+          <span style="margin-left: auto; font-size: 12px; color: var(--text-muted);">선택 기간 롤업 버킷 기준 · 등급 근거는 ISO 판정값만</span>
+        </div>
+        <div style="background: var(--bg-secondary); border: 1px solid var(--border-default); border-radius: 8px; overflow-x: auto; margin-bottom: 14px;">
+          <table style="width: 100%; border-collapse: collapse; font-size: 13px;">
+            <thead>
+              <tr style="background: var(--bg-elevated); font-size: 12px; color: var(--text-muted);">
+                <th style="width: 19%; padding: 10px 16px; text-align: left; font-weight: 500; white-space: nowrap;">지표</th>
+                <th style="width: 14%; padding: 10px 16px; text-align: right; font-weight: 500; white-space: nowrap;">값</th>
+                <th style="width: 11%; padding: 10px 16px; text-align: right; font-weight: 500; white-space: nowrap;">기준</th>
+                <th style="width: 9%; padding: 10px 16px; text-align: left; font-weight: 500; white-space: nowrap;">상태</th>
+                <th style="padding: 10px 16px; text-align: left; font-weight: 500; white-space: nowrap;">비고</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${(statRows || []).map((r) => html`
+                <tr style="border-top: 1px solid var(--border-light);">
+                  <td style=${'padding: 11px 16px; white-space: nowrap; color: var(--text-primary); font-weight: ' + (r.strong ? '700' : '500') + ';'}>${r.k}</td>
+                  <td style=${'padding: 11px 16px; text-align: right; white-space: nowrap; font-family: var(--font-mono); font-weight: 600; color: ' + (r.vColor || 'var(--text-primary)') + ';'}>${r.v}</td>
+                  <td style="padding: 11px 16px; text-align: right; white-space: nowrap; font-family: var(--font-mono); color: var(--text-muted);">${r.thr}</td>
+                  <td style=${'padding: 11px 16px; white-space: nowrap; font-size: 12.5px; font-weight: 700; color: ' + r.stColor + ';'}>${r.st}</td>
+                  <td title=${r.t || null} style="padding: 11px 16px; font-size: 12px; line-height: 1.5; color: var(--text-muted);">${r.note}</td>
+                </tr>
+              `)}
+            </tbody>
+          </table>
         </div>
 
         <div id="sec-trend" style="display: flex; align-items: center; gap: 10px; margin: 6px 0 12px;">
@@ -693,20 +717,45 @@ export function view(v) {
           ${(secSource) ? html`
             <div style="background: var(--bg-secondary); border: 1px solid var(--border-default); border-radius: 8px; padding: 20px; margin-bottom: 16px;">
               <div style="font-size: 17px; font-weight: 600; color: var(--text-primary); margin-bottom: 4px;">유저 정보</div>
-              <div style="font-size: 12px; color: var(--text-muted); margin-bottom: 18px;">Neo 콘솔에 로그인한 계정으로 동작합니다. 보이는 테이블과 저장되는 설정이 계정마다 따로입니다</div>
+              <div style="font-size: 12px; color: var(--text-muted); margin-bottom: 18px;">입력한 API 토큰의 계정으로 동작합니다. 보이는 테이블과 저장되는 설정이 계정마다 따로입니다</div>
 
               ${(userName) ? html`
-                <div style="display: flex; align-items: center; gap: 10px; padding: 12px 14px; border-radius: 8px; background: var(--bg-elevated); border: 1px solid var(--border-light);">
+                <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 12px 14px; border-radius: 8px; background: var(--bg-elevated); border: 1px solid var(--border-light);">
                   <span class="codicon codicon-pass-filled" style="font-size: 15px; color: var(--success, #3fa45b);"></span>
                   <span style="font-size: 13px; color: var(--text-secondary);">접속 계정</span>
                   <span style="font-family: var(--font-mono); font-size: 13px; font-weight: 600; color: var(--text-primary);">${userName}</span>
-                  <span style="margin-left: auto; font-size: 11.5px; color: var(--text-muted);">계정을 바꾸려면 Neo 콘솔에서 다시 로그인하세요</span>
+                  ${(tokenHintText) ? html`<span style="font-family: var(--font-mono); font-size: 11.5px; color: var(--text-muted);">토큰 ${tokenHintText}</span>` : null}
+                  <span style="margin-left: auto; display: inline-flex; gap: 6px;">
+                    ${(!tokenFormShow) ? html`<button onClick=${onTokenEdit}
+                      style="height: 26px; padding: 0 11px; border-radius: 5px; border: 1px solid var(--border-medium); background: transparent; color: var(--text-secondary); font-size: 12px; cursor: pointer;">토큰 변경</button>` : null}
+                    <button onClick=${onTokenClear} title="이 브라우저에 저장된 토큰을 지웁니다 — 지우면 조회·판정·알림 기록이 멈춥니다"
+                      style="height: 26px; padding: 0 11px; border-radius: 5px; border: 1px solid var(--border-medium); background: transparent; color: var(--text-secondary); font-size: 12px; cursor: pointer;">토큰 지우기</button>
+                  </span>
                 </div>` : null}
 
               ${(userAuthMsg) ? html`
                 <div style="display: flex; align-items: flex-start; gap: 10px; padding: 12px 14px; border-radius: 8px; background: rgba(217,154,43,0.10); border: 1px solid rgba(217,154,43,0.35);">
                   <span class="codicon codicon-warning" style="font-size: 15px; color: #d99a2b; margin-top: 1px;"></span>
-                  <div style="font-size: 12.5px; color: var(--text-secondary); line-height: 1.6;">${userAuthMsg}<div style="color: var(--text-muted); margin-top: 3px;">로그인이 확인되기 전에는 어떤 데이터도 조회하지 않습니다.</div></div>
+                  <div style="font-size: 12.5px; color: var(--text-secondary); line-height: 1.6;">${userAuthMsg}<div style="color: var(--text-muted); margin-top: 3px;">토큰이 확인되기 전에는 어떤 데이터도 조회하지 않습니다.</div></div>
+                </div>` : null}
+
+              ${(tokenFormShow) ? html`
+                <div onChange=${onTokenChange} style="margin-top: 10px; padding: 13px 15px; border-radius: 8px; background: var(--bg-elevated); border: 1px solid var(--border-light);">
+                  <label style="display: block; font-size: 12px; font-weight: 600; color: var(--text-tertiary); margin-bottom: 7px;">API 토큰${(tokenFor) ? html` <span style="font-weight: 400; color: var(--text-muted);">— ${tokenFor} 계정</span>` : null}</label>
+                  <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+                    ${/* onChange 금지 — compat에서 입력칸 onChange는 input 이벤트라 onInput을 덮어씀 */ ''}
+                    <input type="password" value=${tokenInput} onInput=${onTokenInput} onKeyDown=${onTokenKey} placeholder="nt_…" autocomplete="off" spellcheck="false"
+                      style="height: 32px; flex: 1; min-width: 240px; max-width: 460px; padding: 0 10px; border-radius: 6px; border: 1px solid var(--border-medium); background: var(--bg-secondary); color: var(--text-primary); font-size: 13px; font-family: var(--font-mono);" />
+                    <button onClick=${onTokenSubmit} disabled=${tokenBusy}
+                      style="height: 32px; padding: 0 15px; border-radius: 6px; border: none; background: var(--primary-base); color: #fff; font-size: 12.5px; font-weight: 600; cursor: ${tokenBusy ? 'wait' : 'pointer'}; opacity: ${tokenBusy ? '.6' : '1'};">${tokenBusy ? '확인 중…' : '확인·저장'}</button>
+                    ${(tokenCancelShow) ? html`<button onClick=${onTokenCancel} disabled=${tokenBusy}
+                      style="height: 32px; padding: 0 13px; border-radius: 6px; border: 1px solid var(--border-medium); background: transparent; color: var(--text-secondary); font-size: 12.5px; cursor: pointer;">취소</button>` : null}
+                  </div>
+                  ${(tokenMsg) ? html`<div style="font-size: 12px; color: var(--danger, #e5646a); margin-top: 7px;">${tokenMsg}</div>` : null}
+                  <div style="font-size: 11.5px; color: var(--text-muted); margin-top: 8px; line-height: 1.6;">
+                    Neo 콘솔의 방패 아이콘(Security) 패널에서 <b style="color: var(--text-secondary);">New token</b>으로 발급합니다. 콘솔에 로그인한 계정의 토큰만 받습니다.<br />
+                    토큰은 이 브라우저에만 저장되며, 폐기·만료되면 다시 입력해야 합니다.
+                  </div>
                 </div>` : null}
 
               ${(dbReady) ? html`
@@ -777,7 +826,7 @@ export function view(v) {
                 </div>` : null}
             </div>` : null}
 
-          ${(secSource) ? html`
+          ${(secSource && appReady) ? html`
             <div style="background: var(--bg-secondary); border: 1px solid var(--border-default); border-radius: 8px; padding: 20px; margin-bottom: 16px;">
               <div style="font-size: 17px; font-weight: 600; color: var(--text-primary); margin-bottom: 4px;">표시 시간대</div>
               <div style="font-size: 12px; color: var(--text-muted); margin-bottom: 14px;">화면·리포트·알림에 찍히는 시각과 "오늘"·날짜 선택의 기준입니다. 데이터 조회는 시간대와 무관하게 같은 순간을 봅니다</div>
@@ -789,7 +838,7 @@ export function view(v) {
               </div>
             </div>` : null}
 
-          ${(secSource) ? html`
+          ${(secSource && appReady) ? html`
                         <div style="background: var(--bg-secondary); border: 1px solid var(--border-default); border-radius: 8px; padding: 20px; margin-bottom: 16px;">
               <div style="font-size: 17px; font-weight: 600; color: var(--text-primary); margin-bottom: 4px;">데이터 소스</div>
               <div style="font-size: 12px; color: var(--text-muted); margin-bottom: 18px;">진동 데이터가 저장된 TAG table을 고르고 태그 별칭을 지정합니다</div>
@@ -1057,7 +1106,7 @@ export function view(v) {
                 <div>
                   <div style="font-size: 13px; font-weight: 600; color: var(--text-primary);">${mcDescTitle}</div>
                   <div style="font-size: 12px; color: var(--text-secondary); margin-top: 3px; line-height: 1.5;">${mcDescBody}</div>
-                  <div style="font-size: 11px; color: var(--text-muted); margin-top: 6px;">ISO 10816-3 기준 · 머신 클래스에 따라 진동 심각도 존(A 양호 → D 심각)의 경계값이 달라집니다.</div>
+                  <div style="font-size: 11px; color: var(--text-muted); margin-top: 6px;">ISO 10816-3 기준 · 머신 클래스에 따라 진동 심각도 존(A 신규 설비 수준 → D 손상 우려)의 경계값이 달라집니다.</div>
                 </div>
               </div>
               <div style="border: 1px solid var(--border-light); border-radius: 8px; padding: 14px 16px;">
@@ -1106,7 +1155,7 @@ export function view(v) {
               </div>
               <div style="font-size: 12px; color: var(--text-muted); margin-bottom: 14px; line-height: 1.7;">정상 운전 구간 RMS의 중심(μ)과 평소 변동(σ)을 학습해 한계(μ+kσ) 초과 시 카드와 근거표에 <b style="color: var(--text-secondary);">베이스라인 이탈</b>로 표시합니다. 등급·알림에는 쓰이지 않습니다.</div>
               <ul style="margin: -6px 0 14px; padding-left: 18px; font-size: 12px; color: var(--text-tertiary); line-height: 1.7; list-style: none;">
-                <li style="position: relative;"><span style="position: absolute; left: -14px;">•</span>절대값이 양호 존이라도 평소 대비 급증을 알아볼 수 있습니다.</li>
+                <li style="position: relative;"><span style="position: absolute; left: -14px;">•</span>절대값이 ISO A 구간이라도 평소 대비 급증을 알아볼 수 있습니다.</li>
                 <li style="position: relative;"><span style="position: absolute; left: -14px;">•</span>추정은 스파이크에 흔들리지 않는 중앙값 방식이고, 정지·기동 구간은 학습에서 자동 제외됩니다.</li>
                 <li style="position: relative;"><span style="position: absolute; left: -14px;">•</span>학습은 선택 사항이며, 등급 판정(결함 패턴·존 경계)은 학습과 무관하게 항상 동작합니다.</li>
               </ul>
@@ -1391,11 +1440,11 @@ export function view(v) {
             </div>
           ` : null}
 
-          <!-- 저장 막대 하단 고정 — 긴 태그 목록 아래로 버튼이 밀리는 것 방지 -->
-          <div style="position: sticky; bottom: 0; z-index: 5; display: flex; align-items: center; gap: 14px; margin-top: 20px; padding: 12px 0; background: var(--bg-canvas); border-top: 1px solid ${settingsDirty ? 'rgba(217,154,43,.45)' : 'var(--border-default)'};">
+          <!-- 저장 막대 하단 고정 — 긴 태그 목록 아래로 버튼이 밀리는 것 방지, 준비 전엔 저장할 설정 없음 -->
+          ${(appReady) ? html`<div style="position: sticky; bottom: 0; z-index: 5; display: flex; align-items: center; gap: 14px; margin-top: 20px; padding: 12px 0; background: var(--bg-canvas); border-top: 1px solid ${settingsDirty ? 'rgba(217,154,43,.45)' : 'var(--border-default)'};">
             <button onClick=${onSaveSettings} style="height: 38px; padding: 0 22px; border-radius: 6px; border: none; background: var(--primary-base); color: #fff; font-size: 13px; font-weight: 600; cursor: pointer;">저장</button>
             ${(settingsDirty) ? html`<span style="display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--warning);"><span class="codicon codicon-circle-filled" style="font-size: 8px;"></span>저장하지 않은 변경사항이 있습니다</span>` : null}
-          </div>
+          </div>` : null}
         </div>
       </div>
     ` : null}

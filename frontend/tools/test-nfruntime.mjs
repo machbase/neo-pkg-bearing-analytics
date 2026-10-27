@@ -6,6 +6,7 @@ globalThis.window = globalThis;
 
 // LOOKUP 테이블을 메모리 맵으로 흉내(test-cfgstore와 같은 방식)
 const store = new Map();
+import './_faketoken.mjs';   // db.js 관문용 토큰 칸
 globalThis.fetch = async (url) => {
   const sql = decodeURIComponent(String(url).replace(/^[^?]*\?q=/, '').replace(/&.*$/, ''));
   let rows = [];

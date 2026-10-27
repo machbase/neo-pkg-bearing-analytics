@@ -63,6 +63,7 @@ chk(bare.rpm === 0 && bare.rpmSrc === 'missing', '종동측인데 풀리경 없�
 function mkApp() {
   const app = new App({ seed: 7, equipmentCount: 3 });
   app.setState = function (st) { Object.assign(this.state, st); };
+  app.state.user = 'TESTER';   // 토큰·계정 확인을 마친 상태
   app._toast = () => {};
   app.E = Object.assign({}, CH);
   app.live = true; app.user = 'JOY';
@@ -95,6 +96,12 @@ const F = app.data.equipment.find((e) => e.name === 'FAN'), M = app.data.equipme
   chk(/■ 회전수: 1112\.5 RPM \(종동축·풀리 환산\) — 모터 1780 RPM\(1× 18\.5 Hz\)/.test(evTxt), '상세분석 근거 — 종동축 회전수·모터 회전수 함께, 1×는 종동축', (evTxt.match(/■ 회전수[^"]{0,70}/) || [''])[0]);
   const llm = String(app._opinionPack(F, det, { flag: false }));
   chk(/1112\.5 RPM \(종동축·풀리 환산\) \(1×=18\.5 Hz/.test(llm), 'LLM 입력 — 종동축 회전수·1×', (llm.match(/\[설비\][^\n]{0,90}/) || [''])[0]);
+  // 소견 프롬프트 — 질문 셋 · 설비 담당자 대상 · 조치는 엔진 결정만 · 감시 등급·별점·0점 후보 목록 없음
+  const op = String(app._opinionPrompt(F, det, dx, { flag: false }));
+  chk(/## 지금 상태\n[\s\S]*## 그렇게 보는 이유\n[\s\S]*## 권장 행동\n/.test(op) && /설비 담당자/.test(op), '소견 프롬프트 — 질문 셋 · 독자 설비 담당자');
+  chk(op.includes('[지금 할 일 — 엔진 결정] ' + app._todoText(F, det, dx)) && /\[세부 조치 — 엔진 결정\]\n/.test(op), '소견 프롬프트 — 권장 행동의 출처(지금 할 일 · 세부 조치) 동봉');
+  chk(!/감시 등급|실시간 감시|[★☆]|근거점수 0\/100|A\(양호\)/.test(op), '소견 프롬프트 — 감시 등급 · 별점 · 0점 후보 줄 · 등급어 존 이름 없음');
+  chk(!/규칙 기반 1차 판정/.test(op) && /· 판정 = /.test(op), '소견 프롬프트 — 판정 문구는 화면 제목과 같은 것');
   const meta = app._reportMeta(F, det, ev, { flag: false }, dx);
   chk(/1112\.5 RPM \(종동축·풀리 환산\)/.test(meta.summary.rpmTxt), '리포트 요약 — 종동축 회전수와 출처', meta.summary.rpmTxt);
   const bf = VC.bearingFreqs(DRIVEN, F.bearing);
@@ -111,8 +118,9 @@ const F = app.data.equipment.find((e) => e.name === 'FAN'), M = app.data.equipme
   // 종동측 문구에 '명판' 표기 없음 — 켑스트럼 기준 1×·리포트 측정 한계
   const liveSrc = (await import('node:fs')).readFileSync(new URL('../src/data/live.js', import.meta.url), 'utf8');
   const rptSrc = (await import('node:fs')).readFileSync(new URL('../../cgi-bin/report/report.js', import.meta.url), 'utf8');
-  chk(/eq\.rpmSrc === 'pulley' \? '종동축 1×\(풀리 환산\) 기준'/.test(liveSrc) && /불가하면 입력값\(명판 또는 종동축 환산\)을 기준으로/.test(rptSrc) && !/불가하면 명판값을/.test(rptSrc),
-    '켑스트럼 기준 1×·리포트 측정 한계 문구 — 종동측을 "명판"이라 하지 않음');
+  // 리포트의 회전수 기준은 FFT 머리의 summary.rpmTxt(위 '리포트 요약' 검사가 종동축 표기 확인)
+  chk(/eq\.rpmSrc === 'pulley' \? '종동축 1×\(풀리 환산\) 기준'/.test(liveSrc) && /'회전수 ' \+ sm\.rpmTxt/.test(rptSrc) && !/명판값을/.test(rptSrc),
+    '켑스트럼 기준 1×·리포트 회전수 표기 — 종동측을 "명판"이라 하지 않음');
   Object.assign(app.state, { tab: 'settings' });
 }
 
@@ -130,6 +138,14 @@ const F = app.data.equipment.find((e) => e.name === 'FAN'), M = app.data.equipme
   const evM = app._evidence(M, Object.assign(emptyDet(M), { ordSpec: { freqs, mags, res: 0.5, resTrue: 0.5 } }));
   const indM = evM.conf.find((c) => /독립 회전원/.test(c.f));
   chk(indM && !indM.tags.some((t) => /귀속 확정/.test(t)), '모터측 센서에서 같은 스펙트럼 — 모터 1×는 동기 성분이라 다른 축 귀속 아님');
+  // 비어 있는 설비 정보 — 설정에 입력 칸이 있는 항목만 안내(계측 방향·위상은 앱이 받지 못해 제외)
+  const all = ev.missing.join(' · ') + ' / ' + app._metaAction(ev).map((x) => x.t + ' ' + x.w).join(' · ');
+  chk(!/계측 방향|위상|축방향/.test(all), '입력 칸이 없는 계측 방향·위상은 미입력 정보·세부 조치에 넣지 않는다', all);
+  chk(ev.missNames.length === ev.missing.length && ev.missNames.every((n) => ev.missing.some((m) => m.indexOf(n + '(') === 0))
+    && (ev.missNames.length === 0 || (app._metaAction(ev)[0].t === ev.missNames.join(' · ') + ' 입력' && app._metaAction(ev)[0].tag === '정보 입력')),
+    '설정할 수 있는 빈 항목은 세부 조치 "설비 정보 입력"에 모두 나온다', ev.missNames.join(','));
+  const bare = app._evidence(Object.assign({}, F, { meta: {}, bearing: null }), Object.assign(emptyDet(F), { ordSpec: { freqs, mags, res: 0.5, resTrue: 0.5 } }));
+  chk(['베어링 품번', '마운팅 방식', '구동방식'].every((n) => bare.missNames.indexOf(n) >= 0), '품번·마운팅·구동방식이 비면 셋 다 안내', bare.missNames.join(','));
 }
 
 // 상세분석 RPM 경고 — 종동측이면 문구·저장처가 종동축

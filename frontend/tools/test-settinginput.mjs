@@ -16,6 +16,7 @@ const chk = (ok, msg, extra) => {
 const mk = (tab) => {
   const a = new App({ seed: 1, equipmentCount: 1 });
   a.setState = function (s) { Object.assign(this.state, s); };
+  a.state.user = 'TESTER';   // 토큰·계정 확인을 마친 상태
   a._scheduleDraw = () => {}; a._toast = () => {};
   a.E = CH; a.live = true; a.repaints = 0; a.forceUpdate = function () { this.repaints++; };
   a._refreshRunState = () => {}; a._judgeLive = () => Promise.resolve(0);

@@ -20,17 +20,17 @@ npm run build:root  # vite build + dist/ → 패키지 루트 복사 (index.html
 | 도구 | 검증 대상 | Neo 필요 |
 | :--- | :--- | :---: |
 | `npm run smoke` | 오프라인 검사 전체 (목록은 `package.json`) | 아니오 |
-| `smoke-live.mjs` | `buildLiveData`·`liveDetail` 실데이터 경로, 저장소 왕복 | 예 (로그인) |
-| `test-judgeinputs.mjs` | 표시 단위(g·mm/s·μm)를 바꿔도 결함 판정 입력이 같은지 | 예 (로그인) |
-| `test-monitor.mjs` | 서버 판정 TQL 생성기 (dryRun — 실테이블 무변경) | 예 |
-| `test-monitor-minified.mjs` | 미니파이 후에도 타이머 TQL이 도는지 (함수명 축약 회귀) | 예 |
-| `npm run verify:live` | 진단 규칙(`verify-persona`)·요약 리포트 문구와 순서(`verify-summary`)·설비 메타 반영(`verify-meta`) | 예 (로그인) |
+| `smoke-live.mjs` | `buildLiveData`·`liveDetail` 실데이터 경로, 저장소 왕복 | 예 (토큰) |
+| `test-judgeinputs.mjs` | 표시 단위(g·mm/s·μm)를 바꿔도 결함 판정 입력이 같은지 | 예 (토큰) |
+| `test-monitor.mjs` | 서버 판정 TQL 생성기 (dryRun — 실테이블 무변경) | 예 (토큰) |
+| `test-monitor-minified.mjs` | 미니파이 후에도 타이머 TQL이 도는지 (함수명 축약 회귀) | 예 (토큰) |
+| `npm run verify:live` | 진단 규칙(`verify-persona`)·요약 리포트 문구와 순서(`verify-summary`)·설비 메타 반영(`verify-meta`) | 예 (토큰) |
 
-로그인이 필요한 라이브 검사(`npm run smoke:live`·`npm run verify:live`)는 앱과 같은 콘솔 세션으로 조회한다(`tools/_liveauth.mjs`). 계정은 환경변수로만 넘기고, 없거나 로그인이 실패하면 건너뛴다. 설비 설정은 그 계정의 저장 설정을 읽는다.
+라이브 검사는 앱과 같은 API 토큰·같은 경로(`/db/*`)로 조회한다(`tools/_liveauth.mjs`). 토큰은 환경변수 `NEO_TOKEN`으로만 넘기고, 없거나 무효면 건너뛴다. 설비 설정은 그 토큰 계정의 저장 설정을 읽는다. 오프라인 검사 중 가짜 `fetch`로 `db.js`를 부르는 것은 `tools/_faketoken.mjs`를 먼저 import한다(토큰 없는 요청은 관문이 막음).
 
 ```bash
-NEO_USER=SYS NEO_PASSWORD=<비밀번호> npm run smoke:live
-NEO_USER=SYS NEO_PASSWORD=<비밀번호> npm run verify:live
+NEO_TOKEN=<API 토큰> npm run smoke:live
+NEO_TOKEN=<API 토큰> npm run verify:live
 ```
 
 계정마다 테이블 구성이 다르다. 기준 데이터는 그 계정의 `BEARING` 테이블(C1)이고, 없으면 건너뛴다. `VIBE_DATA`는 있을 때만 함께 조립해 검사한다. `verify:live`는 테이블 이름을 인자로 받는다(`node tools/verify-persona.mjs <테이블>`).

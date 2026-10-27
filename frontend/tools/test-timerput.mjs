@@ -1,8 +1,10 @@
-// 타이머 등록 경로(JSON-RPC 2.0 `POST /web/api/rpc`) — 오프라인(Neo 불필요) · npm run smoke 포함
-// · 경로·메서드·인자 모양 고정(REST `/web/api/timers`는 404 — 삼키면 "타이머 없음"으로 읽혀 매번 재생성)
+// 타이머 등록 경로(JSON-RPC 2.0 `POST /db/rpc`, API 토큰) — 오프라인(Neo 불필요) · npm run smoke 포함
+// · 경로·메서드·인자 모양·토큰 헤더 고정(다른 경로는 실패 응답 — 삼키면 "타이머 없음"으로 읽혀 매번 재생성)
 // · 등록 전 목록 확인, 중복 전부 정지 후 id로 삭제, 삭제 실패 시 등록 중단, 조회 실패는 null
 globalThis.window = globalThis;
-globalThis.localStorage = { getItem: () => 'h.e30.s', setItem() {}, removeItem() {} };
+const TOK = 'nt_t_' + 'T'.repeat(43);
+const ls = { accessToken: 'h.' + Buffer.from(JSON.stringify({ sub: 'tester' })).toString('base64') + '.s', 'neo-pkg-bearing-analytics.token.TESTER': TOK };
+globalThis.localStorage = { getItem: (k) => (k in ls ? ls[k] : null), setItem() {}, removeItem() {} };
 globalThis.atob = (s) => Buffer.from(s, 'base64').toString('binary');
 const DB = (await import('../../cgi-bin/db/db.js')).default;
 
@@ -21,14 +23,16 @@ let deleteWorks = true;   // false면 삭제 요청 무시(증식 재현)
 let rpcs = [];          // {method, params}
 let files = [];
 let http5xx = 0;
+let noAuth = 0;      // 토큰 헤더 없이 나간 요청 수
 
 const res = (body, ok = true) => Promise.resolve({
   ok, status: ok ? 200 : 500, json: () => Promise.resolve(body), text: () => Promise.resolve(''),
 });
 globalThis.fetch = (url, opts) => {
   const m = (opts && opts.method) || 'GET';
-  if (String(url).startsWith('/web/api/files')) { files.push(m + ' ' + url); return res({ success: true }); }
-  if (url !== '/web/api/rpc') { http5xx++; return res({ success: false }, false); }
+  if (((opts && opts.headers) || {}).Authorization !== 'Bearer ' + TOK) noAuth++;
+  if (String(url).startsWith('/db/files')) { files.push(m + ' ' + url); return res({ success: true }); }
+  if (url !== '/db/rpc') { http5xx++; return res({ success: false }, false); }
   const req = JSON.parse(opts.body);
   rpcs.push({ method: req.method, params: req.params });
   const rpcRes = (result) => res({ jsonrpc: '2.0', id: req.id, result });
@@ -57,7 +61,7 @@ globalThis.fetch = (url, opts) => {
   }
   return rpcErr('unknown method ' + req.method);
 };
-const reset = () => { rpcs = []; files = []; http5xx = 0; };
+const reset = () => { rpcs = []; files = []; http5xx = 0; noAuth = 0; };
 const only = (m) => rpcs.filter((r) => r.method === m);
 
 console.log('\n== 첫 등록 — 지울 것이 없다 ==');
@@ -68,7 +72,8 @@ console.log('\n== 첫 등록 — 지울 것이 없다 ==');
   chk(only('timer.delete').length === 0 && only('timer.stop').length === 0, '없는 타이머를 지우러 가지 않는다');
   /* 등록 전 반드시 목록 확인 — 호출측 "없음 확인"만 믿으면 한 번의 오판으로 같은 이름 추가(Neo는 이름 중복 허용) */
   chk(only('timer.list').length === 1, '등록 전에 목록을 확인한다');
-  chk(http5xx === 0, 'REST 경로로 새지 않는다');
+  chk(http5xx === 0, '다른 경로로 새지 않는다');
+  chk(noAuth === 0, '파일 저장·RPC 모두 토큰을 싣는다', String(noAuth));
 }
 
 console.log('\n== 인자 모양 — 여기가 틀리면 조용히 404/Parse error ==');
@@ -97,7 +102,7 @@ console.log('\n== 이미 있는 것 — 멈추고 지우고 다시 만든다 =='
   // 이름 아닌 id로 삭제 — 이름을 보내면 unmarshal 오류로 타이머 잔존
   chk(only('timer.stop')[0].params[0] === 42 && only('timer.delete')[0].params[0] === 42, 'id 로 멈추고 지운다',
     JSON.stringify(only('timer.delete')[0].params));
-  chk(http5xx === 0, 'REST 경로로 새지 않는다');
+  chk(http5xx === 0, '다른 경로로 새지 않는다');
 }
 
 console.log('\n== 상태를 모를 때 — 목록을 한 번 읽는다 ==');

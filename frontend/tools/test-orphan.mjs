@@ -11,6 +11,7 @@ const VC = (await import('../../cgi-bin/calc/calc.js')).default;
 let SQLS = [];                 // 실행된 SQL 순서
 let ROWS = {};                 // 패턴 → 반환 행
 DB.q = null;                   // db.js 내부 q는 교체 불가 — fetch를 가로챔
+import './_faketoken.mjs';   // db.js 관문용 토큰 칸
 globalThis.fetch = (url) => {
   const sql = decodeURIComponent(String(url).replace(/^[^?]*\?q=/, '').split('&')[0]);
   SQLS.push(sql);
