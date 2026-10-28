@@ -136,6 +136,8 @@ If a selected table or tag is removed from the DB or becomes empty, a change ban
 
 The app needs to know what each tag actually is before it can produce a grade. Tags with nothing set yet are marked with an amber dot.
 
+![Equipment settings screen](../static/images/settings-equipment.png)
+
 > **RPM and bearing model are required.** The fault pattern that switches the grade on is computed on a fault-frequency grid, and without shaft speed and bearing geometry that grid cannot be built. If either is missing, that tag's **grade never rises** — which is "cannot judge", not "normal". On screen:
 >
 > - Monitoring card: an **On hold** (판정 보류) badge instead of a grade (hover shows "cannot judge")

@@ -11,6 +11,8 @@ Once setup is done, you work across three main tabs — Monitoring · Detail Ana
 
 The at-a-glance view of every piece of equipment.
 
+![Monitoring screen](../static/images/monitoring.png)
+
 ### Summary bar
 
 The top summary bar has these cells.
@@ -72,6 +74,8 @@ This exists so you can tell whether "no events" means the equipment is fine or m
 
 The event list below shows recorded events with **time · tag · type · detail · grade**. Click any row to open detail analysis at the moment that event occurred.
 
+![Event list](../static/images/events.png)
+
 The **detail** cell shows, by type:
 
 | Type | Detail cell |
@@ -124,6 +128,8 @@ A single grey **DC component** (DC 성분) line without the warning box is not a
 
 The top of the card shows the overall grade (the bar under it marks which of the four steps it is), the verdict, and one line on how the two axes produced the grade (for example "fault pattern present + ISO zone A → Warning"). Below them come **what to do now** (지금 할 일) and the supporting facts (evidence score, plus the **judgment time** and how many of the period's segments gave the same verdict); without RPM or a bearing, "criteria n/N (… not applied)" is shown as well. A reason sentence is added only when that one line cannot explain the result, such as when the fault pattern could not be measured or the vibration is high with no pattern.
 
+![Severity assessment in Detail Analysis](../static/images/detail-severity.png)
+
 Two boxes underneath show how the grade was set. **① Fault pattern** (① 결함 패턴) is the axis that switches the grade on (none / present), and **② Vibration magnitude** (② 진동 크기) is the axis that sets its height — the ISO zone A–D bar fills up to the current value, and the row below lists the grade each zone gives when a fault pattern is present (A·B → Warning, C → Danger, D → Critical). The zone bar uses no grade colors, and the zones are named by their ISO meaning (A new-machine level · B long-term operation OK · C restricted operation · D damage likely) rather than by grade words.
 
 **That grade is not set by the vibration magnitude (ISO).** Exactly one axis raises it: the **fault pattern** — whether evidence stands at a bearing defect frequency (BPFO / BPFI / BSF / FTF) in the [envelope]({{< relref "glossary#envelope-demodulation" >}}). Only then does the grade rise, and the ISO zone decides **how high** it rises.
@@ -168,9 +174,13 @@ Falling kurtosis normally reads as "getting better", but this combination can me
 | Cepstrum | Periodic structure in harmonics and sidebands |
 | Diagnostic indicators (time domain) | Impulse and energy indicators computed from the raw waveform |
 
+![Envelope analysis chart — peaks at BPFO and 2×BPFO](../static/images/detail-envelope.png)
+
 ### Diagnosis and action details
 
 Press **Expand comprehensive analysis** (종합 분석 펼치기) to see the rule-based diagnosis. It calls out faults such as imbalance, misalignment, bearing inner/outer race, looseness, and gear issues, and presents **supporting evidence** (with the indicator each piece came from) alongside **action details** (how to carry out what to do now, and what would strengthen the verdict, each with its reason).
+
+![Comprehensive analysis — supporting evidence and action details](../static/images/detail-diagnosis.png)
 
 Action details are not a fixed list: only the items that match the verdict (fault pattern · vibration magnitude · impulsiveness · trend · vibration of unknown origin · missing equipment information) are picked, up to five. When a measurement gate is active, only measurement checks appear and no machine inspection items.
 
@@ -190,6 +200,8 @@ Without an LLM connected, the rule-based diagnosis stands on its own.
 
 Where you turn analysis into a document.
 
+![Report generation and archive](../static/images/report-archive.png)
+
 1. Select the **target tags** for the report. (nothing is selected by default; select-all is available)
 2. Choose a **period** — presets (1 hour · 6 hours · 24 hours · All) are anchored **per tag, to that tag's latest data**; a range set in the calendar applies as-is to every selected tag. If some tags have no data in a custom range, a warning shows where their data actually is.
 3. Optionally turn on **Include LLM opinion** and pick a provider.
@@ -202,6 +214,8 @@ Generation runs in four steps — query data → compute indicators → generate
 ### Report structure
 
 The **Summary** (요약) · **Full analysis** (전체 분석) tabs at the top of the report switch the view. Summary is built for a quick read; Full analysis lays out every chart and all evidence in numbered sections (01 Severity through 05 Action details). The **View evidence** (근거 보기) and **View in-depth analysis** (심층 분석 보기) links in the summary jump to the matching section of the full analysis.
+
+![Report Summary tab](../static/images/report-summary.png)
 
 | Tab | Contents |
 | :--- | :--- |
