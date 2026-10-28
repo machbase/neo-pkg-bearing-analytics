@@ -24,7 +24,7 @@ export function view(v) {
       <span style="width: 1px; height: 20px; background: var(--border-default);"></span>
       <span style="display: inline-flex; align-items: center; gap: 8px; white-space: nowrap;">
         <span class="codicon codicon-pulse" style="font-size: 15px; color: var(--primary-light);"></span>
-        <span style="font-size: 14px; font-weight: 600; color: var(--text-primary); letter-spacing: -0.2px;">Vibration Analysis</span>
+        <span style="font-size: 14px; font-weight: 600; color: var(--text-primary); letter-spacing: -0.2px;">Bearing Vibration Analysis</span>
       </span>
     </div>
     <nav style="display: flex; gap: 2px; margin-left: 6px;">

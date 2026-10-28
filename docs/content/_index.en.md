@@ -13,7 +13,7 @@ Its core is **bearing fault diagnosis**. Envelope demodulation checks whether ev
 
 > If the terms above (BPFO, envelope, fault pattern) are unfamiliar, read the [Glossary]({{< relref "glossary" >}}) first — it is a single page.
 
-Open the app in your browser and every piece of equipment is graded in real time — the fault pattern switches the grade on and the ISO 10816 zone sets its height. From there you get per-tag waveform and spectrum analysis, rule-based fault diagnosis with recommended actions, and one-click analysis reports — all in one place.
+Open the app in your browser and every piece of equipment is graded in real time — the fault pattern switches the grade on and the ISO 10816 zone sets its height. From there you get per-tag waveform and spectrum analysis, rule-based fault diagnosis with what to do now and action details, and one-click analysis reports — all in one place.
 
 Every analysis is **deterministic**. Grading, diagnosis, and reporting need no LLM. An LLM connects only as an **optional** layer that adds a narrative expert opinion to detail analysis and reports.
 
