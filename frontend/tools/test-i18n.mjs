@@ -102,7 +102,15 @@ const cases = [
   ['설정 판정 기준', { tab: 'settings', setSection: 'criteria' }],
   ['설정 알람', { tab: 'settings', setSection: 'monitor' }],
   ['설정 LLM', { tab: 'settings', setSection: 'llm' }],
-  ['토큰 입력', { ready: true, user: '', needsToken: true, authMsg: '' }],
+  ['토큰 입력', { tab: 'settings', setSection: 'source', ready: true, user: '', needsToken: true, authMsg: '' }],
+  // 상태 저장 문구(Tk·공유 모듈 오류) — 한국어로 저장, 표시할 때 번역
+  ['토큰 안내 문구', { tab: 'settings', setSection: 'source', ready: true, user: '', needsToken: true, authMsg: 'API 토큰이 없습니다 — USER2 계정의 토큰을 입력하세요',
+    tokenMsg: 'USER3 계정의 토큰입니다 — USER2 계정의 토큰을 입력하세요' }],
+  ['설정 손상', { cfgFail: { kind: 'broken', msg: '설정 일부가 손상됐습니다 — monitor, llm', domains: ['monitor', 'llm'] } }],
+  ['발송·연결 시험 결과', { tab: 'settings', setSection: 'monitor', notifCh: { webhook: true }, notifTo: { webhook: 'https://example.invalid/hook' },
+    notifTest: { ch: 'webhook', ok: false, msg: '발송 실패 (응답 없음)' } }],
+  ['LLM 연결 시험 결과', { tab: 'settings', setSection: 'llm', llmTest: { ok: true, msg: '응답 120ms · "OK"' } }],
+  ['토스트', { tab: 'monitor', toast: { msg: '설정 조회 실패 — 조회 실패 HTTP 500', kind: 'err' } }],
   ['언어 메뉴 열림', { tab: 'monitor', langOpen: true }],
 ];
 for (const lang of ['en', 'ja']) {

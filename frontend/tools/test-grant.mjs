@@ -30,10 +30,10 @@ DB.setUser('SYS');
 
 // ── 1. 회수 구문 ──────────────────────────────────────────────────────
 {
-  const g = SQL.grantStatements('JOY'), r = SQL.revokeStatements('JOY');
-  chk(r.length === 6 && r.every((s) => /^REVOKE .+ FROM JOY$/.test(s)), '회수 6문장 — 모두 FROM 계정', r.length);
+  const g = SQL.grantStatements('USER2'), r = SQL.revokeStatements('USER2');
+  chk(r.length === 6 && r.every((s) => /^REVOKE .+ FROM USER2$/.test(s)), '회수 6문장 — 모두 FROM 계정', r.length);
   chk(/MONSTATE/.test(r[0]) && /CONNECT ON DATABASE/.test(r[5]) && /CREATE ON DATABASE/.test(r[4]), '역순 — 공용 표 먼저, CONNECT 마지막');
-  const tgt = (s) => s.replace(/^(GRANT|REVOKE) /, '').replace(/ (TO|FROM) JOY$/, '');
+  const tgt = (s) => s.replace(/^(GRANT|REVOKE) /, '').replace(/ (TO|FROM) USER2$/, '');
   chk(JSON.stringify(g.map(tgt).sort()) === JSON.stringify(r.map(tgt).sort()), '부여한 권한·대상과 1:1 — 남는 권한 없음');
   chk(SQL.revokeStatements("x'; DROP").every((q) => !/[';]/.test(q.replace(/;$/, ''))), '계정명의 따옴표·세미콜론은 지워 구문 주입 불가');
 }
@@ -41,9 +41,9 @@ DB.setUser('SYS');
 // ── 2. 상태 요약 — 실제 권한 기록 형태 ─────────────────────────────────────
 {
   const full = (u) => [[u, null], [u, 'BAND'], [u, 'BASELINE'], [u, 'EVENTS'], [u, 'MONSTATE'], [u, '_BAND_META'], [u, '_EVENTS_META']];
-  const m = SQL.accessSummary(full('JOY').concat([['PART', null]]), [['JOY', 'NEO_BEARING_MONITOR_JOY'], ['JOY', 'NEO_BEARING_BAND_JOY']]);
-  chk(m.JOY.n === 5 && m.JOY.total === 5, '부여 직후 기록 7행(_META 포함) → 5/5', JSON.stringify(m.JOY));
-  chk(m.JOY.timers === 2, '이 패키지 타이머 수를 센다', m.JOY.timers);
+  const m = SQL.accessSummary(full('USER2').concat([['PART', null]]), [['USER2', 'NEO_BEARING_MONITOR_USER2'], ['USER2', 'NEO_BEARING_BAND_USER2']]);
+  chk(m.USER2.n === 5 && m.USER2.total === 5, '부여 직후 기록 7행(_META 포함) → 5/5', JSON.stringify(m.USER2));
+  chk(m.USER2.timers === 2, '이 패키지 타이머 수를 센다', m.USER2.timers);
   chk(m.PART.n === 1, '표 권한을 회수하고 DB 권한만 남으면 1/5', JSON.stringify(m.PART));
   chk(!m.TESTUSER, '기록이 없는 계정은 항목 없음(= 권한 없음)');
 }
@@ -56,21 +56,21 @@ function mkApp(st) {
   app.E = CH; app.live = true;
   app.data = { now: Date.now(), equipment: [], events: [], reports: [] };
   Object.assign(app.state, { ready: true, tab: 'settings', setSection: 'source', user: 'SYS',
-    grantUsers: ['JOY', 'PART', 'TESTUSER'], grantStatus: st }, {});
+    grantUsers: ['USER2', 'PART', 'TESTUSER'], grantStatus: st }, {});
   return app;
 }
 {
-  const st = { JOY: { n: 5, total: 5, timers: 2 }, PART: { n: 1, total: 5, timers: 0 } };
+  const st = { USER2: { n: 5, total: 5, timers: 2 }, PART: { n: 1, total: 5, timers: 0 } };
   const app = mkApp(st);
   const rows = app.renderVals().grantRows;
   const by = (u) => rows.filter((r) => r.user === u)[0];
-  chk(by('JOY').statusText === '권한 있음' && !by('JOY').canGrant && by('JOY').canRevoke, '다 있으면 회수만');
+  chk(by('USER2').statusText === '권한 있음' && !by('USER2').canGrant && by('USER2').canRevoke, '다 있으면 회수만');
   chk(by('TESTUSER').statusText === '권한 없음' && by('TESTUSER').canGrant && !by('TESTUSER').canRevoke, '없으면 부여만');
   chk(/일부/.test(by('PART').statusText) && by('PART').canGrant && by('PART').canRevoke, '일부면 둘 다', by('PART').statusText);
-  chk(by('JOY').timersText === '타이머 2개' && /매 회차 실패/.test(by('JOY').askText), '타이머가 있으면 회수 확인에 경고', by('JOY').askText);
+  chk(by('USER2').timersText === '타이머 2개' && /매 회차 실패/.test(by('USER2').askText), '타이머가 있으면 회수 확인에 경고', by('USER2').askText);
   chk(/지우지 않으며/.test(by('TESTUSER').askText), '회수해도 데이터는 남는다고 알린다');
-  by('JOY').onRevoke();
-  chk(app.renderVals().grantRows.filter((r) => r.user === 'JOY')[0].ask, '회수 버튼은 바로 실행하지 않고 줄 안에서 확인');
+  by('USER2').onRevoke();
+  chk(app.renderVals().grantRows.filter((r) => r.user === 'USER2')[0].ask, '회수 버튼은 바로 실행하지 않고 줄 안에서 확인');
   const unk = mkApp(null).renderVals().grantRows[0];
   chk(unk.statusText === '확인 불가' && unk.canGrant && unk.canRevoke, '상태를 못 읽으면 두 버튼 모두(재실행 무해)');
   chk(/-- 권한 회수/.test(app.renderVals().dbGrantSql) && /REVOKE CONNECT ON DATABASE/.test(app.renderVals().dbGrantSql)
@@ -79,9 +79,9 @@ function mkApp(st) {
 
 // ── 4. 회수 실행 — 보내는 SQL 순서, 끝나면 상태 다시 읽기 ───────────────────
 {
-  const app = mkApp({ JOY: { n: 5, total: 5, timers: 0 } });
+  const app = mkApp({ USER2: { n: 5, total: 5, timers: 0 } });
   sent.length = 0;
-  app._grantRun('JOY', true);
+  app._grantRun('USER2', true);
   await new Promise((r) => setTimeout(r, 30));
   const rev = sent.filter((s) => /^REVOKE/.test(s));
   chk(rev.length === 6 && /MONSTATE/.test(rev[0]) && /CONNECT/.test(rev[5]), '회수 6문장을 역순으로 보낸다', rev.length);
@@ -91,20 +91,50 @@ function mkApp(st) {
 
 // ── 5. 다시 읽기 — 조회 중 요청은 끝난 뒤 한 번 더, 실패해도 목록 유지 ──────────────────
 {
-  const app = mkApp({ JOY: { n: 5, total: 5, timers: 0 } });
+  const app = mkApp({ USER2: { n: 5, total: 5, timers: 0 } });
   sent.length = 0;
   app._loadGrantUsers(true); app._loadGrantUsers(true);   // 새로고침 중 부여·회수 직후 갱신 요청
   await new Promise((r) => setTimeout(r, 40));
   const nUsers = sent.filter((q) => /M\$SYS_USERS/.test(q)).length;
   chk(nUsers === 2, '조회 중 다시 읽기 요청을 버리지 않는다(끝난 뒤 한 번 더)', nUsers);
   const app2 = mkApp(null);
-  app2.state.grantUsers = ['JOY']; app2.state.grantMsg = 'JOY 의 권한을 회수했습니다 (6건)';
+  app2.state.grantUsers = ['USER2']; app2.state.grantMsg = 'USER2 의 권한을 회수했습니다 (6건)';
   failUsers = true;
   app2._loadGrantUsers(true);
   await new Promise((r) => setTimeout(r, 30));
   failUsers = false;
   chk(app2.state.grantUsers.length === 1 && /회수했습니다/.test(app2.state.grantMsg) && /다시 읽지 못했습니다/.test(app2.state.grantMsg),
     '다시 읽기 실패 — 목록·직전 결과 문구 유지', app2.state.grantMsg);
+}
+
+// ── 6. 영·일 화면 — 결과 문구(한국어로 저장, 표시할 때 번역)·계정별 줄 ───────────────────
+// 계정명에 번역 조각을 이어 붙이면 사전 문형과 안 맞아 한국어로 남음
+{
+  const I18N = await import('../src/i18n.js');
+  const HAN = /[가-힣]/;
+  const app = mkApp({ USER2: { n: 5, total: 5, timers: 2 }, PART: { n: 1, total: 5, timers: 0 } });
+  const msgs = [];
+  for (const rev of [false, true]) {
+    app.state.grantBusy = '';
+    app._grantRun('USER2', rev);
+    await new Promise((r) => setTimeout(r, 30));
+    msgs.push(app.state.grantMsg);
+  }
+  app.state.grantUsers = ['USER2'];   // 가짜 응답은 빈 목록 — 목록이 있어야 직전 문구 이어 붙임 경로
+  failUsers = true;
+  app._loadGrantUsers(true);
+  await new Promise((r) => setTimeout(r, 30));
+  failUsers = false;
+  msgs.push(app.state.grantMsg);
+  for (const lang of ['en', 'ja']) {
+    I18N.setLang(lang);
+    const shown = msgs.map(I18N.tx);
+    chk(shown.every((s) => s && !HAN.test(s) && /USER2/.test(s)), lang + ' 부여·회수·다시 읽기 실패 문구에 한국어 없음', shown.join(' | '));
+    const rv = app.renderVals();
+    const rowTxt = rv.grantRows.flatMap((r) => [r.statusText, r.timersText, r.askText]).concat(rv.grantMsg).filter(Boolean);
+    chk(rowTxt.every((s) => !HAN.test(s)), lang + ' 계정별 줄·안내 줄에 한국어 없음', rowTxt.filter((s) => HAN.test(s)).slice(0, 3).join(' | '));
+  }
+  I18N.setLang('ko');
 }
 
 console.log(fail ? `\n${fail} failed` : '\n=== 전부 통과 ===');

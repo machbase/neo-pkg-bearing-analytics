@@ -1,4 +1,4 @@
-# neo-pkg-bearing-analytics v1.1.0
+# neo-pkg-bearing-analytics v1.1.1
 
 [English](README.md) | [한국어](README.kr.md) | [日本語](README.ja.md)
 

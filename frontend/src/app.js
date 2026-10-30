@@ -146,6 +146,10 @@ var ROUTE_DEFS = { order: ROUTE_ORDER, timing: ROUTE_DEFAULT_TIMING };
 // 설정 영역(db CONFIG_FILES 도메인) → [화면 이름, 설정 탭 섹션] — 손상 안내의 수정 위치 표시용
 var CFG_DOMAIN_UI = { source: ['데이터 소스', 'source'], equipment: ['설비 정보', 'equip'], criteria: ['판정 기준', 'criteria'],
   monitor: ['알람 설정', 'monitor'], llm: ['LLM 연동', 'llm'] };
+// 손상 영역 화면 이름 — 손상 안내·기본값 열기 토스트 공용(이름마다 번역 후 연결)
+function cfgDomNames(doms) {
+  return (doms || []).map(function (d) { return tx((CFG_DOMAIN_UI[d] || [d])[0]); }).join('·');
+}
 function routesWithDefaults(routes) {
   return Notify.notifyCfgFrom({ routes: routes }, ROUTE_DEFS).routes;
 }
@@ -637,7 +641,7 @@ export class App extends Component {
       self._bootWith(cfg0 || {});
       var ui = CFG_DOMAIN_UI[doms[0]] || CFG_DOMAIN_UI.source;
       self.setState({ tab: 'settings', setSection: ui[1] });
-      self._toast(T('{0} 설정을 기본값으로 열었습니다 — 확인 후 저장하면 복구됩니다', doms.map(function (d) { return (CFG_DOMAIN_UI[d] || [d])[0]; }).join('·')), 'warn');
+      self._toast(T('{0} 설정을 기본값으로 열었습니다 — 확인 후 저장하면 복구됩니다', cfgDomNames(doms)), 'warn');
     }, function (err) { self._initCfgFail(err); });
   }
   // 설정 저장 잠금 — 걸려 있으면 사유 알림 후 true(_bootWith 참조)
@@ -722,7 +726,7 @@ export class App extends Component {
     (revoke ? revokeFrom : grantTo)(u).then(function (r) {
       self.setState({ grantBusy: '',
         grantMsg: r.failed ? Tk('{0} — {1}/{2} 적용, 실패: {3}', u, r.total - r.failed, r.total, r.reasons[0])
-          : Tk('{0} ({1}건)', u + (revoke ? Tk(' 의 권한을 회수했습니다') : Tk(' 에 권한을 부여했습니다')), r.total) });
+          : revoke ? Tk('{0} 의 권한을 회수했습니다 ({1}건)', u, r.total) : Tk('{0} 에 권한을 부여했습니다 ({1}건)', u, r.total) });
       self._toast(T('{0} 권한 {1} 완료', u, ko), r.failed ? 'warn' : 'ok');
       self._loadGrantUsers(true);
     }).catch(function (e) {
@@ -5129,7 +5133,7 @@ export class App extends Component {
     base.monEmptyFail = !!S.loadFail;   // 조회 실패로 빈 상태 — '소스 없음'과 구분
     // 설정 읽기 실패 화면(_initCfgFail) — 조회 실패는 재시도만, 조각 손상은 해당 영역 기본값 열기 추가
     var _cf = S.cfgFail;
-    var _cfDoms = (_cf && _cf.domains || []).map(function (d) { return tx((CFG_DOMAIN_UI[d] || [d])[0]); }).join('·');
+    var _cfDoms = cfgDomNames(_cf && _cf.domains);
     base.cfgFailShow = !!_cf && S.ready;
     base.cfgFailTitle = !_cf ? '' : _cf.kind === 'broken' ? T('{0} 설정을 읽을 수 없습니다', _cfDoms) : T('설정을 불러오지 못했습니다');
     base.cfgFailText = !_cf ? '' : _cf.kind === 'broken'
