@@ -1,6 +1,8 @@
 // 화면 로직 — renderVals()가 view.js에 넘길 값 생성
 import { Component } from 'preact/compat';
 import { view } from './view.js';
+import { T, Tk, tx, txAll, withLang, getLang, setLang, onLangChange, LANGS, dictOf } from './i18n.js';
+import TxCore from '../../cgi-bin/i18n/tx.js';
 import { pickerOpen } from './daterange.js';
 import { listTagTables, tagSchemas, listTags, tagStats, rollupTrend, isNoRollup, probeRollup, loadConfig, saveConfig, saveConfigPartial, buildLiveData, liveDetail, sweepAnchors, monPattern, emptyDet, rollupBatch, loadTrendChunks , timerStates, monTimer, bandTimer, wdTimer, deleteWdTimer, rawWindow, CAPS, pkgBase} from './data/live.js';
 import { ensureMonTables, loadEventsRange, countEvents, loadBaselines, saveBaseline, deleteBaseline, insertEvent, insertBandPoint, loadMonState, saveMonState, createMonitorTimer, deleteMonitorTimer, createBandTimer, deleteBandTimer, bandRaw, bandLatest, bandTrend, bandBackfill, bandTimes } from './data/live.js';
@@ -38,9 +40,9 @@ var TZ_FALLBACK = ['Asia/Seoul', 'Asia/Tokyo', 'Asia/Shanghai', 'Asia/Singapore'
   'America/Los_Angeles', 'America/Sao_Paulo', 'Australia/Sydney', 'Pacific/Auckland'];
 // 서버 타이머 회차 문제 코드 → 배너(서버 errAdd와 같은 코드)
 var ST_ERR = {
-  state_read: { lv: 'err', text: function () { return '직전 판정 상태를 읽지 못해 회차를 건너뛰었습니다 — DB 연결을 확인하세요'; } },
-  tag_fail: { lv: 'warn', text: function (n) { return '태그 ' + n + '개 처리 실패 — 다음 회차에 다시 시도합니다'; } },
-  round: { lv: 'err', text: function () { return '회차가 오류로 끝났습니다'; } },
+  state_read: { lv: 'err', text: function () { return T('직전 판정 상태를 읽지 못해 회차를 건너뛰었습니다 — DB 연결을 확인하세요'); } },
+  tag_fail: { lv: 'warn', text: function (n) { return T('태그 {0}개 처리 실패 — 다음 회차에 다시 시도합니다', n); } },
+  round: { lv: 'err', text: function () { return T('회차가 오류로 끝났습니다'); } },
 };
 var FLAP_REFRESH_MS = 60000;   // 반복 악화 조회 간격
 var SLOW_WIN_N = 7;       // 회차 소요 표본 창
@@ -61,7 +63,7 @@ var RPM_WARN_FRAC = 0.02;
 var CFG_KEYS = ['srcSel', 'displayTz', 'machineClass', 'classThresh', 'unitThresh',
   'equipCls', 'equipRpm', 'equipBearing', 'equipGeo', 'equipUnit', 'equipMeta', 'lineHz', 'cardOrder',
   'knownTags', 'revived',
-  'evalWindow', 'monitorOn', 'notifCh', 'notifTo', 'routes', 'aliases',
+  'evalWindow', 'monitorOn', 'notifCh', 'notifTo', 'notifLang', 'routes', 'aliases',
   'monitorInterval', 'monMode', 'renotify', 'bandOn', 'bandInterval', 'bandWin',
   'llmProvider', 'llmKeys', 'llmModels', 'ollamaUrl', 'genLLM'];
 // 설정 폼 편집 키 — '저장 안 함'의 되돌림 대상(나머지는 즉시 저장 값)
@@ -84,22 +86,22 @@ function SWITCH_KNOB(on) {
 var IV_KO = { '10m': '10분', '30m': '30분', '1h': '1시간' };
 // 소요 시간 표기 — 초/분/시간 한 단위만
 function fmtDur(ms) {
-  if (!(ms > 0)) return '0초';
+  if (!(ms > 0)) return T('0초');
   var s = Math.round(ms / 1000);
-  if (s < 60) return s + '초';
+  if (s < 60) return T('{0}초', s);
   var m = Math.round(s / 60);
-  if (m < 60) return m + '분';
-  return (m / 60).toFixed(m % 60 ? 1 : 0) + '시간';
+  if (m < 60) return T('{0}분', m);
+  return T('{0}시간', (m / 60).toFixed(m % 60 ? 1 : 0));
 }
 // 학습 시점 표기 — 정비·운전조건 변경 뒤 기준의 유효성 판단용
 function agoText(ms) {
   if (!(ms > 0)) return '';
   var d = Date.now() - ms;
-  if (d < 60000) return '방금';
-  if (d < 3600000) return Math.round(d / 60000) + '분 전';
-  if (d < 86400000) return Math.round(d / 3600000) + '시간 전';
+  if (d < 60000) return T('방금');
+  if (d < 3600000) return T('{0}분 전', Math.round(d / 60000));
+  if (d < 86400000) return T('{0}시간 전', Math.round(d / 3600000));
   var days = Math.round(d / 86400000);
-  return days < 30 ? days + '일 전' : Math.round(days / 30) + '개월 전';
+  return days < 30 ? T('{0}일 전', days) : T('{0}개월 전', Math.round(days / 30));
 }
 // 30일 넘은 기준 강조 — 그사이 정비 가능성
 function agoStale(ms) { return ms > 0 && Date.now() - ms > 30 * 86400000; }
@@ -190,6 +192,7 @@ function normCfg(cfg0) {
   if (!(durMs(cfg.evalWindow) > 0)) cfg.evalWindow = '10s';
   if (durMs(cfg.evalWindow) > 3600000) cfg.evalWindow = '10s';
   if (!DUR_MS[cfg.monitorInterval]) cfg.monitorInterval = '3s';
+  if (['ko', 'en', 'ja'].indexOf(cfg.notifLang) < 0) cfg.notifLang = '';
   // 목록에서 빠진 1분·5분 주기 → 10분(IV_KO 하한)
   if (cfg.bandInterval === '1m' || cfg.bandInterval === '5m') cfg.bandInterval = '10m';
   // 라우팅 이관 — 옛 webhook:false·'무시'는 '알림 안 함'으로(꺼둔 의도 보존)
@@ -226,7 +229,7 @@ function normCfg(cfg0) {
 }
 // 테이블 조회 실패 오류 — 누락 테이블 이름 포함(배너가 원인 후보로 표시)
 function loadError(tables) {
-  var e = new Error('테이블 조회 실패: ' + tables.join(', '));
+  var e = new Error(T('테이블 조회 실패: {0}', tables.join(', ')));
   e.tables = tables.slice();
   return e;
 }
@@ -247,6 +250,8 @@ function mergeSpark(buf, buckets, spanMs) {
 var SENSOR_HOLD_MS = 60000;    // 계측 이상 확정
 var SENSOR_CLEAR_MS = 300000;  // 계측 복귀
 // 등급 이벤트 사유 문구 — VALUE의 ISO 값은 등급 근거가 아니므로(게이트=결함 패턴) 격자 점수·부위 기재
+// 대역 이탈 DETAIL('sub=0.050/0.025 · vh4=…(잠정)') — 형식 그대로, 잠정 표식만 화면 언어로(내보내기·알림)
+function bandDetailTx(s) { return String(s || '').replace(/\(잠정\)/g, function () { return '(' + T('잠정') + ')'; }); }
 function judgeDetail(ev, pat, imp) {
   var p = [];
   if (pat && pat.r != null) p.push('격자 ' + Number(pat.r).toFixed(1));
@@ -383,7 +388,7 @@ function judgeTick(prev, rg, breach, now, cfg, bandState, run, cyc) {
    toString 단독 전달 시 압축이 durKo 이름을 바꿔 서버에서만 ReferenceError */
 function detailSrc() { return VC.embedSrc([durKo, judgeDetail], { judgeDetail: judgeDetail }); }
 
-export { judgeTick, durMs, detailSrc, normCfg, mergeSpark }; // 테스트·서버 타이머 재사용
+export { judgeTick, judgeDetail, durMs, detailSrc, normCfg, mergeSpark }; // 테스트·서버 타이머 재사용
 import VC from '../../cgi-bin/calc/calc.js';
 import LLM from '../../cgi-bin/llm/llm.js';
 import Report from '../../cgi-bin/report/report.js';
@@ -391,6 +396,8 @@ import { REPORT_ROOT, reportDir, ensureDir, saveFile, listDir, deleteFile, readF
 import CH from '../../cgi-bin/chart/chart.js';
 // 차트 모듈 — 부팅 시 this.E로 사용
 var ENGINE = CH;
+// 비동기 콜백을 한국어로 실행 — 리포트 조립처럼 엔진 문구를 한국어로 모으는 구간(번역은 리포트가 표시 지점에서)
+function koFn(fn) { return function () { var self = this, args = arguments; return withLang('ko', function () { return fn.apply(self, args); }); }; }
 
 export class App extends Component {
   constructor(props) {
@@ -404,7 +411,7 @@ export class App extends Component {
     try { savedTheme = localStorage.getItem('vibeTheme'); } catch (e) {}
     var theme = savedTheme ? (savedTheme === 'light' ? 'light' : 'dark') : ((props && props.defaultTheme === 'light') ? 'light' : 'dark');
     this.state = {
-      ready: false, tab: (props && props.defaultTab) || 'monitor', theme: theme,
+      ready: false, tab: (props && props.defaultTab) || 'monitor', theme: theme, lang: getLang(), langOpen: false,
       user: '', authMsg: '', cfgFail: null,
       // API 토큰 입력 — needsToken: 입력칸 필수 표시, tokenEdit: 부팅 뒤 교체 입력칸
       needsToken: false, tokenEdit: false, tokenInput: '', tokenBusy: false, tokenMsg: '',
@@ -437,6 +444,7 @@ export class App extends Component {
       dirty: false, toast: null, pendingNav: null, monitorInterval: '3s', cardSize: 232,
       notifCh: { webhook: false }, // 알람 채널은 웹훅 하나(저장본 잔존 키 무시)
       notifTo: { webhook: '' }, // 발송 대상 URL
+      notifLang: '', // 알림 문구 언어(ko·en·ja) — 비면 화면 언어로 보이고 저장 때 확정
       notifTest: null, // 테스트 발송 결과 {ch, ok, msg}
       routes: {}, // 심각도별 라우팅 {심각도: {timing}} — 미설정 행은 ROUTE_DEFAULT_TIMING
       // 서버 타이머는 앱 종료 후에도 상주 → 설정에서 고를 때만 생성·끄면 삭제. 앱 모드는 화면 닫으면 감시 중단(배너 표시)
@@ -471,7 +479,7 @@ export class App extends Component {
     });
     this._refWaveCross = function (el) { self._c.wave_cross = el; };
   }
-  componentDidMount() { window.addEventListener('resize', this._onResize); window.addEventListener('storage', this._onStorage); this._poll(); this._clk = setInterval(this._clock.bind(this), 1000); this._clock(); this._initTip(); }
+  componentDidMount() { var self = this; this._chartLabels(); this._offLang = onLangChange(function (l) { self._chartLabels(); self.setState({ lang: l }); self._scheduleDraw(); }); window.addEventListener('resize', this._onResize); window.addEventListener('storage', this._onStorage); this._poll(); this._clk = setInterval(this._clock.bind(this), 1000); this._clock(); this._initTip(); }
   /* data-tip 커스텀 툴팁 — 네이티브 title의 지연·스타일 제약 회피
      fixed 싱글턴이라 overflow 스크롤 컨테이너에서도 안 잘림 */
   _initTip() {
@@ -505,7 +513,7 @@ export class App extends Component {
   }
   // 헤더 시계 — 표시 시간대, 브라우저 시간이 아니면 오프셋 병기
   _clock() { var el = document.getElementById('vclock'); if (!el) return; var now = Date.now(); el.textContent = CH.fmtFull(now).slice(0, 19) + (CH.getZone() ? ' ' + CH.offsetLabel(now) : ''); }
-  componentWillUnmount() { window.removeEventListener('resize', this._onResize); window.removeEventListener('storage', this._onStorage); if (this._raf) clearTimeout(this._raf); if (this._pt) clearTimeout(this._pt); if (this._tt) clearTimeout(this._tt); if (this._live) clearInterval(this._live); if (this._clk) clearInterval(this._clk); if (this._gt) clearTimeout(this._gt); if (this._resyncT) clearTimeout(this._resyncT); if (this._loadRetryT) clearTimeout(this._loadRetryT); }
+  componentWillUnmount() { if (this._offLang) this._offLang(); window.removeEventListener('resize', this._onResize); window.removeEventListener('storage', this._onStorage); if (this._raf) clearTimeout(this._raf); if (this._pt) clearTimeout(this._pt); if (this._tt) clearTimeout(this._tt); if (this._live) clearInterval(this._live); if (this._clk) clearInterval(this._clk); if (this._gt) clearTimeout(this._gt); if (this._resyncT) clearTimeout(this._resyncT); if (this._loadRetryT) clearTimeout(this._loadRetryT); }
   _poll() { this._boot(ENGINE); } // 모듈 import라 로드 대기 불필요
   /* 신원 확인 우선 — 토큰 확인 전엔 서버 조회 없음(헤더 없는 /db/* 요청은 기본 신원으로 통과될 수 있음)
      · 콘솔 로그인 계정 = 토큰 계정 = 실제 실행 계정이어야 부팅 */
@@ -513,24 +521,24 @@ export class App extends Component {
     var self = this;
     this.E = E;
     var who = consoleUser();
-    if (!who) { this._initNoAuth('Neo 콘솔에 로그인되어 있지 않습니다'); return; }
+    if (!who) { this._initNoAuth(Tk('Neo 콘솔에 로그인되어 있지 않습니다')); return; }
     var tok = apiToken();
-    if (!tok) { this._initNoAuth('API 토큰이 없습니다 — ' + who + ' 계정의 토큰을 입력하세요', true); return; }
+    if (!tok) { this._initNoAuth(Tk('API 토큰이 없습니다 — {0} 계정의 토큰을 입력하세요', who), true); return; }
     onAuthFail(function () { self._onAuthLost(); });
     validateToken(tok).then(function (tu) {
       if (!tu) {
         clearApiToken();
-        self._initNoAuth('저장된 토큰이 유효하지 않습니다(폐기·만료) — 새 토큰을 입력하세요', true);
+        self._initNoAuth(Tk('저장된 토큰이 유효하지 않습니다(폐기·만료) — 새 토큰을 입력하세요'), true);
         return null;
       }
       if (tu !== who) {
-        self._initNoAuth('토큰 계정(' + tu + ')이 콘솔 로그인 계정(' + who + ')과 다릅니다 — ' + who + ' 계정의 토큰을 입력하세요', true);
+        self._initNoAuth(Tk('토큰 계정({0})이 콘솔 로그인 계정({1})과 다릅니다 — {2} 계정의 토큰을 입력하세요', tu, who, who), true);
         return null;
       }
       // 토큰 계정과 실제 실행 계정 대조 — 불일치 시 남의 권한으로 도는 상태라 차단
       return whoami().then(function (user) {
         if (user !== tu) {
-          self._initNoAuth('토큰 계정(' + tu + ')과 실제 실행 계정(' + user + ')이 다릅니다 — 관리자에게 알리세요');
+          self._initNoAuth(Tk('토큰 계정({0})과 실제 실행 계정({1})이 다릅니다 — 관리자에게 알리세요', tu, user));
           return null;
         }
         self.user = user;
@@ -551,7 +559,7 @@ export class App extends Component {
       // 권한 부여 대상 계정 목록 — 저장소 준비 여부와 무관하게 관리자에게 필요
       if (self.state.user === 'SYS') self._loadGrantUsers();
     }).catch(function (e) {
-      self._initNoAuth('계정을 확인하지 못했습니다 — ' + ((e && e.message) || e), true);
+      self._initNoAuth(Tk('계정을 확인하지 못했습니다 — {0}', (e && e.message) || e), true);
     });
   }
   // 인증 전/끊김 화면 — 조회 없이 설정 화면만, 사유 표시로 빈 화면과 구분. askToken: 토큰 입력칸 표시
@@ -562,7 +570,7 @@ export class App extends Component {
     if (this._live) clearInterval(this._live);
     if (this._cat) clearInterval(this._cat);
     this.setState({
-      ready: true, authMsg: why || '인증이 필요합니다', user: '', needsToken: !!askToken,
+      ready: true, authMsg: why || Tk('인증이 필요합니다'), user: '', needsToken: !!askToken,
       srcSel: [], selTag: null, diagTag: null, events: [], reports: [],
       tab: 'settings', setSection: 'source',
     });
@@ -572,21 +580,21 @@ export class App extends Component {
   _tokenSubmit() {
     var self = this, S = this.state, tok = String(S.tokenInput || '').trim();
     if (S.tokenBusy) return;
-    if (!tok) { this.setState({ tokenMsg: '토큰을 입력하세요' }); return; }
+    if (!tok) { this.setState({ tokenMsg: Tk('토큰을 입력하세요') }); return; }
     var who = this.user || consoleUser();
-    if (!who) { this.setState({ tokenMsg: 'Neo 콘솔에 로그인되어 있지 않습니다' }); return; }
+    if (!who) { this.setState({ tokenMsg: Tk('Neo 콘솔에 로그인되어 있지 않습니다') }); return; }
     this.setState({ tokenBusy: true, tokenMsg: '' });
     validateToken(tok).then(function (tu) {
-      if (!tu) { self.setState({ tokenBusy: false, tokenMsg: '유효하지 않은 토큰입니다(오타·폐기·만료)' }); return; }
-      if (tu !== who) { self.setState({ tokenBusy: false, tokenMsg: tu + ' 계정의 토큰입니다 — ' + who + ' 계정의 토큰을 입력하세요' }); return; }
-      if (!setApiToken(tok)) { self.setState({ tokenBusy: false, tokenMsg: '이 브라우저에 토큰을 저장하지 못했습니다(사이트 데이터 차단)' }); return; }
+      if (!tu) { self.setState({ tokenBusy: false, tokenMsg: Tk('유효하지 않은 토큰입니다(오타·폐기·만료)') }); return; }
+      if (tu !== who) { self.setState({ tokenBusy: false, tokenMsg: Tk('{0} 계정의 토큰입니다 — {1} 계정의 토큰을 입력하세요', tu, who) }); return; }
+      if (!setApiToken(tok)) { self.setState({ tokenBusy: false, tokenMsg: Tk('이 브라우저에 토큰을 저장하지 못했습니다(사이트 데이터 차단)') }); return; }
       self.setState({ tokenBusy: false, tokenInput: '', tokenEdit: false, tokenMsg: '' });
-      if (self.user && !self.state.authMsg) { self._toast('토큰을 바꿨습니다', 'ok'); return; }
+      if (self.user && !self.state.authMsg) { self._toast(T('토큰을 바꿨습니다'), 'ok'); return; }
       if (self.user) { window.location.reload(); return; }
       self.setState({ authMsg: '', needsToken: false });
       self._boot(ENGINE);
     }, function (e) {
-      self.setState({ tokenBusy: false, tokenMsg: '토큰을 확인하지 못했습니다 — ' + ((e && e.message) || e) });
+      self.setState({ tokenBusy: false, tokenMsg: Tk('토큰을 확인하지 못했습니다 — {0}', (e && e.message) || e) });
     });
   }
   // 이 브라우저의 토큰 삭제 — 조회·판정·알림 기록이 멈추고 입력 화면으로
@@ -594,7 +602,7 @@ export class App extends Component {
     clearApiToken();
     this.setState({ tokenEdit: false, tokenInput: '', tokenMsg: '' });
     if (this.user) this._onAuthLost();
-    else this._initNoAuth('토큰을 지웠습니다 — 새 토큰을 입력하세요', true);
+    else this._initNoAuth(Tk('토큰을 지웠습니다 — 새 토큰을 입력하세요'), true);
   }
   // 부팅 뒤 토큰이 사라졌는지(다른 탭에서 삭제)
   _checkToken() {
@@ -629,18 +637,17 @@ export class App extends Component {
       self._bootWith(cfg0 || {});
       var ui = CFG_DOMAIN_UI[doms[0]] || CFG_DOMAIN_UI.source;
       self.setState({ tab: 'settings', setSection: ui[1] });
-      self._toast(doms.map(function (d) { return (CFG_DOMAIN_UI[d] || [d])[0]; }).join('·')
-        + ' 설정을 기본값으로 열었습니다 — 확인 후 저장하면 복구됩니다', 'warn');
+      self._toast(T('{0} 설정을 기본값으로 열었습니다 — 확인 후 저장하면 복구됩니다', doms.map(function (d) { return (CFG_DOMAIN_UI[d] || [d])[0]; }).join('·')), 'warn');
     }, function (err) { self._initCfgFail(err); });
   }
   // 설정 저장 잠금 — 걸려 있으면 사유 알림 후 true(_bootWith 참조)
   _cfgLocked(silent) {
     if (!this._checkIdentity()) {
-      if (!silent) this._toast('다른 계정으로 로그인되어 저장하지 않았습니다 — 새로고침하세요', 'err');
+      if (!silent) this._toast(T('다른 계정으로 로그인되어 저장하지 않았습니다 — 새로고침하세요'), 'err');
       return true;
     }
     if (this._cfgOk) return false;
-    if (!silent) this._toast('설정을 불러오지 못한 상태라 저장하지 않았습니다 — 새로고침 후 다시 시도하세요', 'err');
+    if (!silent) this._toast(T('설정을 불러오지 못한 상태라 저장하지 않았습니다 — 새로고침 후 다시 시도하세요'), 'err');
     return true;
   }
   _initNeedsDb(why, hasDb) {
@@ -665,7 +672,7 @@ export class App extends Component {
       .then(function () { return self._resumeAfterDb(); })
       .catch(function (e) {
         self.setState({ dbBusy: false, dbWhy: (e && e.message) || String(e) });
-        self._toast('저장소를 만들지 못했습니다 — 아래 SQL 을 관리자에게 요청하세요', 'err');
+        self._toast(T('저장소를 만들지 못했습니다 — 아래 SQL 을 관리자에게 요청하세요'), 'err');
       });
   }
   // 저장소 준비 재확인 — 직접 생성 불가 계정의 권한 수령 확인용
@@ -676,13 +683,13 @@ export class App extends Component {
     checkAppDb().then(function (ok) {
       if (!ok) {
         self.setState({ dbBusy: false });
-        self._toast('아직 준비되지 않았습니다', 'warn');
+        self._toast(T('아직 준비되지 않았습니다'), 'warn');
         return;
       }
       return self._resumeAfterDb();
     }).catch(function (e) {
       self.setState({ dbBusy: false });
-      self._toast('확인 실패: ' + ((e && e.message) || e), 'err');
+      self._toast(T('확인 실패: {0}', (e && e.message) || e), 'err');
     });
   }
   /* 계정 권한 — 계정 목록·권한 상태는 데이터 소스 화면을 처음 열 때 조회(force = 다시 읽기)
@@ -702,25 +709,25 @@ export class App extends Component {
       .catch(function (e) {
         var why = (e && e.message) || e, S0 = self.state;
         // 다시 읽기 실패 — 기존 목록·직전 결과 문구 유지
-        if (S0.grantUsers && S0.grantUsers.length) self.setState({ grantMsg: (S0.grantMsg ? S0.grantMsg + ' · ' : '') + '상태를 다시 읽지 못했습니다 — ' + why });
-        else self.setState({ grantUsers: [], grantStatus: null, grantMsg: '계정 목록을 읽지 못했습니다 — ' + why });
+        if (S0.grantUsers && S0.grantUsers.length) self.setState({ grantMsg: Tk('{0}상태를 다시 읽지 못했습니다 — {1}', S0.grantMsg ? S0.grantMsg + ' · ' : '', why) });
+        else self.setState({ grantUsers: [], grantStatus: null, grantMsg: Tk('계정 목록을 읽지 못했습니다 — {0}', why) });
         done();
       });
   }
   // 권한 부여·회수 공용 — 실패는 문장별 사유 표시(재실행 무해), 끝나면 상태 다시 읽기
   _grantRun(u, revoke) {
-    var self = this, ko = revoke ? '회수' : '부여';
+    var self = this, ko = revoke ? T('회수') : T('부여');
     if (!u || this.state.grantBusy) return;
     this.setState({ grantBusy: u, grantAsk: '', grantMsg: '' });
     (revoke ? revokeFrom : grantTo)(u).then(function (r) {
       self.setState({ grantBusy: '',
-        grantMsg: r.failed ? u + ' — ' + (r.total - r.failed) + '/' + r.total + ' 적용, 실패: ' + r.reasons[0]
-          : u + (revoke ? ' 의 권한을 회수했습니다' : ' 에 권한을 부여했습니다') + ' (' + r.total + '건)' });
-      self._toast(u + ' 권한 ' + ko + ' 완료', r.failed ? 'warn' : 'ok');
+        grantMsg: r.failed ? Tk('{0} — {1}/{2} 적용, 실패: {3}', u, r.total - r.failed, r.total, r.reasons[0])
+          : Tk('{0} ({1}건)', u + (revoke ? Tk(' 의 권한을 회수했습니다') : Tk(' 에 권한을 부여했습니다')), r.total) });
+      self._toast(T('{0} 권한 {1} 완료', u, ko), r.failed ? 'warn' : 'ok');
       self._loadGrantUsers(true);
     }).catch(function (e) {
-      self.setState({ grantBusy: '', grantMsg: '실패 — ' + ((e && e.message) || e) });
-      self._toast('권한 ' + ko + ' 실패', 'err');
+      self.setState({ grantBusy: '', grantMsg: Tk('실패 — {0}', (e && e.message) || e) });
+      self._toast(T('권한 {0} 실패', ko), 'err');
       self._loadGrantUsers(true);
     });
   }
@@ -732,7 +739,7 @@ export class App extends Component {
   // 사용 도중 토큰 무효(401)·삭제 — 폴링 중단(미중단 시 매 주기 401)
   _onAuthLost() {
     if (this.state.authMsg) return;
-    this._initNoAuth('API 토큰이 유효하지 않거나 지워졌습니다(폐기·만료) — ' + (this.user || '') + ' 계정의 새 토큰을 입력하세요', true);
+    this._initNoAuth(Tk('API 토큰이 유효하지 않거나 지워졌습니다(폐기·만료) — {0} 계정의 새 토큰을 입력하세요', this.user || ''), true);
   }
   /* 부팅 — 설정 읽기 결과(db.loadConfig)로 분기
      읽음·저장 이력 없음은 그대로 부팅, 실패는 기본값 대체 없이 사유 화면(_initCfgFail) */
@@ -758,7 +765,7 @@ export class App extends Component {
       })
       .then(function (r) {
         var cfg = r[0], tables = r[1];
-        if (!tables || !tables.length) { self._initEmpty('DB에서 TAG 테이블을 찾지 못했습니다 — 연결 상태를 확인하세요'); return; }
+        if (!tables || !tables.length) { self._initEmpty(T('DB에서 TAG 테이블을 찾지 못했습니다 — 연결 상태를 확인하세요')); return; }
         self.live = true;
         self.liveTables = tables;
         self._loadSchemas(); // 컬럼 구성 — 선택 목록에서 미지원 테이블 차단(부팅은 비차단)
@@ -773,7 +780,7 @@ export class App extends Component {
           // 실패 표시 먼저 — _applyLive의 틱이 서버 타이머 동기화 때 빠진 테이블을 '태그 없음'으로 읽어 삭제하지 않도록
           if (failed.length) self._onLoadFail(loadError(failed), sel);
           self._applyLive(data, cfg, sel);
-        }).catch(function (e) { console.warn('[vibe] live build failed', e); self._initEmpty('데이터 적재 실패: ' + (e.message || e)); });
+        }).catch(function (e) { console.warn('[vibe] live build failed', e); self._initEmpty(T('데이터 적재 실패: {0}', e.message || e)); });
       });
   }
   _applyLive(d, cfg, sel) {
@@ -888,23 +895,22 @@ export class App extends Component {
     } });
     if (this._loadRetryT) clearTimeout(this._loadRetryT);
     this._loadRetryT = setTimeout(function () { self._loadRetryT = null; self._reloadLive(true); }, wait);
-    if (first) this._toast('데이터를 다시 불러오지 못했습니다 — 이전 데이터로 감시하며 재시도합니다', 'err');
+    if (first) this._toast(T('데이터를 다시 불러오지 못했습니다 — 이전 데이터로 감시하며 재시도합니다'), 'err');
   }
   // 불러오기 실패 배너 — 감시 이상 배너와 같은 줄, 감시 유지·누락 범위·복귀 조건 함께 표시
   _loadFailWarns() {
     var self = this, LF = this.state.loadFail;
     if (!LF) return [];
-    var t = '데이터를 다시 불러오지 못했습니다 — 화면과 감시는 마지막으로 불러온 데이터로 계속됩니다.';
+    var t = T('데이터를 다시 불러오지 못했습니다 — 화면과 감시는 마지막으로 불러온 데이터로 계속됩니다.');
     if (LF.missing.length) {
-      t += ' 아직 못 불러온 테이블(' + LF.missing.join(', ') + ')은 감시되지 않습니다.'
-        + ' 선택은 저장되어 있어 다시 저장할 필요는 없습니다.';
+      t += T(' 아직 못 불러온 테이블({0})은 감시되지 않습니다. 선택은 저장되어 있어 다시 저장할 필요는 없습니다.', LF.missing.join(', '));
     }
-    t += ' 재시도 ' + LF.tries + '회 실패 · 다음 시도 ' + CH.fmtFull(LF.nextAt).slice(11, 19) + '.';
+    t += T(' 재시도 {0}회 실패 · 다음 시도 {1}.', LF.tries, CH.fmtFull(LF.nextAt).slice(11, 19));
     if (LF.tries >= 3 && LF.tables.length) {
-      t += ' 계속 실패하면 ' + LF.tables.join(', ') + ' 테이블이 지워졌거나 권한이 없는지 확인하고, 필요하면 설정에서 선택을 해제하세요.';
+      t += T(' 계속 실패하면 {0} 테이블이 지워졌거나 권한이 없는지 확인하고, 필요하면 설정에서 선택을 해제하세요.', LF.tables.join(', '));
     }
-    if (LF.why) t += ' (' + LF.why + ')';
-    return [{ lv: 'err', text: t, act: LF.busy ? '다시 시도 중…' : '지금 다시 시도', onAct: function () {
+    if (LF.why) t += ' (' + tx(LF.why) + ')';
+    return [{ lv: 'err', text: t, act: LF.busy ? T('다시 시도 중…') : T('지금 다시 시도'), onAct: function () {
       if (self.state.loadFail && self.state.loadFail.busy) return;
       self.setState({ loadFail: Object.assign({}, self.state.loadFail, { busy: true }) });
       self._reloadLive(true);
@@ -916,7 +922,7 @@ export class App extends Component {
     this._loadTries = 0;
     if (this._loadRetryT) { clearTimeout(this._loadRetryT); this._loadRetryT = null; }
     if (this.state.loadFail) this.setState({ loadFail: null });
-    if (was) this._toast('데이터를 다시 불러왔습니다 — 정상 감시로 돌아왔습니다', 'ok');
+    if (was) this._toast(T('데이터를 다시 불러왔습니다 — 정상 감시로 돌아왔습니다'), 'ok');
   }
   // 타이머 2개 — 판정(monitorInterval)·카탈로그(CAT_TICK_MS) 분리(태그 증감 확인이 판정마다 붙지 않도록)
   _startTimers() {
@@ -971,7 +977,7 @@ export class App extends Component {
       var _el = Date.now() - _t0;
       self._tickCostMs = self._tickCostMs == null ? _el : self._tickCostMs * 0.7 + _el * 0.3;
       if (failed.length && !self.state.srcNotice && !self._noticeMuted) {
-        self.setState({ srcNotice: '데이터 소스 조회 실패 — ' + failed.join(', ') + ' 확인이 필요합니다.' });
+        self.setState({ srcNotice: Tk('데이터 소스 조회 실패 — {0} 확인이 필요합니다.', failed.join(', ')) });
       }
       self._refreshRunState(now);   // 정지·두절 표시용 — 판정과 별개로 서버 모드에서도 필요
       self._judgeLive().then(function (n) { if (n) self._loadEventsLive(); }); // 새 이벤트가 났을 때만 목록 갱신
@@ -1119,14 +1125,14 @@ export class App extends Component {
   // 베어링 표시 이름 — 직접 입력은 적어 둔 품번(없으면 '직접 입력')
   _bearingLabel(eq) {
     var b = (eq && eq.bearing) || {};
-    return b.name ? b.name + ' (직접 입력)' : (b.model || '');
+    return b.name ? T('{0} (직접 입력)', b.name) : (b.model || '');
   }
   // 결함 패턴 측정 가능 태그 — 회전수·구름체 기하 둘 다 필요(monPattern·서버 patValue와 같은 조건, 미끄럼 베어링은 n=0이라 제외)
   _patCapable(eq) { return eq.rpm > 0 && !!(eq.bearing && eq.bearing.n > 0); }
   // 회전수 표기 — 종동측이면 출처 함께(모터 명판과 숫자가 다른 이유)
   _rpmText(eq) {
     var src = eq.rpmSrc;
-    return eq.rpm + ' RPM' + (src === 'pulley' ? ' (종동축·풀리 환산)' : src === 'measured' ? ' (종동축·입력값)' : '');
+    return eq.rpm + ' RPM' + (src === 'pulley' ? T(' (종동축·풀리 환산)') : src === 'measured' ? T(' (종동축·입력값)') : '');
   }
   _patBlocked() {
     var eqs = this.data ? this._activeEqs() : [];
@@ -1136,8 +1142,8 @@ export class App extends Component {
       else if (!(e.bearing && e.bearing.n > 0)) noGeo++;
     });
     return { n: noRpm + noGeo, total: eqs.length, noRpm: noRpm, noGeo: noGeo,
-      why: (noRpm && noGeo) ? '회전수 ' + noRpm + '대 · 베어링 형식 ' + noGeo + '대 미입력'
-        : noRpm ? '회전수 미입력' : '베어링 형식 미입력' };
+      why: (noRpm && noGeo) ? T('회전수 {0}대 · 베어링 형식 {1}대 미입력', noRpm, noGeo)
+        : noRpm ? T('회전수 미입력') : T('베어링 형식 미입력') };
   }
   _applyHealth(timers, st) {
     var C = this._ac();   // 적용된 설정 — 폼의 미저장 편집 배제
@@ -1148,29 +1154,27 @@ export class App extends Component {
     var nferr = this._nfLast || null;
     var iv = durMs(C.monitorInterval) || 3000;
     var warns = [];
-    var reMon = function () { self._toast('서버 감시를 다시 등록합니다'); self._specSig = null; self._syncMonitorTimer(); };
-    var reBand = function () { self._toast('대역 추출을 다시 등록합니다'); self._bandSig = null; self._syncBandTimer(); };
+    var reMon = function () { self._toast(T('서버 감시를 다시 등록합니다')); self._specSig = null; self._syncMonitorTimer(); };
+    var reBand = function () { self._toast(T('대역 추출을 다시 등록합니다')); self._bandSig = null; self._syncBandTimer(); };
     // 자동 복구 대상 — 켜둔 설정인데 스스로 멈춘 타이머. 복구 문구로 공백 구간의 침묵이 근거 아님을 명시
-    var MON_T = { key: 'mon', recK: 'recovered', toast: '서버 감시가 멈춰 자동으로 다시 등록합니다',
+    var MON_T = { key: 'mon', recK: 'recovered', toast: T('서버 감시가 멈춰 자동으로 다시 등록합니다'),
       sync: function () { self._specSig = null; self._syncMonitorTimer(true); },
-      rec: function (ago, why) { return '서버 감시가 ' + ago + ' 전 멈췄다가 자동으로 복구됐습니다 — ' + why
-        + '. 그 사이 판정이 없었으므로 이 구간의 "이상 없음"은 확인된 것이 아닙니다'; } };
-    var BAND_T = { key: 'band', recK: 'bandrecovered', toast: '대역 추출이 멈춰 자동으로 다시 등록합니다',
+      rec: function (ago, why) { return T('서버 감시가 {0} 전 멈췄다가 자동으로 복구됐습니다 — {1}. 그 사이 판정이 없었으므로 이 구간의 "이상 없음"은 확인된 것이 아닙니다', ago, why); } };
+    var BAND_T = { key: 'band', recK: 'bandrecovered', toast: T('대역 추출이 멈춰 자동으로 다시 등록합니다'),
       sync: function () { self._bandSig = null; self._syncBandTimer(true); },
-      rec: function (ago, why) { return '대역 추출이 ' + ago + ' 전 멈췄다가 자동으로 복구됐습니다 — ' + why
-        + '. 그 사이 대역 값이 쌓이지 않아 대역 기준이 판정에서 빠져 있었습니다'; } };
+      rec: function (ago, why) { return T('대역 추출이 {0} 전 멈췄다가 자동으로 복구됐습니다 — {1}. 그 사이 대역 값이 쌓이지 않아 대역 기준이 판정에서 빠져 있었습니다', ago, why); } };
     var dead = null, dband = null;   // 사망 판정 사유 — 자동 복구 입력
     // 감시 타이머 점검은 알람이 켜져 있을 때만 — 알람 OFF면 타이머가 내려가 있는 게 정상(대역 추출만 켠 경우)
     if (C.monMode === 'server' && C.monitorOn) {
       if (!timers) {
-        warns.push({ k: 'unknown', lv: 'warn', text: '감시 타이머 상태를 확인할 수 없습니다 — Neo 연결을 확인하세요' });
+        warns.push({ k: 'unknown', lv: 'warn', text: T('감시 타이머 상태를 확인할 수 없습니다 — Neo 연결을 확인하세요') });
       } else {
         var t = timers[monTimer()];
         if (!t) {
-          warns.push({ k: 'nomon', lv: 'err', text: '서버 감시 타이머가 등록되어 있지 않습니다 — 감시가 돌지 않습니다', act: '다시 등록', onAct: reMon });
+          warns.push({ k: 'nomon', lv: 'err', text: T('서버 감시 타이머가 등록되어 있지 않습니다 — 감시가 돌지 않습니다'), act: T('다시 등록'), onAct: reMon });
         } else if (!/^RUNNING/.test(t.state || '')) {
           // state에 'STOP, ReferenceError: ...'처럼 사유 포함 — 그대로 표시
-          dead = { k: 'stopped', text: '서버 감시가 멈춰 있습니다 — ' + (t.state || '상태 불명'), why: t.state || '상태 불명' };
+          dead = { k: 'stopped', text: T('서버 감시가 멈춰 있습니다 — {0}', t.state || T('상태 불명')), why: t.state || T('상태 불명') };
         }
       }
       // 심박 — 판정 주기 6배 초과 시 RUNNING이어도 실제 미동작
@@ -1180,7 +1184,7 @@ export class App extends Component {
         if (hb.pat > 0) this._patZeroAt = 0;
         if (age > Math.max(60000, iv * 6)) {
           // RUNNING인데 판정 미동작 — STOP과 같은 조치(재등록)
-          var _st = '마지막 판정이 ' + durKo(age) + ' 전입니다 (주기 ' + C.monitorInterval + ')';
+          var _st = T('마지막 판정이 {0} 전입니다 (주기 {1})', tx(durKo(age)), C.monitorInterval);
           if (!dead) dead = { k: 'stale', text: _st, why: _st };
         } else if (hb.pat != null && hb.n > 0 && hb.pat === 0) {
           /* 훑기는 하나 패턴 측정 태그 0 — 등급 축이 비어 알람 불가(다른 검사는 전부 통과해 화면이 조용함)
@@ -1188,12 +1192,11 @@ export class App extends Component {
           if (!this._patZeroAt) this._patZeroAt = now;
           if (now - this._patZeroAt > PAT_ZERO_MS) {
             warns.push({ k: 'nopat', lv: 'warn',
-              text: hb.n + '대를 훑었지만 결함 패턴을 잰 태그가 0입니다 — 등급을 켜는 축이 비어 알람이 날 수 없습니다'
-                + '. 회전수·베어링 기하가 없거나, 판정 창에 표본이 모자랍니다',
-              act: '설비 정보 열기', onAct: function () { self.setState({ tab: 'settings', setSection: 'equip' }); } });
+              text: T('{0}대를 훑었지만 결함 패턴을 잰 태그가 0입니다 — 등급을 켜는 축이 비어 알람이 날 수 없습니다. 회전수·베어링 기하가 없거나, 판정 창에 표본이 모자랍니다', hb.n),
+              act: T('설비 정보 열기'), onAct: function () { self.setState({ tab: 'settings', setSection: 'equip' }); } });
           }
         } else if (hb.n === 0) {
-          warns.push({ k: 'nodata', lv: 'warn', text: '판정 대상이 0개입니다 — 감시 태그에 새 데이터가 들어오는지 확인하세요' });
+          warns.push({ k: 'nodata', lv: 'warn', text: T('판정 대상이 0개입니다 — 감시 태그에 새 데이터가 들어오는지 확인하세요') });
         }
         /* 회차 소요가 주기에 근접하면 경고 — 겹친 회차는 잠금으로 건너뛰어 실제 주기가 조용히 늘어남
            중앙값 + 히스테리시스(SLOW_ON/OFF) — 회차별 소요 편차로 인한 배너 깜빡임 방지 */
@@ -1204,10 +1207,8 @@ export class App extends Component {
             var _over = _med >= iv;
             warns.push({
               k: 'slowtick', lv: _over ? 'err' : 'warn',
-              text: '서버 감시 1회차가 ' + (_med / 1000).toFixed(1) + '초 걸립니다 (최근 회차 중앙값 · 주기 '
-                + C.monitorInterval + ' · 태그 ' + hb.n + '개)'
-                + (_over ? ' — 회차가 겹쳐 일부 주기를 건너뜁니다. 주기를 늘리거나 감시 태그를 줄이세요.' : ' — 주기를 늘리는 것을 권합니다.'),
-              act: '설정 열기', onAct: function () { self.setState({ tab: 'settings', setSection: 'monitor' }); },
+              text: T('서버 감시 1회차가 {0}초 걸립니다 (최근 회차 중앙값 · 주기 {1} · 태그 {2}개){3}', (_med / 1000).toFixed(1), C.monitorInterval, hb.n, _over ? T(' — 회차가 겹쳐 일부 주기를 건너뜁니다. 주기를 늘리거나 감시 태그를 줄이세요.') : T(' — 주기를 늘리는 것을 권합니다.')),
+              act: T('설정 열기'), onAct: function () { self.setState({ tab: 'settings', setSection: 'monitor' }); },
             });
           }
         }
@@ -1215,13 +1216,11 @@ export class App extends Component {
       // 발송 설정 읽기 실패 회차 — 이벤트는 기록되나 알림 미발송. 읽기 성공 회차에 서버가 기록 삭제(t:0)
       if (nferr && nferr.t > 0) {
         warns.push({ k: 'nferr', lv: 'err',
-          text: '서버 감시가 알림 설정을 읽지 못해 이벤트 ' + (nferr.n || 0) + '건을 알리지 못했습니다 ('
-            + durKo(Math.max(0, now - nferr.t)) + ' 전 · ' + (nferr.m || '사유 미상')
-            + ') — 이벤트 이력에는 남아 있습니다. 알림 설정을 다시 저장해 보세요',
-          act: '알림 설정 열기', onAct: function () { self.setState({ tab: 'settings', setSection: 'monitor' }); } });
+          text: T('서버 감시가 알림 설정을 읽지 못해 이벤트 {0}건을 알리지 못했습니다 ({1} 전 · {2}) — 이벤트 이력에는 남아 있습니다. 알림 설정을 다시 저장해 보세요', nferr.n || 0, tx(durKo(Math.max(0, now - nferr.t))), nferr.m || T('사유 미상')),
+          act: T('알림 설정 열기'), onAct: function () { self.setState({ tab: 'settings', setSection: 'monitor' }); } });
       }
       // 회차 문제 — 상태 조회 실패·태그 실패·회차 예외
-      ((hb && hb.err) || []).forEach(function (e) { var w = self._stErrWarn('서버 감시', 'mon', e); if (w) warns.push(w); });
+      ((hb && hb.err) || []).forEach(function (e) { var w = self._stErrWarn(T('서버 감시'), 'mon', e); if (w) warns.push(w); });
       // 타이머 상태 못 읽으면(timers null) 복구·복구 문구 생략 — 모르는 상태를 살아났다고 표시 금지
       if (timers) {
         var _rw = this._recoverWarn(MON_T, dead, now, reMon);
@@ -1232,7 +1231,7 @@ export class App extends Component {
       && (typeof document === 'undefined' || document.visibilityState !== 'hidden')) {
       var lag = now - this._lastJudgeAt;
       if (lag > Math.max(60000, iv * 20)) {
-        warns.push({ k: 'applag', lv: 'warn', text: '앱 판정이 ' + durKo(lag) + ' 동안 멈춰 있습니다 — 탭을 다시 열거나 새로고침하세요' });
+        warns.push({ k: 'applag', lv: 'warn', text: T('앱 판정이 {0} 동안 멈춰 있습니다 — 탭을 다시 열거나 새로고침하세요', tx(durKo(lag))) });
       }
     }
     // 대역 추출은 감시 모드와 무관하게 동작 → 확인·복구도 모드 분기 밖(앱 모드 사용자도 대역 사망 인지)
@@ -1241,31 +1240,29 @@ export class App extends Component {
       // 없는 사유 구분 — 대상 태그 0이면 앱이 안 구운 것이라 '다시 등록' 무의미 → 설비 정보(RPM)로 안내
       if (!b && this._bandNoTarget) {
         warns.push({ k: 'bandnotarget', lv: 'warn',
-          text: '대역 추출이 켜져 있지만 조건을 갖춘 태그가 없어 돌지 않습니다 — ' + (this._bandSkipWhy || '대상 없음')
-            + '. 대역 경계가 회전주파수의 배수로 정의되므로 RPM 없이는 대역을 나눌 수 없습니다',
-          act: '설비 정보 열기', onAct: function () { self.setState({ tab: 'settings', setSection: 'equip' }); } });
-      } else if (!b) warns.push({ k: 'noband', lv: 'warn', text: '대역 추출 타이머가 등록되어 있지 않습니다', act: '다시 등록', onAct: reBand });
-      else if (!/^RUNNING/.test(b.state || '')) dband = { k: 'bandstop', text: '대역 추출이 멈춰 있습니다 — ' + (b.state || '상태 불명'), why: b.state || '상태 불명' };
+          text: T('대역 추출이 켜져 있지만 조건을 갖춘 태그가 없어 돌지 않습니다 — {0}. 대역 경계가 회전주파수의 배수로 정의되므로 RPM 없이는 대역을 나눌 수 없습니다', this._bandSkipWhy || T('대상 없음')),
+          act: T('설비 정보 열기'), onAct: function () { self.setState({ tab: 'settings', setSection: 'equip' }); } });
+      } else if (!b) warns.push({ k: 'noband', lv: 'warn', text: T('대역 추출 타이머가 등록되어 있지 않습니다'), act: T('다시 등록'), onAct: reBand });
+      else if (!/^RUNNING/.test(b.state || '')) dband = { k: 'bandstop', text: T('대역 추출이 멈춰 있습니다 — {0}', b.state || T('상태 불명')), why: b.state || T('상태 불명') };
       else if (sb && sb.t) {
         // RUNNING인데 회차 기록이 멈춤 — 추출 주기 3배(최소 30분) 초과 시 정지와 같은 조치(재등록)
         var bIv = durMs(C.bandInterval) || 600000, bAge = now - sb.t;
         if (bAge > Math.max(1800000, bIv * 3)) {
-          var _bst = '대역 추출이 ' + durKo(bAge) + ' 동안 회차를 마치지 못했습니다 (주기 ' + (C.bandInterval || '10m') + ')';
+          var _bst = T('대역 추출이 {0} 동안 회차를 마치지 못했습니다 (주기 {1})', tx(durKo(bAge)), C.bandInterval || '10m');
           dband = { k: 'bandstale', text: _bst, why: _bst };
         }
       }
       var _bw = this._recoverWarn(BAND_T, dband, now, reBand);
       if (_bw) warns.push(_bw);
-      ((sb && sb.err) || []).forEach(function (e) { var w = self._stErrWarn('대역 추출', 'band', e); if (w) warns.push(w); });
+      ((sb && sb.err) || []).forEach(function (e) { var w = self._stErrWarn(T('대역 추출'), 'band', e); if (w) warns.push(w); });
     } else if (!C.bandOn && this._recover) { delete this._recover.band; }   // 꺼둔 기능의 흔적 제거
     // 표시 상한으로 감시에서 빠진 태그 수 명시 — 알람 없음이 정상 때문이 아닌 경우
     var _cap = S.srcCap;
     if (_cap && _cap.dropped > 0) {
       warns.push({
         k: 'cap', lv: 'warn',
-        text: '태그 ' + _cap.dropped + '개가 표시 상한(테이블당 ' + CAPS.perTable + '개 · 전체 ' + CAPS.total
-          + '개)을 넘어 감시에서 빠져 있습니다 — 감시 중인 태그는 ' + _cap.shown + '개입니다',
-        act: '설정에서 확인', onAct: function () { self.setState({ tab: 'settings', setSection: 'source' }); },
+        text: T('태그 {0}개가 표시 상한(테이블당 {1}개 · 전체 {2}개)을 넘어 감시에서 빠져 있습니다 — 감시 중인 태그는 {3}개입니다', _cap.dropped, CAPS.perTable, CAPS.total, _cap.shown),
+        act: T('설정에서 확인'), onAct: function () { self.setState({ tab: 'settings', setSection: 'source' }); },
       });
     }
     // 되살아난 태그 — 같은 설비인지 사람 확인 후 학습 기반 판정 재개(이름 외 단서 없음)
@@ -1275,9 +1272,9 @@ export class App extends Component {
       warns.push({
         k: 'revived', lv: 'warn',
         text: revKeys.length === 1
-          ? alias(revKeys[0]) + ' — 새로 추가된 태그에 예전 학습값이 남아 있습니다. 이전과 같은 설비인지 확인해 주세요'
-          : '새로 추가된 태그 ' + revKeys.length + '개에 예전 학습값이 남아 있습니다. 이전과 같은 설비인지 확인해 주세요',
-        act: '설정에서 확인', onAct: function () { self.setState({ tab: 'settings', setSection: 'criteria' }); },
+          ? T('{0} — 새로 추가된 태그에 예전 학습값이 남아 있습니다. 이전과 같은 설비인지 확인해 주세요', alias(revKeys[0]))
+          : T('새로 추가된 태그 {0}개에 예전 학습값이 남아 있습니다. 이전과 같은 설비인지 확인해 주세요', revKeys.length),
+        act: T('설정에서 확인'), onAct: function () { self.setState({ tab: 'settings', setSection: 'criteria' }); },
       });
     }
     /* 결함 패턴 축을 세울 수 없는 태그 — 설비 정보 입력으로만 해소되므로 카드 호버 아닌 상시 배너
@@ -1285,9 +1282,8 @@ export class App extends Component {
     var _blk = this._patBlocked();
     if (_blk.n) {
       warns.push({ k: 'nogeo', lv: 'warn',
-        text: _blk.total + '대 중 ' + _blk.n + '대가 결함 패턴을 못 재 등급이 서지 않습니다 — ' + _blk.why
-          + '. 이 설비들의 "이상 없음"은 확인된 것이 아닙니다',
-        act: '설비 정보 열기', onAct: function () { self.setState({ tab: 'settings', setSection: 'equip' }); } });
+        text: T('{0}대 중 {1}대가 결함 패턴을 못 재 등급이 서지 않습니다 — {2}. 이 설비들의 "이상 없음"은 확인된 것이 아닙니다', _blk.total, _blk.n, _blk.why),
+        act: T('설비 정보 열기'), onAct: function () { self.setState({ tab: 'settings', setSection: 'equip' }); } });
     }
     var sig = warns.map(function (w) { return w.k + ':' + w.text; }).join('|');
     if (sig === this._healthSig) return;      // 같은 상태면 리렌더 생략
@@ -1302,26 +1298,26 @@ export class App extends Component {
     if (R.at && now - R.at > RECOVER_CALM_MS) { R.n = 0; R.at = 0; R.why = ''; }
     if (!dead) {
       if (!R.n) return null;
-      return { k: tgt.recK, lv: 'warn', text: tgt.rec(durKo(now - R.at), R.why) };
+      return { k: tgt.recK, lv: 'warn', text: tgt.rec(tx(durKo(now - R.at)), R.why) };
     }
     if (R.n >= RECOVER_MAX) {
-      return { k: dead.k, lv: 'err', text: dead.text + ' · 자동 복구 ' + R.n + '회로 살아나지 않았습니다 — 사유를 확인하세요',
-        act: '다시 등록', onAct: manual };
+      return { k: dead.k, lv: 'err', text: T('{0} · 자동 복구 {1}회로 살아나지 않았습니다 — 사유를 확인하세요', dead.text, R.n),
+        act: T('다시 등록'), onAct: manual };
     }
     // 방금 시도했으면 결과 대기 — 등록 직후 첫 회차 미실행 가능
     if (R.at && now - R.at < RECOVER_GAP_MS) {
-      return { k: dead.k, lv: 'err', text: dead.text + ' · 자동 복구 ' + R.n + '회 시도, 결과를 기다리는 중입니다',
-        act: '다시 등록', onAct: manual };
+      return { k: dead.k, lv: 'err', text: T('{0} · 자동 복구 {1}회 시도, 결과를 기다리는 중입니다', dead.text, R.n),
+        act: T('다시 등록'), onAct: manual };
     }
     // 자동 복구는 담당 탭만 — 여러 탭·PC가 동시에 재등록하면 등록이 서로 덮임
     if (!this._isLead()) {
-      return { k: dead.k, lv: 'err', text: dead.text + ' · 자동 복구는 이 계정의 다른 탭(또는 PC)이 맡습니다',
-        act: '다시 등록', onAct: manual };
+      return { k: dead.k, lv: 'err', text: T('{0} · 자동 복구는 이 계정의 다른 탭(또는 PC)이 맡습니다', dead.text),
+        act: T('다시 등록'), onAct: manual };
     }
     R.n++; R.at = now; R.why = dead.why;
     this._toast(tgt.toast);
     tgt.sync();
-    return { k: dead.k, lv: 'warn', text: dead.text + ' · 자동으로 다시 등록했습니다 (' + R.n + '/' + RECOVER_MAX + ')' };
+    return { k: dead.k, lv: 'warn', text: T('{0} · 자동으로 다시 등록했습니다 ({1}/{2})', dead.text, R.n, RECOVER_MAX) };
   }
   /* ── 탭·PC 조율 ──
      한 계정의 백그라운드 쓰기(앱 모드 판정·알림, 서버 스크립트 재등록·자동 복구, 알던 태그 저장)는 담당 하나만
@@ -1402,7 +1398,7 @@ export class App extends Component {
     var A = this._ac(), patch = {};
     CFG_KEYS.forEach(function (k) { if ((!dirty || FORM_KEYS.indexOf(k) < 0) && A[k] !== undefined) patch[k] = cfgClone(A[k]); });
     this.setState(patch);
-    if (dirty) this._toast('다른 곳에서 설정이 저장되었습니다 — 지금 편집을 저장하면 그 변경을 덮어씁니다', 'warn');
+    if (dirty) this._toast(T('다른 곳에서 설정이 저장되었습니다 — 지금 편집을 저장하면 그 변경을 덮어씁니다'), 'warn');
     var DATA_KEYS = ['srcSel', 'equipCls', 'equipRpm', 'equipBearing', 'equipGeo', 'equipUnit', 'equipMeta', 'lineHz', 'aliases'];
     if (DATA_KEYS.some(function (k) { return JSON.stringify(prev[k]) !== JSON.stringify(A[k]); })) this._reloadLive(true);
     else if (prev.monitorInterval !== A.monitorInterval) this._startTimers();
@@ -1467,13 +1463,13 @@ export class App extends Component {
       // 불러오기 실패 중엔 재시도가 전체를 읽음 — 여기서 재적재 시 백오프 무시·화면 매번 적재 중
       if (added && !self._reloadPending && !self._loadFail) {
         self._reloadPending = true;
-        self._toast('새 태그 감지 — 데이터를 다시 불러옵니다');
+        self._toast(T('새 태그 감지 — 데이터를 다시 불러옵니다'));
         setTimeout(function () { self._reloadPending = false; self._reloadLive(); }, 400);
         return;
       }
       // 제거는 알림만 — 사용자가 '다시 불러오기'로 확정(일시 소실 시 선택 보존)
       if ((gone || failed.length) && !self.state.srcNotice && !self._noticeMuted) {
-        self.setState({ srcNotice: '데이터 소스 변동 감지 — 선택된 테이블 또는 태그가 제거되었거나 비어 있습니다.' });
+        self.setState({ srcNotice: Tk('데이터 소스 변동 감지 — 선택된 테이블 또는 태그가 제거되었거나 비어 있습니다.') });
         return;
       }
       /* 서버 모드 — 태그 목록이 TQL에 값으로 구워지므로 감시 대상 변경 시 재굽기(서명 같으면 생략)
@@ -1492,6 +1488,8 @@ export class App extends Component {
   _cfgFromState() {
     var S = this.state, o = {};
     CFG_KEYS.forEach(function (k) { o[k] = S[k]; });
+    // 알림 언어 — 안 고른 채 저장하면 그때 화면 언어로 확정(서버 타이머는 화면 언어를 모름)
+    if (!o.notifLang) o.notifLang = getLang();
     return o;
   }
   /* 적용된 설정 — 판정·서버 타이머·재적재·모니터링 화면 전용
@@ -1522,7 +1520,7 @@ export class App extends Component {
     var obj = Object.assign(this._cfgFromState(), ov || {});
     return saveConfigPartial(obj, keys)
       .then(function () { self._setApplied(obj, keys); self._bumpStamp('cfg'); })
-      .catch(function (e) { self._toast('설정 저장 실패: ' + (e.message || e), 'err'); });
+      .catch(function (e) { self._toast(T('설정 저장 실패: {0}', e.message || e), 'err'); });
   }
   /* 설정 폼 밖에서 즉시 적용하는 값(헤더 알람 토글·진동 배지 RMS 구간·대역 추출 주기) — 그 키만 저장·적용
      전체 저장 시 설정 탭의 미저장 편집까지 포함됨. 편집본에도 같은 값 반영(다음 저장 때 되돌림 방지) */
@@ -1543,7 +1541,7 @@ export class App extends Component {
     }, function (e) {
       self._setApplied(prev, keys);
       self.setState(prev);
-      self._toast('설정 저장 실패: ' + (e.message || e), 'err');
+      self._toast(T('설정 저장 실패: {0}', e.message || e), 'err');
       return false;
     });
   }
@@ -1556,7 +1554,7 @@ export class App extends Component {
       .then(function () { return self._syncBandTimer(); })      // 대역 추출 타이머도 함께
       .then(function () { return self._syncWdTimer(); })        // 감시자 타이머 잔존분 삭제
       .then(function () { self._cfgFresh = false; return true; })
-      .catch(function (e) { self._toast('설정 저장 실패: ' + (e.message || e), 'err'); return false; });
+      .catch(function (e) { self._toast(T('설정 저장 실패: {0}', e.message || e), 'err'); return false; });
   }
   // 현재 설정 → 서버 판정 TQL 스펙 (태그·존·베이스라인 + 시나리오 파라미터 ms)
   _monSpec() {
@@ -1620,7 +1618,9 @@ export class App extends Component {
       cfg: { escHold: SENSOR_HOLD_MS, recHold: SENSOR_CLEAR_MS,
         reno: { 1: durMs((C.renotify || {})['주의']), 2: durMs((C.renotify || {})['위험']), 3: durMs((C.renotify || {})['심각']) } },
       // 발송도 앱과 같은 함수 — 웹훅 URL 미포함(스크립트는 파일 API로 타 계정 열람 가능), 서버가 발송 때 계정 설정 표에서 읽음
-      notify: { src: Notify.serverSrc(), cfgTable: configTable(), defs: ROUTE_DEFS },
+      // 알림 언어 — 번역기 소스와 영·일 사전(서버 스크립트에 나오는 문구의 키만 골라 실림, monitor.js)
+      notify: { src: Notify.serverSrc(), cfgTable: configTable(), defs: ROUTE_DEFS,
+        i18n: { src: TxCore.makeTx.toString(), dicts: { en: dictOf('en'), ja: dictOf('ja') }, pick: TxCore.pickFor } },
     };
   }
   // 타이머 목록 조회 — 테스트 교체용 메서드 래핑
@@ -1656,7 +1656,7 @@ export class App extends Component {
     var sched = { '1s': '@every 1s', '3s': '@every 3s', '5s': '@every 5s', '10s': '@every 10s', '30s': '@every 30s', '1m': '@every 1m', '10m': '@every 10m' }[C.monitorInterval] || '@every 3s';
     if (!spec.tags.length) {
       return this._dropTimer('_specSig', deleteMonitorTimer, monTimer())
-        .then(function () { if (!silent) self._toast('감시할 태그가 없어 서버 감시를 만들지 않았습니다', 'warn'); });
+        .then(function () { if (!silent) self._toast(T('감시할 태그가 없어 서버 감시를 만들지 않았습니다'), 'warn'); });
     }
     // 서명에 생성 TQL 자체 포함 — 코드 변경(패키지 업데이트)에도 재굽기
     var tql = Monitor.buildMonitorTql(spec);
@@ -1669,12 +1669,12 @@ export class App extends Component {
     if (bad) {
       this._specSig = null;
       console.error('[vibe] 서버 감시 코드 검증 실패', bad);
-      this._toast('서버 감시 코드 검증 실패 — 타이머를 바꾸지 않았습니다: ' + bad, 'err');
+      this._toast(T('서버 감시 코드 검증 실패 — 타이머를 바꾸지 않았습니다: {0}', bad), 'err');
       return Promise.resolve();
     }
     return createMonitorTimer(tql, sched)
-      .then(function () { self._specSig = sig; if (!silent) self._toast('서버 상시감시 켜짐 · ' + sched, 'ok'); })
-      .catch(function (e) { self._specSig = null; if (!silent) self._toast('서버 감시 설정 실패: ' + (e.message || e), 'err'); });
+      .then(function () { self._specSig = sig; if (!silent) self._toast(T('서버 상시감시 켜짐 · {0}', sched), 'ok'); })
+      .catch(function (e) { self._specSig = null; if (!silent) self._toast(T('서버 감시 설정 실패: {0}', e.message || e), 'err'); });
   }
   /* 앱 내 판정 — 앱 모드에서 주기 평가(규칙은 judgeTick, 서버 타이머와 동일)
      · 회차 = 결함 패턴 측정(추출 주기), 계측·두절은 10초 축
@@ -1875,45 +1875,51 @@ export class App extends Component {
   }
   // 기간 이벤트를 CSV/JSON으로 브라우저 다운로드
   _exportEvents() {
-    var C = this._ac();   // 적용된 설정 — 폼의 미저장 편집 배제
-    var self = this, S = this.state, E = this.E;
+    var self = this, S = this.state;
     var fromMs = CH.parseDT(S.csvFrom + 'T00:00:00');
     var toMs = CH.parseDT(S.csvTo + 'T23:59:59.999');
-    if (!(fromMs <= toMs)) { this._toast('기간이 올바르지 않습니다 (시작 ≤ 종료)', 'warn'); return; }
-    var aliasOf = function (r) { return (C.aliases || {})[r.tbl + ':' + r.tag] || ''; };
+    if (!(fromMs <= toMs)) { this._toast(T('기간이 올바르지 않습니다 (시작 ≤ 종료)'), 'warn'); return; }
     loadEventsRange(fromMs, toMs).then(function (rows) {
-      if (!rows.length) { self._toast('해당 기간에 이벤트가 없습니다', 'warn'); return; }
-      var content, mime, ext;
-      // 시각은 초까지 — 같은 분 다건의 순서 구분(화면은 분까지)
-      var ts = function (ms) { return E.fmtFull(ms).slice(0, 19); };
-      // 상세 — 알람이 실제로 들고 있는 내용(대역 이탈의 대역별 값·한계, 두절의 무수신 시간)
-      var det = function (r) { return r.detail || ''; };
-      // 원본 단위 행(가속도·변위 설비 등급 이벤트)은 기준 숫자 대신 근거 문구 — 화면과 같은 규칙
-      var units = {};
-      ((self.data && self.data.equipment) || []).forEach(function (e) { units[e.table + ':' + e.name] = e.unit; });
-      var nat = function (r) { return natRow(r.etype, units[r.tbl + ':' + r.tag]); };
-      var limOf = function (r) { return nat(r) ? (Notify.basisText(r.detail) || '속도 ISO 기준 판정') : r.lim; };
-      if (S.dlFmt === 'json') {
-        content = JSON.stringify(rows.map(function (r) {
-          return { time: ts(r.ts), table: r.tbl, tag: r.tag, alias: aliasOf(r), type: TYPEKO[r.etype] || r.etype, grade: r.grade, value: r.val,
-            limit: nat(r) ? null : r.lim, basis: nat(r) ? limOf(r) : undefined, detail: det(r) };
-        }), null, 2);
-        mime = 'application/json'; ext = 'json';
-      } else {
-        var cell = function (v) { v = String(v == null ? '' : v); return /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; };
-        var lines = ['시각,테이블,태그,별칭,유형,등급,지표값,기준값,상세'];
-        rows.forEach(function (r) { lines.push([ts(r.ts), r.tbl, r.tag, aliasOf(r), TYPEKO[r.etype] || r.etype, r.grade, r.val, limOf(r), det(r)].map(cell).join(',')); });
-        content = '﻿' + lines.join('\r\n'); // BOM — Excel 한글 정상 표시
-        mime = 'text/csv;charset=utf-8'; ext = 'csv';
-      }
-      var url = URL.createObjectURL(new Blob([content], { type: mime }));
+      if (!rows.length) { self._toast(T('해당 기간에 이벤트가 없습니다'), 'warn'); return; }
+      var f = self._eventsFile(rows, S.dlFmt);
+      var url = URL.createObjectURL(new Blob([f.content], { type: f.mime }));
       var a = document.createElement('a');
-      a.href = url; a.download = 'vibe-events_' + S.csvFrom + '_' + S.csvTo + '.' + ext;
+      a.href = url; a.download = 'vibe-events_' + S.csvFrom + '_' + S.csvTo + '.' + f.ext;
       document.body.appendChild(a); a.click(); a.remove();
       setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
       self.setState({ dlOpen: false });
-      self._toast(rows.length + '건 ' + ext.toUpperCase() + ' 다운로드');
-    }).catch(function (e) { self._toast('내보내기 실패: ' + (e.message || e), 'err'); });
+      self._toast(T('{0}건 {1} 다운로드', rows.length, f.ext.toUpperCase()));
+    }).catch(function (e) { self._toast(T('내보내기 실패: {0}', e.message || e), 'err'); });
+  }
+  /* 내보낼 파일 내용 — 헤더·유형·등급·상세·근거는 내려받을 때의 화면 언어(저장은 한국어, 근거 추출은 원문에서)
+     fmt: 'json' | 그 외 CSV */
+  _eventsFile(rows, fmt) {
+    var C = this._ac();   // 적용된 설정 — 폼의 미저장 편집 배제
+    var self = this, E = this.E, content, mime, ext;
+    var aliasOf = function (r) { return (C.aliases || {})[r.tbl + ':' + r.tag] || ''; };
+    // 시각은 초까지 — 같은 분 다건의 순서 구분(화면은 분까지)
+    var ts = function (ms) { return E.fmtFull(ms).slice(0, 19); };
+    // 상세 — 알람이 실제로 들고 있는 내용(대역 이탈의 대역별 값·한계, 두절의 무수신 시간) · 대역 이탈은 기계용 형식이라 잠정 표식만
+    var det = function (r) { return (r.etype === 'band' || r.etype === 'bandrec') ? bandDetailTx(r.detail) : tx(r.detail || ''); };
+    // 원본 단위 행(가속도·변위 설비 등급 이벤트)은 기준 숫자 대신 근거 문구 — 화면과 같은 규칙
+    var units = {};
+    ((self.data && self.data.equipment) || []).forEach(function (e) { units[e.table + ':' + e.name] = e.unit; });
+    var nat = function (r) { return natRow(r.etype, units[r.tbl + ':' + r.tag]); };
+    var limOf = function (r) { return nat(r) ? (tx(Notify.basisText(r.detail)) || T('속도 ISO 기준 판정')) : r.lim; };
+    if (fmt === 'json') {
+      content = JSON.stringify(rows.map(function (r) {
+        return { time: ts(r.ts), table: r.tbl, tag: r.tag, alias: aliasOf(r), type: tx(TYPEKO[r.etype]) || r.etype, grade: tx(r.grade), value: r.val,
+          limit: nat(r) ? null : r.lim, basis: nat(r) ? limOf(r) : undefined, detail: det(r) };
+      }), null, 2);
+      mime = 'application/json'; ext = 'json';
+    } else {
+      var cell = function (v) { v = String(v == null ? '' : v); return /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; };
+      var lines = [[T('시각'), T('테이블'), T('태그'), T('별칭'), T('유형'), T('등급'), T('지표값'), T('기준값'), T('상세')].map(cell).join(',')];
+      rows.forEach(function (r) { lines.push([ts(r.ts), r.tbl, r.tag, aliasOf(r), tx(TYPEKO[r.etype]) || r.etype, tx(r.grade), r.val, limOf(r), det(r)].map(cell).join(',')); });
+      content = '﻿' + lines.join('\r\n'); // BOM — Excel 한글·일본어 정상 표시
+      mime = 'text/csv;charset=utf-8'; ext = 'csv';
+    }
+    return { content: content, mime: mime, ext: ext };
   }
   /* ── 태그 되살아남 차단 ──
      삭제 후 같은 이름으로 재등장한 태그는 사람 확인 전까지 베이스라인·대역 판정 중단(ISO 존은 계속) — 옛 학습값 오적용 방지 */
@@ -1971,7 +1977,7 @@ export class App extends Component {
     delete rev[key];
     this.setState({ revived: rev });
     this._persistView(['revived'], { revived: rev });
-    this._toast('기존 학습값을 계속 사용합니다');
+    this._toast(T('기존 학습값을 계속 사용합니다'));
     this._syncMonitorTimer(true);
   }
   // 일괄 유지 — 저장·타이머 재등록 1회(낱개 반복 호출 회피)
@@ -1980,7 +1986,7 @@ export class App extends Component {
     if (!n) return;
     this.setState({ revived: {} });
     this._persistView(['revived'], { revived: {} });
-    this._toast(n + '개 태그의 기존 학습값을 계속 사용합니다');
+    this._toast(T('{0}개 태그의 기존 학습값을 계속 사용합니다', n));
     this._syncMonitorTimer(true);
   }
   /* 다른 설비 — 학습값(RMS+대역)·판정 상태 삭제 후 재학습 대기
@@ -1999,7 +2005,7 @@ export class App extends Component {
       self._persistView(['revived'], { revived: rev });
       return self._loadBaselines();
     }).then(function () {
-      self._toast('학습값을 초기화했습니다 — 다시 학습해 주세요');
+      self._toast(T('학습값을 초기화했습니다 — 다시 학습해 주세요'));
       self._syncMonitorTimer(true);
     });
   }
@@ -2046,11 +2052,10 @@ export class App extends Component {
       // 정상상태 게이트 — 정지·기동/정지 램프 버킷 제외(한계 오염 방지), 제외 내역은 결과에 기록
       var ss = VC.steadyStateFilter(vals);
       var fit = VC.baselineFit(ss.vals);
-      var exTxt = (ss.idle || ss.ramp) ? ' · 제외 ' + (ss.idle + ss.ramp) + '개(정지 ' + ss.idle + '·과도 ' + ss.ramp + ')' : '';
+      var exTxt = (ss.idle || ss.ramp) ? T(' · 제외 {0}개(정지 {1}·과도 {2})', ss.idle + ss.ramp, ss.idle, ss.ramp) : '';
       // 창 대부분이 정지면 참조(P75)가 정지 수준에 붙어 '정지=정상' 학습 → 폐기(비율·높이 함께 판단)
-      if (ss.bimodal) throw new Error('학습 구간이 정지↔운전 두 수준으로 갈라져 있습니다(상위 수준 표본 '
-        + Math.round(ss.bimodalFrac * 100) + '%, 중앙값의 ' + Math.round(ss.bimodalRatio) + '배) — 정상 운전이 대부분인 기간으로 다시 학습하세요');
-      if (!fit) throw new Error('정상상태 표본 ' + ss.vals.length + '개 (최소 ' + VC.BASELINE_MIN_N + '개 필요' + exTxt + ') — 판정 구간 ' + winSec + '초로 묶어 세므로, 학습 창을 늘리거나 판정 구간을 줄이세요');
+      if (ss.bimodal) throw new Error(T('학습 구간이 정지↔운전 두 수준으로 갈라져 있습니다(상위 수준 표본 {0}%, 중앙값의 {1}배) — 정상 운전이 대부분인 기간으로 다시 학습하세요', Math.round(ss.bimodalFrac * 100), Math.round(ss.bimodalRatio)));
+      if (!fit) throw new Error(T('정상상태 표본 {0}개 (최소 {1}개 필요{2}) — 판정 구간 {3}초로 묶어 세므로, 학습 창을 늘리거나 판정 구간을 줄이세요', ss.vals.length, VC.BASELINE_MIN_N, exTxt, winSec));
       var ms = buckets.map(function (b) { return b.ms; });
       var spanMin = ms.length ? Math.round((Math.max.apply(null, ms) - Math.min.apply(null, ms)) / 60000) : 0;
       var k = parseFloat(self.state.blK) || 3;
@@ -2062,11 +2067,11 @@ export class App extends Component {
         self.setState({ baselines: self._blMerge(ent) });
         unbusy();
         self._resyncMonSoon(); // 서버 모드면 새 μ·σ로 TQL 재생성 — 미실행 시 옛 한계로 판정
-        self._toast((eq.alias || eq.name) + ' 베이스라인 학습 완료 · μ ' + obj.mu.toFixed(2) + ' / σ ' + obj.sigma.toFixed(2) + exTxt + (spanMin < 10 ? ' · 구간 짧음(참고용)' : ''), spanMin < 10 ? 'warn' : 'ok');
+        self._toast(T('{0} 베이스라인 학습 완료 · μ {1} / σ {2}{3}{4}', eq.alias || eq.name, obj.mu.toFixed(2), obj.sigma.toFixed(2), exTxt, spanMin < 10 ? T(' · 구간 짧음(참고용)') : ''), spanMin < 10 ? 'warn' : 'ok');
       });
     }).catch(function (e) {
       unbusy();
-      self._toast('베이스라인 학습 실패: ' + (e.message || e), 'err');
+      self._toast(T('베이스라인 학습 실패: {0}', e.message || e), 'err');
     });
   }
   /* 대역 베이스라인 학습 — BAND 대역 시계열로 대역별 μ·σ 학습(RMS 학습과 같은 steadyStateFilter → baselineFit)
@@ -2085,19 +2090,19 @@ export class App extends Component {
       return bandRaw(key, from, to).then(function (rows) {
         var raw = rows.filter(function (r) { return isFinite(r.v); });
         // 행 없음(추출 미동작·기간 부족)과 0만 쌓임(원리적 측정 불가)은 사유 분리
-        if (!raw.length) return { bn: bn, err: '값 없음 — 대역 추출이 돌지 않았거나 학습 기간에 쌓인 값이 없습니다' };
+        if (!raw.length) return { bn: bn, err: T('값 없음 — 대역 추출이 돌지 않았거나 학습 기간에 쌓인 값이 없습니다') };
         // 추출 주기 격자로 밀도 균일화 — 촘촘한 구간이 표본을 지배해 기준이 되는 것 방지
         var vals = VC.evenSample(raw, grid);
         var ss = VC.steadyStateFilter(vals);
-        if (ss.bimodal) return { bn: bn, err: '정지↔운전 두 수준' };
+        if (ss.bimodal) return { bn: bn, err: T('정지↔운전 두 수준') };
         // 전부 0인 대역은 학습 제외 — Nyquist 위라 측정 불가, 학습 시 한계 0이라 양수 하나로 이탈
         var nz = ss.vals.filter(function (v) { return v > 0; });
         // 값 없음 사유 — 대역은 샘플레이트, 포락선은 설정
         if (!nz.length) return { bn: bn, err: VC.BAND_FREQ.indexOf(bn) >= 0
-          ? '측정 범위 밖 — 대역 하한이 Nyquist보다 높습니다'
-          : '값 없음 — 베어링 품번 미지정이거나 복조 대역이 성립하지 않습니다' };
+          ? T('측정 범위 밖 — 대역 하한이 Nyquist보다 높습니다')
+          : T('값 없음 — 베어링 품번 미지정이거나 복조 대역이 성립하지 않습니다') };
         var fit = VC.baselineFit(ss.vals);
-        if (!fit) return { bn: bn, err: '표본 ' + ss.vals.length + '개(최소 ' + VC.BASELINE_MIN_N + ')' };
+        if (!fit) return { bn: bn, err: T('표본 {0}개(최소 {1})', ss.vals.length, VC.BASELINE_MIN_N) };
         var obj = { mu: +fit.mu.toFixed(5), sigma: +fit.sigma.toFixed(5), k: k, n: fit.n, band: bn, at: Date.now(),
           raw: raw.length, grid: grid }; // 솎기 전 표본 수 — 균일화 제거량 툴팁 표시용
         return saveBaseline(key, obj).then(function () { return { bn: bn, obj: obj }; });
@@ -2194,17 +2199,16 @@ export class App extends Component {
       var nm = eq.alias || eq.name;
       if (r.ok === 0) {
         // 대역별 사유가 다를 수 있어 최다 사유 표시
-        var cnt = {}, why = '사유 불명', top = 0;
+        var cnt = {}, why = T('사유 불명'), top = 0;
         r.fail.forEach(function (f) { var e2 = f.err || ''; cnt[e2] = (cnt[e2] || 0) + 1; if (cnt[e2] > top) { top = cnt[e2]; why = e2; } });
-        self._toast(nm + ' 대역 학습 불가 — ' + why + (r.fail.length > top ? ' (' + top + '/' + r.fail.length + ')' : ''), 'warn');
+        self._toast(T('{0} 대역 학습 불가 — {1}{2}', nm, why, r.fail.length > top ? ' (' + top + '/' + r.fail.length + ')' : ''), 'warn');
       } else {
-        self._toast(nm + ' 대역 베이스라인 ' + r.ok + '/' + VC.BAND_ORDER.length + ' 학습 완료'
-          + (r.fail.length ? ' · ' + r.fail.length + '개 대역 실패' : ''), r.fail.length ? 'warn' : 'ok');
+        self._toast(T('{0} 대역 베이스라인 {1}/{2} 학습 완료{3}', nm, r.ok, VC.BAND_ORDER.length, r.fail.length ? T(' · {0}개 대역 실패', r.fail.length) : ''), r.fail.length ? 'warn' : 'ok');
         self._resyncMonSoon(); // 서버 모드면 새 대역 기준으로 감시 TQL 재굽기
       }
     }).catch(function (e) {
       unbusy();
-      self._toast('대역 학습 실패: ' + (e.message || e), 'err');
+      self._toast(T('대역 학습 실패: {0}', e.message || e), 'err');
     });
   }
   _delBandBaseline(eq) {
@@ -2212,7 +2216,7 @@ export class App extends Component {
     Promise.all(VC.BAND_ORDER.concat(VC.BAND_LEGACY).map(function (bn) { return deleteBaseline(base + ':' + bn).catch(function () {}); }))
       .then(function () {
         self.setState({ baselines: self._blMerge(null, VC.BAND_ORDER.map(function (bn) { return base + ':' + bn; })) });
-        self._toast((eq.alias || eq.name) + ' 대역 베이스라인 삭제됨');
+        self._toast(T('{0} 대역 베이스라인 삭제됨', eq.alias || eq.name));
         self._resyncMonSoon(); // 서버 TQL에 구워진 옛 기준 제거
       });
   }
@@ -2256,7 +2260,7 @@ export class App extends Component {
         stat: eq.stat || null, label: self._tagLabel(eq) };
     });
     var skipped = all.filter(function (t) { return !(t.fs > 0 && t.fr > 0); })
-      .map(function (t) { return { label: t.label, why: !(t.fr > 0) ? 'RPM 미설정' : '샘플레이트 불명' }; });
+      .map(function (t) { return { label: t.label, why: !(t.fr > 0) ? T('RPM 미설정') : T('샘플레이트 불명') }; });
     return { tags: all.filter(function (t) { return t.fs > 0 && t.fr > 0; }), skipped: skipped, total: all.length };
   }
   _bandSpec() {
@@ -2273,8 +2277,8 @@ export class App extends Component {
     var why = {}, n = 0;
     (spec.skipped || []).forEach(function (s2) { if (!why[s2.why]) { why[s2.why] = 0; n++; } why[s2.why]++; });
     var keys = Object.keys(why);
-    if (!keys.length) return '선택된 태그가 없습니다';
-    return keys.map(function (k) { return k + ' ' + why[k] + '개'; }).join(' · ');
+    if (!keys.length) return T('선택된 태그가 없습니다');
+    return keys.map(function (k) { return T('{0} {1}개', k, why[k]); }).join(' · ');
   }
   /* 과거 채우기(백필) 계획 — 채울 범위·소요 선계산
      - 상한 = 학습 창, 간격 = 추출 주기(다르면 백필 구간이 표본 지배)
@@ -2336,7 +2340,7 @@ export class App extends Component {
   _runBandBackfill() {
     var self = this, S = this.state;
     var plan = this._bandPlan();
-    if (!plan.tags.length) { this._toast('대역을 추출할 태그가 없습니다', 'warn'); return Promise.resolve(); }
+    if (!plan.tags.length) { this._toast(T('대역을 추출할 태그가 없습니다'), 'warn'); return Promise.resolve(); }
     var now = Date.now();
     this._bfCancel = false;
     // 찬 칸은 건너뜀(추가 태그만 채움·이어하기) — 현황 먼저 읽고 계획
@@ -2350,7 +2354,7 @@ export class App extends Component {
         var anchors = VC.bandAnchors(plan.ends[k] || now, plan.iv, plan.per[k] || 0, had);
         if (anchors.length) { jobs.push({ t: t, anchors: anchors }); total += anchors.length; }
       });
-      if (!total) { self._toast('이미 다 채워져 있습니다 — 새로 계산할 구간이 없습니다', 'ok'); return; }
+      if (!total) { self._toast(T('이미 다 채워져 있습니다 — 새로 계산할 구간이 없습니다'), 'ok'); return; }
       return self._bfRun(jobs, total, now, plan, cov);
     });
   }
@@ -2392,9 +2396,9 @@ export class App extends Component {
       var cancelled = self._bfCancel;
       self.setState({ bandFill: null });
       var got = Object.keys(gain).reduce(function (a, k) { return a + gain[k]; }, 0);
-      self._toast(cancelled ? '과거 채우기 중지 — 채운 만큼은 그대로 남습니다(다시 누르면 이어서 채웁니다)'
-        : got === 0 ? '채울 구간에 원본이 없어 저장된 값이 없습니다 — 해당 태그의 데이터 기간을 확인하세요'
-          : '과거 채우기 완료 · ' + got + '개', (cancelled || got === 0) ? 'warn' : 'ok');
+      self._toast(cancelled ? T('과거 채우기 중지 — 채운 만큼은 그대로 남습니다(다시 누르면 이어서 채웁니다)')
+        : got === 0 ? T('채울 구간에 원본이 없어 저장된 값이 없습니다 — 해당 태그의 데이터 기간을 확인하세요')
+          : T('과거 채우기 완료 · {0}개', got), (cancelled || got === 0) ? 'warn' : 'ok');
       return self._refreshBandCov(); // 현황 표시 갱신
     });
   }
@@ -2429,10 +2433,10 @@ export class App extends Component {
     var n = Math.floor(H * 3600000 / iv);
     var round = nTags * BAND_PER_MS, duty = iv > 0 ? round / iv * 100 : 0;
     return [
-      { k: '대역 학습 표본', v: n + '개 (현재 ' + cur.perTag + '개) · 최소 ' + VC.BASELINE_MIN_N, warn: n < VC.BASELINE_MIN_N },
-      { k: '회차당 소요', v: fmtDur(round) + ' · ' + nTags + '개 태그' },
-      { k: '서버 점유율', v: duty >= 100 ? '주기 초과 — 다음 회차를 밀어냅니다' : duty.toFixed(0) + '%', warn: duty >= 50 },
-      { k: '최소 학습 소요', v: n < VC.BASELINE_MIN_N ? '학습 불가' : fmtDur(VC.BASELINE_MIN_N * iv) + ' 후 (채우기 없이)' , warn: n < VC.BASELINE_MIN_N },
+      { k: T('대역 학습 표본'), v: T('{0}개 (현재 {1}개) · 최소 {2}', n, cur.perTag, VC.BASELINE_MIN_N), warn: n < VC.BASELINE_MIN_N },
+      { k: T('회차당 소요'), v: T('{0} · {1}개 태그', fmtDur(round), nTags) },
+      { k: T('서버 점유율'), v: duty >= 100 ? T('주기 초과 — 다음 회차를 밀어냅니다') : duty.toFixed(0) + '%', warn: duty >= 50 },
+      { k: T('최소 학습 소요'), v: n < VC.BASELINE_MIN_N ? T('학습 불가') : T('{0} 후 (채우기 없이)', fmtDur(VC.BASELINE_MIN_N * iv)) , warn: n < VC.BASELINE_MIN_N },
     ];
   }
   // 주기 확정 — 이전 구간 처리 후 타이머를 새 주기로 재굽기
@@ -2450,11 +2454,11 @@ export class App extends Component {
         // 서버 판정 타이머에 구워진 대역 학습값도 삭제 후 재굽기
         return Promise.all(eqs.map(function (eq) { return self._delBandBaseline(eq); }))
           .then(function () { return self._syncMonitorTimer(true); })
-          .then(function () { self._toast('추출 주기 ' + (IV_KO[next] || next) + ' · 대역 베이스라인 초기화됨', 'ok'); });
+          .then(function () { self._toast(T('추출 주기 {0} · 대역 베이스라인 초기화됨', IV_KO[next] || next), 'ok'); });
       });
     }
     if (act === 'refill') return applied.then(function (ok) { if (ok) return self._runBandBackfill(); });
-    return applied.then(function (ok) { if (ok) self._toast('추출 주기 ' + (IV_KO[next] || next) + '로 변경', 'ok'); });
+    return applied.then(function (ok) { if (ok) self._toast(T('추출 주기 {0}로 변경', IV_KO[next] || next), 'ok'); });
   }
   // 대역 추출 타이머 — 판정 타이머와 같은 서명 비교, 태그·회전수 변경 시 재굽기(대역 경계가 1× 상대). 주기가 달라 판정 타이머와 분리
   _syncBandTimer(silent) {
@@ -2473,7 +2477,7 @@ export class App extends Component {
     // 대상 0이면 삭제 — 설정은 켜짐인데 타이머가 없으므로 사유 토스트(silent 제외)
     if (!spec.tags.length) {
       var why = this._bandNoTargetWhy(spec);
-      if (!silent) this._toast('대역 추출을 켤 수 없습니다 — ' + why, 'warn');
+      if (!silent) this._toast(T('대역 추출을 켤 수 없습니다 — {0}', why), 'warn');
       return this._dropTimer('_bandSig', deleteBandTimer, bandTimer());
     }
     // 서명에 생성 TQL 포함 — 코드 변경 시 재굽기
@@ -2481,8 +2485,8 @@ export class App extends Component {
     var sig = JSON.stringify(spec.tags) + '|' + sched + '|' + srcSig(tql);
     if (silent && sig === this._bandSig) return Promise.resolve();
     return createBandTimer(tql, sched)
-      .then(function () { self._bandSig = sig; if (!silent) self._toast('대역 추출 켜짐 · ' + sched, 'ok'); })
-      .catch(function (e) { self._bandSig = null; if (!silent) self._toast('대역 추출 설정 실패: ' + (e.message || e), 'err'); });
+      .then(function () { self._bandSig = sig; if (!silent) self._toast(T('대역 추출 켜짐 · {0}', sched), 'ok'); })
+      .catch(function (e) { self._bandSig = null; if (!silent) self._toast(T('대역 추출 설정 실패: {0}', e.message || e), 'err'); });
   }
   // 서버 타이머 재동기화 예약 — 병렬 학습 완료마다 재등록 방지, 디바운스로 마지막 1회만
   _resyncMonSoon() {
@@ -2503,8 +2507,8 @@ export class App extends Component {
       self._blMap = m;
       self.setState({ baselines: m });
       self._resyncMonSoon(); // 삭제도 판정 기준 변경 — 서버 TQL 재굽기
-      self._toast((eq ? (eq.alias || eq.name) : key) + ' 베이스라인 삭제됨');
-    }).catch(function (e) { self._toast('삭제 실패: ' + (e.message || e), 'err'); });
+      self._toast(T('{0} 베이스라인 삭제됨', eq ? (eq.alias || eq.name) : key));
+    }).catch(function (e) { self._toast(T('삭제 실패: {0}', e.message || e), 'err'); });
   }
   // DB 미접속·테이블 없음 — 빈 라이브 상태로 시작(설정 → 데이터 소스 유도)
   _initEmpty(msg) {
@@ -2601,8 +2605,8 @@ export class App extends Component {
     if (!this.live || !snap || !snap.anchor) return null;
     var at = this.E.fmtDT(snap.anchor), p = snap.pick, note = '';
     if (p && p.worst) {
-      note = p.live + '구간 중 ' + (!p.level ? '가장 나쁜 곳' : p.atLevel <= 1 ? '이곳만 · 단발 가능성' : p.atLevel + '구간 동일');
-      if (p.stopped) note += ' · 정지 의심 ' + p.stopped + '구간 제외';
+      note = T('{0}구간 중 {1}', p.live, !p.level ? T('가장 나쁜 곳') : p.atLevel <= 1 ? T('이곳만 · 단발 가능성') : T('{0}구간 동일', p.atLevel));
+      if (p.stopped) note += T(' · 정지 의심 {0}구간 제외', p.stopped);
     }
     return { at: day && at.slice(0, 10) === day ? at.slice(11) : at.slice(5), note: note };
   }
@@ -2642,9 +2646,9 @@ export class App extends Component {
         this._detailAt(eq, reqFrom, anchor, vu, useSweep).then(function (r) {
           var det = r.det;
           c.det = det; c.state = 'ready'; c.anchor = r.pick.at; c.pick = r.pick;
-          if (det.raw && !det.raw.values.length) self._toast('선택 구간에 원시 파형이 없습니다 · 마지막 수집 ' + (eq.lastSeen ? self.E.fmtDT(eq.lastSeen) : '-'), 'warn');
+          if (det.raw && !det.raw.values.length) self._toast(T('선택 구간에 원시 파형이 없습니다 · 마지막 수집 {0}', eq.lastSeen ? self.E.fmtDT(eq.lastSeen) : '-'), 'warn');
           self.forceUpdate();
-        }).catch(function (e) { c.state = 'error'; self._toast('상세분석 조회 실패 — 네트워크·DB 상태 확인 후 새로고침하세요', 'err'); self.forceUpdate(); console.warn('[vibe] detail load failed', e); });
+        }).catch(function (e) { c.state = 'error'; self._toast(T('상세분석 조회 실패 — 네트워크·DB 상태 확인 후 새로고침하세요'), 'err'); self.forceUpdate(); console.warn('[vibe] detail load failed', e); });
       }
       return c.det;
     }
@@ -2699,6 +2703,7 @@ export class App extends Component {
         : spanSec <= 365 * 86400 ? 'hour'
           : spanSec <= 3650 * 86400 ? 'day' : 'month';
     var stepSec = { sec: 1, min: 60, hour: 3600, day: 86400, month: 2592000 }[unit];
+    // label은 리포트 '롤업 단위' 칸 전용 — 한국어로 넘기고 리포트가 번역
     return { fromMs: fromMs, toMs: toMs, unit: unit, stepSec: stepSec, clock: stepSec <= 60, raw: !!raw, capped: capped,
       label: { sec: '초별 (1s)', min: '분별 (1m)', hour: '시간별 (1h)', day: '일별 (1d)', month: '월별 (1M)' }[unit] + (raw ? ' · 원본 집계' : '') };
   }
@@ -2730,10 +2735,10 @@ export class App extends Component {
     var key = eq.id + '|' + S.period + '|' + (S.period === 'custom' ? S.from + '~' + S.to : '');
     var c = this._rfCache[key];
     if (!c) {
-      c = this._rfCache[key] = { roll: [], label: '조회 중…', stepSec: 3600, clock: false, state: 'loading', fromMs: null, toMs: null };
+      c = this._rfCache[key] = { roll: [], label: T('조회 중…'), stepSec: 3600, clock: false, state: 'loading', fromMs: null, toMs: null };
       this._rollForAsync(eq, 'detail').then(function (rf) {
         Object.assign(c, rf, { state: 'ready' }); self.forceUpdate();
-      }).catch(function (e) { c.state = 'error'; c.label = '조회 실패'; console.warn('[vibe] rollFor failed', e); });
+      }).catch(function (e) { c.state = 'error'; c.label = T('조회 실패'); console.warn('[vibe] rollFor failed', e); });
     }
     return { roll: c.roll, label: c.label, stepSec: c.stepSec, clock: c.clock, fromMs: c.fromMs, toMs: c.toMs, raw: !!c.raw, capped: !!c.capped };
   }
@@ -2748,25 +2753,25 @@ export class App extends Component {
     var dom = det.fft.freqs.length ? VC.diagnoseDominant(det.fft.freqs, det.fft.mags, fr, bf) : null;
     var sp = det.spectral || { notes: [], cause: null };
     var cause = sp.cause || (dom ? dom.cause : null); // 하모닉 패턴 우선(단일 피크보다 신뢰↑)
-    if (dom) ev.push({ src: 'FFT', txt: '지배 주파수 ' + dom.domF.toFixed(1) + ' Hz' + (dom.hit ? ' — ' + dom.hit : '') });
-    sp.notes.forEach(function (t) { ev.push({ src: '패턴', txt: t }); });
-    if (det.envelope && det.envelope.fault) ev.push({ src: '포락선', txt: det.envelope.hint });
-    if (det.bandKurt != null) ev.push({ src: '지표', txt: '밴드 커토시스 ' + det.bandKurt.toFixed(1) + (det.bandKurt > 4.5 ? ' · 고주파 충격성' : '') });
+    if (dom) ev.push({ src: 'FFT', txt: T('지배 주파수 {0} Hz{1}', dom.domF.toFixed(1), dom.hit ? ' — ' + dom.hit : '') });
+    sp.notes.forEach(function (t) { ev.push({ src: T('패턴'), txt: t }); });
+    if (det.envelope && det.envelope.fault) ev.push({ src: T('포락선'), txt: det.envelope.hint });
+    if (det.bandKurt != null) ev.push({ src: T('지표'), txt: T('밴드 커토시스 {0}{1}', det.bandKurt.toFixed(1), det.bandKurt > 4.5 ? T(' · 고주파 충격성') : '') });
     var kurtIn = det.indics[1];
-    if (kurtIn) ev.push({ src: '지표', txt: '커토시스 ' + kurtIn.v + (kurtIn.hint ? ' · ' + kurtIn.hint : '') });
+    if (kurtIn) ev.push({ src: T('지표'), txt: T('커토시스 {0}{1}', kurtIn.v, kurtIn.hint ? ' · ' + kurtIn.hint : '') });
     var crestIn = det.indics[3];
-    if (crestIn) ev.push({ src: '지표', txt: 'Crest Factor ' + crestIn.v + (crestIn.hint ? ' · ' + crestIn.hint : '') });
-    if (!ev.length) ev.push({ src: '지표', txt: '표시 구간 데이터 없음 — 조회 기간 확인 필요' });
+    if (crestIn) ev.push({ src: T('지표'), txt: 'Crest Factor ' + crestIn.v + (crestIn.hint ? ' · ' + crestIn.hint : '') });
+    if (!ev.length) ev.push({ src: T('지표'), txt: T('표시 구간 데이터 없음 — 조회 기간 확인 필요') });
     // 규칙 패턴 무검출 시 근거 강도 1순위 채택 — 상단 판정과 근거표 일치
     var evx = det.fft.freqs.length ? this._evidence(eq, det) : null;
     if (!cause && evx) {
       var t = evx.top;
       if (t && t.score >= VC.EVID_ADOPT) {
-        if (/베어링/.test(t.f)) cause = '베어링 충격성 의심' + (evx.hasBearing ? '' : ' (베어링 형식 미지정 — 확정 불가)');
-        else if (/벨트|Sub-sync/.test(t.f)) cause = '비동기·sub-synchronous 성분 의심 (벨트·오일훨 등)';
-        else if (/풀림/.test(t.f)) cause = '기계적 풀림 의심';
-        else if (/정렬/.test(t.f)) cause = '축 정렬 불량 의심';
-        else if (/불평형/.test(t.f)) cause = '질량 불평형 의심';
+        if (/베어링/.test(t.f)) cause = T('베어링 충격성 의심{0}', evx.hasBearing ? '' : T(' (베어링 형식 미지정 — 확정 불가)'));
+        else if (/벨트|Sub-sync/.test(t.f)) cause = T('비동기·sub-synchronous 성분 의심 (벨트·오일훨 등)');
+        else if (/풀림/.test(t.f)) cause = T('기계적 풀림 의심');
+        else if (/정렬/.test(t.f)) cause = T('축 정렬 불량 의심');
+        else if (/불평형/.test(t.f)) cause = T('질량 불평형 의심');
       }
     }
     /* 결함 패턴 축 — 학습 없는 스펙트럼 절대 판정(진폭 정상이어도 패턴 확실하면 등급 상승)
@@ -2810,7 +2815,7 @@ export class App extends Component {
     // 결함 패턴 = 회전수·구름체 기하 둘 다 필요(감시 _patCapable과 같은 조건 — 품번 미지정·저널 베어링은 판정 못 함)
     var _patMeta = this._patCapable(eq);
     var coreAx = [
-      { ko: 'ISO 존', ok: isoGi != null },
+      { ko: T('ISO 존'), ok: isoGi != null },
       { ko: '결함 패턴', ok: _patMeta && !!(evx && !evx.gate) },
     ];
     /* 결함 패턴 못 잰 사유 — meta(회전수·품번 없음) · sleeve(저널 베어링, 판정 대상 아님) · gate(계측 이상) · data(스펙트럼 없음)
@@ -2818,8 +2823,8 @@ export class App extends Component {
     var _sleeve = _rpmOk && !!(eq.bearing && eq.bearing.model === 'sleeve');
     var patWhy = coreAx[1].ok ? '' : !_patMeta ? (_sleeve ? 'sleeve' : 'meta') : (evx && evx.gate) ? 'gate' : 'data';
     var extraAx = [
-      { ko: '베이스라인', ok: blGi != null },
-      { ko: '대역', ok: _rpmOk && !!_bandJ },
+      { ko: T('베이스라인'), ok: blGi != null },
+      { ko: T('대역'), ok: _rpmOk && !!_bandJ },
     ];
     var okOf = function (a) { return a.ok; };
     var koOf = function (a) { return a.ko; };
@@ -2830,32 +2835,31 @@ export class App extends Component {
     var impulse = gi === 0 && !!(sev && sev.crest && sev.crest.grade > 0);
     if (gi === 0 && (isoOnly > 0 || blOnly || bandOnly)) {
       var _why = [];
-      if (blOnly) _why.push('평소 대비 급증');
-      if (bandOnly) _why.push('대역 이탈');
-      if (isoOnly > 0) _why.push('진동 크기 ISO ' + ['A', 'B', 'C', 'D'][isoOnly] + ' 구간');
-      verdict = '베어링 결함 징후 없음 · ' + _why.join(' · ')
-        + ' — 불평형·정렬불량·풀림 등 베어링 외 원인 점검 권장';
+      if (blOnly) _why.push(T('평소 대비 급증'));
+      if (bandOnly) _why.push(T('대역 이탈'));
+      if (isoOnly > 0) _why.push(T('진동 크기 ISO {0} 구간', ['A', 'B', 'C', 'D'][isoOnly]));
+      verdict = T('베어링 결함 징후 없음 · {0} — 불평형·정렬불량·풀림 등 베어링 외 원인 점검 권장', _why.join(' · '));
     }
-    else if (gi === 0) verdict = impulse ? '진폭 정상 · 충격성 신호 존재 — 계측 확인 후 재평가'
-      : covN >= coreAx.length ? '뚜렷한 결함 징후 없음 — 정상 운전'
-        : '관측 범위 내 이상 없음 — 판정 기준 ' + covN + '/' + coreAx.length;
-    else verdict = (cause || '이상 진동 — 다축 정밀 측정 권장') + ' — ' + (gi >= 3 ? '심각 단계' : gi === 2 ? '진행 단계' : '초기 징후');
+    else if (gi === 0) verdict = impulse ? T('진폭 정상 · 충격성 신호 존재 — 계측 확인 후 재평가')
+      : covN >= coreAx.length ? T('뚜렷한 결함 징후 없음 — 정상 운전')
+        : T('관측 범위 내 이상 없음 — 판정 기준 {0}/{1}', covN, coreAx.length);
+    else verdict = (cause || T('이상 진동 — 다축 정밀 측정 권장')) + ' — ' + (gi >= 3 ? T('심각 단계') : gi === 2 ? T('진행 단계') : T('초기 징후'));
     // 전대역 복조의 '없음'은 약한 근거(조기 결함 공진 대역이 Nyquist 밖) → 양호 판정일 때만 단서 부기
     if (gi === 0 && det.demodSrc === 'wideband') {
-      verdict += ' · 전대역 복조(샘플레이트 ' + Math.round(eq.fs || 0) + ' Hz — 1~5 kHz 대역 불성립) — 조기 베어링 결함은 이 판정에 미포함';
+      verdict += T(' · 전대역 복조(샘플레이트 {0} Hz — 1~5 kHz 대역 불성립) — 조기 베어링 결함은 이 판정에 미포함', Math.round(eq.fs || 0));
     }
     // 계측 게이트 — 계측 문제 파형이면 진단보다 검증 우선, 사유(클리핑·DC·스파이크) 문구 포함
     var _gr = VC.gateReason(det.quality, null);
-    if (_gr) { verdict = '계측 검증 필요(' + _gr.label + ') — 결함 진단 보류 · 센서·케이블·마운팅 점검'; impulse = false; }
+    if (_gr) { verdict = T('계측 검증 필요({0}) — 결함 진단 보류 · 센서·케이블·마운팅 점검', _gr.label); impulse = false; }
     // 회전수 미상은 계측 게이트 다음 우선순위
     /* 결함 패턴을 못 세우는 설정(회전수·구름체 기하 없음) — 다른 축 소견이 없을 때만 판정문 대체, 있으면 사유만 덧붙임
        (진동 수준·평소 대비 급증 같은 소견을 지우지 않음) */
     else if (gi === 0 && !_patMeta) {
-      var _noPat = !_rpmOk ? '회전수 미상' : _sleeve ? '저널 베어링' : '베어링 품번 미지정';
-      if (isoOnly > 0 || blOnly || bandOnly || impulse) verdict += ' · 결함 패턴 판정 불가(' + _noPat + ')';
-      else verdict = !_rpmOk ? '회전수 미상 — 주파수 판정 불가(결함 패턴·대역 축 제외) · 설정에서 RPM 입력 필요'
-        : _sleeve ? '저널(sleeve) 베어링 — 구름베어링 결함주파수 없음 · 결함 패턴 판정 대상 아님'
-          : '구름베어링 형상 없음(품번 미지정) — 결함 패턴 판정 불가 · 설정에서 베어링 품번 입력 필요';
+      var _noPat = !_rpmOk ? T('회전수 미상') : _sleeve ? T('저널 베어링') : T('베어링 품번 미지정');
+      if (isoOnly > 0 || blOnly || bandOnly || impulse) verdict += T(' · 결함 패턴 판정 불가({0})', _noPat);
+      else verdict = !_rpmOk ? T('회전수 미상 — 주파수 판정 불가(결함 패턴·대역 축 제외) · 설정에서 RPM 입력 필요')
+        : _sleeve ? T('저널(sleeve) 베어링 — 구름베어링 결함주파수 없음 · 결함 패턴 판정 대상 아님')
+          : T('구름베어링 형상 없음(품번 미지정) — 결함 패턴 판정 불가 · 설정에서 베어링 품번 입력 필요');
     }
     var acts = this._buildActions(eq, det, dom, cause, evx, gi);
     return {
@@ -2867,8 +2871,8 @@ export class App extends Component {
       // 진동(주파수 대역)·베어링(포락선 결함주파수) 분리 반환 — 조치가 다르고 대역 배수는 인접 결함 전파로 오염 가능
       bandAx: _bandJ ? { envR: _bandJ.envR, envKey: _bandJ.envKey, envAlt: _bandJ.envAlt, freqR: _bandJ.freqR, freqKey: _bandJ.freqKey } : null,
       cov: { n: covN, total: coreAx.length, missing: covMiss, extra: extraOn, patWhy: patWhy },
-      sub: (eq.alias || eq.name) + ' · ' + (eq.bearing && eq.bearing.n ? '베어링 ' + this._bearingLabel(eq) : '베어링 미지정') + ' · ' + this._rpmText(eq)
-        + (det.frMeas ? '(실측 ' + Math.round(det.frMeas.rpm) + ')' : '')
+      sub: (eq.alias || eq.name) + ' · ' + (eq.bearing && eq.bearing.n ? T('베어링 {0}', this._bearingLabel(eq)) : T('베어링 미지정')) + ' · ' + this._rpmText(eq)
+        + (det.frMeas ? T('(실측 {0})', Math.round(det.frMeas.rpm)) : '')
         + (det.isoRms != null ? ' · ISO Zone ' + ['A', 'B', 'C', 'D'][VC.gradeFor(det.isoRms, this._isoZones(eq))] : ''),
       color: g.color, soft: g.soft, gradeKo: g.ko,
       evidence: ev,
@@ -2895,89 +2899,88 @@ export class App extends Component {
     var zk = ['A', 'B', 'C', 'D'][jg];
     // 계측 게이트 → 기계 상태 조치 일절 없음(결함 지목·존 권고 포함), 계측 확인 항목만. 게이트는 전역 상태
     if (gate) {
-      add('센서 고정 상태 · 케이블 · 커넥터 접촉 점검', '극단 Crest·첨도는 단발 스파이크(정전기·케이블·접촉)와 구분 불가', '점검');
+      add(T('센서 고정 상태 · 케이블 · 커넥터 접촉 점검'), T('극단 Crest·첨도는 단발 스파이크(정전기·케이블·접촉)와 구분 불가'), T('점검'));
       // 설비 정보 입력을 앞으로 — 목록 상한 절단 방지
       a.push.apply(a, this._metaAction(evx));
-      add('재측정 때 8초 이상 연속 수집', '측대역·저주파 정밀 진단 조건(분해능 0.125 Hz · 8회 평균)', '계측');
-      if (tr && tr.pct > 10) add('계측 검증 뒤 추세 다시 확인', '스파이크가 섞이면 RMS 추세 자체가 왜곡됨');
-      add('계측 검증 뒤 진동 크기 다시 확인', '지금 값 ' + (isoOk ? this._isoDisp(eq, det) + '(ISO ' + zk + ' 구간)' : E.STATUS[jg].ko) + '은 아티팩트가 섞인 상한값');
+      add(T('재측정 때 8초 이상 연속 수집'), T('측대역·저주파 정밀 진단 조건(분해능 0.125 Hz · 8회 평균)'), T('계측'));
+      if (tr && tr.pct > 10) add(T('계측 검증 뒤 추세 다시 확인'), T('스파이크가 섞이면 RMS 추세 자체가 왜곡됨'));
+      add(T('계측 검증 뒤 진동 크기 다시 확인'), T('지금 값 {0}은 아티팩트가 섞인 상한값', isoOk ? T('{0}(ISO {1} 구간)', this._isoDisp(eq, det), zk) : E.STATUS[jg].ko));
       return a.slice(0, 5);
     }
     // 점검 항목 — 지금 할 일(점검 시점)을 실행할 때 볼 것. gi > 0은 베어링 결함 패턴이 있을 때만
     if (gi >= 1) {
-      add('베어링 이상음 · 발열 · 윤활 상태 · 고정 볼트 점검',
-        '베어링 결함 신호 ' + ['', '초기', '진행', '심각'][Math.min(3, gi)] + ' 단계' + (isoOk ? ' · 진동 크기 ISO ' + zk + ' 구간' : ''),
-        gi === 1 ? '정기 점검' : '점검');
+      add(T('베어링 이상음 · 발열 · 윤활 상태 · 고정 볼트 점검'),
+        T('베어링 결함 신호 {0} 단계{1}', ['', T('초기'), T('진행'), T('심각')][Math.min(3, gi)], isoOk ? T(' · 진동 크기 ISO {0} 구간', zk) : ''),
+        gi === 1 ? T('정기 점검') : T('점검'));
     } else if (isoOk && jg > 0) {
-      add('커플링 정렬 · 체결 볼트 · 회전체 오염·손상 점검', '진동 크기 ISO ' + zk + ' 구간인데 베어링 결함 패턴 없음', '점검');
+      add(T('커플링 정렬 · 체결 볼트 · 회전체 오염·손상 점검'), T('진동 크기 ISO {0} 구간인데 베어링 결함 패턴 없음', zk), T('점검'));
     }
-    if (isoOk && eq.grade > jg) add('알람 임계 재검토 또는 협대역 감시로 전환',
-      '광대역 감시 등급 ' + E.STATUS[eq.grade].ko + '(최신 1초 RMS ' + E.fmt(eq.rms) + ' ' + eq.unit + ')이 규격 판정보다 높음(고주파 성분 차이)', '감시 설정');
+    if (isoOk && eq.grade > jg) add(T('알람 임계 재검토 또는 협대역 감시로 전환'),
+      T('광대역 감시 등급 {0}(최신 1초 RMS {1} {2})이 규격 판정보다 높음(고주파 성분 차이)', E.STATUS[eq.grade].ko, E.fmt(eq.rms), eq.unit), T('감시 설정'));
     // 원인별 (지배 주파수 + 하모닉/측대역 패턴)
     cause = cause || '';
-    if (/불평형/.test(cause)) add('회전체 밸런싱 점검(현장 동적 균형)', '1× 성분 지배', '점검');
-    if (/정렬/.test(cause)) add('커플링·축 정렬 점검(레이저 얼라인먼트)', '2× 성분 우세', '점검');
-    if (/풀림/.test(cause)) add('체결·고정·베어링 하우징 점검', '1× 하모닉 다수(기계적 풀림 패턴)', '점검');
+    if (/불평형/.test(cause)) add(T('회전체 밸런싱 점검(현장 동적 균형)'), T('1× 성분 지배'), T('점검'));
+    if (/정렬/.test(cause)) add(T('커플링·축 정렬 점검(레이저 얼라인먼트)'), T('2× 성분 우세'), T('점검'));
+    if (/풀림/.test(cause)) add(T('체결·고정·베어링 하우징 점검'), T('1× 하모닉 다수(기계적 풀림 패턴)'), T('점검'));
     // 부위별 교체 검토는 진행 단계(위험) 이상만 — 초기 징후는 점검 항목 확인이 조치
     if (gi >= 2) {
-      if (/외륜/.test(cause)) add('베어링 교체 검토 · 윤활 상태 확인', '외륜 결함 패턴(BPFO 하모닉 열)', '점검');
-      if (/내륜/.test(cause)) add('베어링 교체 검토', '내륜 결함 패턴(BPFI 하모닉·측대역)', '점검');
-      if (/전동체|볼/.test(cause)) add('베어링 교체 검토', '전동체 결함 패턴(BSF 하모닉)', '점검');
+      if (/외륜/.test(cause)) add(T('베어링 교체 검토 · 윤활 상태 확인'), T('외륜 결함 패턴(BPFO 하모닉 열)'), T('점검'));
+      if (/내륜/.test(cause)) add(T('베어링 교체 검토'), T('내륜 결함 패턴(BPFI 하모닉·측대역)'), T('점검'));
+      if (/전동체|볼/.test(cause)) add(T('베어링 교체 검토'), T('전동체 결함 패턴(BSF 하모닉)'), T('점검'));
     }
     // 증상별(충격성, 밴드 커토시스 우선) — fs가 결함주파수를 못 따라가면 포락선 분석 대신 별도 고주파 측정
     if (impulsive) {
       var _bf = (eq.bearing && eq.bearing.n > 0 && eq.rpm > 0) ? VC.bearingFreqs(eq.rpm, eq.bearing) : null;
-      var _impTxt = '충격성 신호(' + (bk != null ? '밴드 커토시스 ' + bk.toFixed(1) : '커토시스 ' + kurt.toFixed(1)) + ' · Crest ' + crest.toFixed(1) + ')';
+      var _impTxt = T('충격성 신호({0} · Crest {1})', bk != null ? T('밴드 커토시스 {0}', bk.toFixed(1)) : T('커토시스 {0}', kurt.toFixed(1)), crest.toFixed(1));
       if (_bf && !VC.bearingFsOk(eq.fs, _bf)) {
         var _top = Math.max(_bf.BPFO || 0, _bf.BPFI || 0, _bf.BSF || 0);
-        add('휴대형 진동계로 고주파 별도 측정', _impTxt + ' — 지금 샘플레이트 ' + this._num(eq.fs) + ' Hz로는 결함주파수 ' + _top.toFixed(0)
-          + ' Hz 포락선 복조 불가(최소 ' + this._num(Math.round(_top * VC.BEARING_FS_RATIO)) + ' Hz)', '계측');
+        add(T('휴대형 진동계로 고주파 별도 측정'), T('{0} — 지금 샘플레이트 {1} Hz로는 결함주파수 {2} Hz 포락선 복조 불가(최소 {3} Hz)', _impTxt, this._num(eq.fs), _top.toFixed(0), this._num(Math.round(_top * VC.BEARING_FS_RATIO))), T('계측'));
       } else {
-        add('베어링·기어 손상 정밀 점검(포락선·고주파)', _impTxt, '점검');
+        add(T('베어링·기어 손상 정밀 점검(포락선·고주파)'), _impTxt, T('점검'));
       }
     }
     // 추세 (관측이 짧으면 "단기 상승"으로 — 장기 추세 단정 회피)
     if (tr && tr.pct > 10) {
       var _rl = eq.rollup || [], _durMin = _rl.length > 1 ? (_rl[_rl.length - 1].ms - _rl[0].ms) / 60000 : 0;
-      add('측정 주기 단축 · 추세 추적', _durMin < 60 ? '단기 RMS 상승 +' + tr.pct.toFixed(0) + '%(관측 ' + Math.round(_durMin) + '분, 장기 추세 판단 불가)'
-        : 'RMS 상승 추세(+' + tr.pct.toFixed(0) + '%)');
+      add(T('측정 주기 단축 · 추세 추적'), _durMin < 60 ? T('단기 RMS 상승 +{0}%(관측 {1}분, 장기 추세 판단 불가)', tr.pct.toFixed(0), Math.round(_durMin))
+        : T('RMS 상승 추세(+{0}%)', tr.pct.toFixed(0)));
     }
     // 미설명 성분(가장 큰 것) — 직결이면 옆 기계, 벨트·기어(또는 미상)면 구동 구성까지
     var _ux = (evx && evx.unexplained) || [];
-    if (_ux.length) add(meta.drive === 'direct' ? '옆 기계·주변 설비 진동 확인' : '벨트·기어 구성(풀리 지름 · 기어 잇수)과 옆 기계 확인',
-      Math.round(parseFloat(_ux[0])) + ' Hz 진동의 출처 판별(지금은 미설명 성분)', '현장 확인');
+    if (_ux.length) add(meta.drive === 'direct' ? T('옆 기계·주변 설비 진동 확인') : T('벨트·기어 구성(풀리 지름 · 기어 잇수)과 옆 기계 확인'),
+      T('{0} Hz 진동의 출처 판별(지금은 미설명 성분)', Math.round(parseFloat(_ux[0]))), T('현장 확인'));
     // 비어 있는 설비 정보 — 입력 칸이 있는 항목은 항상 안내
     a.push.apply(a, this._metaAction(evx));
     // 지배 주파수 불일치 (패턴도 못 잡은 경우만)
-    if (dom && !dom.hit && !cause && eq.grade >= 1) add('유체·구조 공진 등 비동기 원인 확인', '지배 주파수 ' + dom.domF.toFixed(1) + ' Hz가 1×·2×·베어링 주파수와 불일치', '현장 확인');
+    if (dom && !dom.hit && !cause && eq.grade >= 1) add(T('유체·구조 공진 등 비동기 원인 확인'), T('지배 주파수 {0} Hz가 1×·2×·베어링 주파수와 불일치', dom.domF.toFixed(1)), T('현장 확인'));
     return a.slice(0, 5);
   }
   /* 지금 할 일 한 줄 — 상세분석·리포트 공용. 등급(결함 패턴 게이트) 기준, 판정 못 한 상태면 해소 방법
      held = 화면의 판정 보류(감시 동결 포함) — 없으면 분석 창 계측 게이트 */
   _todoText(eq, det, dx, held) {
-    if (held || (det.quality && det.quality.gate)) return '계측 검증 후 재측정 · 센서 마운팅·케이블·커넥터 점검';
+    if (held || (det.quality && det.quality.gate)) return T('계측 검증 후 재측정 · 센서 마운팅·케이블·커넥터 점검');
     // 결함 패턴 측정 불가 = 측정 상태 — ISO 값만으로 조치 지시 안 함
     var miss = (dx && dx.cov && dx.cov.missing) || [];
     if (miss.indexOf('결함 패턴') >= 0) {
       var pw = dx.cov.patWhy;
-      return pw === 'data' ? '다른 기간으로 다시 분석 · 이 구간은 파형 부족으로 베어링 상태 미판정'
-        : pw === 'sleeve' ? '진동 크기는 ISO 존으로 확인 · 저널 베어링은 결함 패턴 대상 아님'
-          : '명판 회전수·베어링 품번 입력 후 다시 분석 · 지금은 베어링 상태 미판정';
+      return pw === 'data' ? T('다른 기간으로 다시 분석 · 이 구간은 파형 부족으로 베어링 상태 미판정')
+        : pw === 'sleeve' ? T('진동 크기는 ISO 존으로 확인 · 저널 베어링은 결함 패턴 대상 아님')
+          : T('명판 회전수·베어링 품번 입력 후 다시 분석 · 지금은 베어링 상태 미판정');
     }
     var isoG = det.isoRms != null ? VC.gradeFor(det.isoRms, this._isoZones(eq)) : 0;
     // 화면과 같은 등급(결함 패턴 게이트) 기준 — 진폭만 높은 설비 과잉 조치 · 저진폭 초기 결함 누락 방지
     var g = (dx && dx.gi != null) ? dx.gi : isoG;
-    var t = (g === 0 && isoG > 0) ? '베어링 외 원인 점검 · 정렬·체결·불평형 확인'
-      : (g === 0 && dx && dx.impulse) ? '포락선에서 베어링 결함 주파수 대조 · 센서·케이블·마운팅 점검'
-        : ['운전 유지 · 현 측정 주기로 예방관리', '운전 유지 · 다음 정기 점검에 베어링 상태 확인',
-          '계획 정지 시 베어링 점검 · 그때까지 측정 주기 단축', '긴급 점검 · 설비 중요도에 따라 정지 검토'][g];
+    var t = (g === 0 && isoG > 0) ? T('베어링 외 원인 점검 · 정렬·체결·불평형 확인')
+      : (g === 0 && dx && dx.impulse) ? T('포락선에서 베어링 결함 주파수 대조 · 센서·케이블·마운팅 점검')
+        : [T('운전 유지 · 현 측정 주기로 예방관리'), T('운전 유지 · 다음 정기 점검에 베어링 상태 확인'),
+          T('계획 정지 시 베어링 점검 · 그때까지 측정 주기 단축'), T('긴급 점검 · 설비 중요도에 따라 정지 검토')][g];
     // 블록간 변동 크면 경계 여유가 불확도 안 → 잠정(R10)
-    return Math.round((det.isoSpread || 1) * 100) / 100 >= 1.5 ? t + ' (잠정)' : t;
+    return Math.round((det.isoSpread || 1) * 100) / 100 >= 1.5 ? T('{0} (잠정)', t) : t;
   }
   // 비어 있는 설비 정보 → 세부 조치 항목(설정에 입력 칸이 있는 항목만, 없으면 빈 배열)
   _metaAction(evx) {
     var n = (evx && evx.missNames) || [];
-    return n.length ? [{ t: n.join(' · ') + ' 입력', w: '설정 → 설비 정보에서 입력하면 판정할 수 있는 결함 후보가 늘어남', tag: '정보 입력' }] : [];
+    return n.length ? [{ t: T('{0} 입력', n.join(' · ')), w: T('설정 → 설비 정보에서 입력하면 판정할 수 있는 결함 후보가 늘어남'), tag: T('정보 입력') }] : [];
   }
   // 상세분석 이동 + 조회기간을 해당 태그의 데이터 기준으로 재설정 (카드 클릭·이벤트·태그 선택 공용)
   _gotoDetail(id, atMs) {
@@ -3018,16 +3021,16 @@ export class App extends Component {
   }
   // 길이 표기 — 분 입력, 초·분·시간·일 중 하나
   _durText(min) {
-    if (!(min > 0)) return '0분';
-    if (min < 1) return Math.max(1, Math.round(min * 60)) + '초';
-    if (min < 120) return Math.round(min) + '분';
-    if (min < 2880) return Math.round(min / 60) + '시간';
-    return this._num(Math.round(min / 1440)) + '일';
+    if (!(min > 0)) return T('0분');
+    if (min < 1) return T('{0}초', Math.max(1, Math.round(min * 60)));
+    if (min < 120) return T('{0}분', Math.round(min));
+    if (min < 2880) return T('{0}시간', Math.round(min / 60));
+    return T('{0}일', this._num(Math.round(min / 1440)));
   }
   // 롤업 단위 표기 — 버킷 초
   _stepText(s) {
     s = Math.round(s || 1);
-    return s >= 2592000 ? '1개월' : s >= 86400 ? (s / 86400) + '일' : s >= 3600 ? (s / 3600) + '시간' : s >= 60 ? (s / 60) + '분' : s + '초';
+    return s >= 2592000 ? T('1개월') : s >= 86400 ? T('{0}일', s / 86400) : s >= 3600 ? T('{0}시간', s / 3600) : s >= 60 ? T('{0}분', s / 60) : T('{0}초', s);
   }
   // 추세 축 시작 — 앞쪽이 통째로 비면 첫 표본까지 당김(끝·중간 결측은 무수신 정보라 유지)
   _xFrom0(roll, fromMs) {
@@ -3063,7 +3066,7 @@ export class App extends Component {
   _llmModelText(src) {
     var S = src || this._ac(), typed = (S.llmModels || {})[S.llmProvider] || '';
     var m = LLM.activeModel(this._llmCfg(S));
-    return m ? m + (typed ? '' : ' (기본값)') : '';
+    return m ? m + (typed ? '' : T(' (기본값)')) : '';
   }
   // 사용 가능한 프로바이더 = 키가 저장된 것 (ollama는 키가 없으므로 모델 입력 또는 현재 선택 시 포함)
   _llmProviders() {
@@ -3075,10 +3078,11 @@ export class App extends Component {
   }
   // 리포트/상세분석의 프로바이더 드롭다운 — 즉시 적용·즉시 저장, 이전 프로바이더의 소견·테스트 상태는 무효화
   _pickLlmProvider(p) {
-    var self = this;
     if (!p || p === this._ac().llmProvider) return;
-    this.setState({ llmProvider: p, llmConfigured: false, llmTest: null, dxAiText: null });
-    this._persistView(['llmProvider'], { llmProvider: p });   // 이 값만 저장 — 설정 탭 미저장 편집 배제
+    this.setState({ llmConfigured: false, llmTest: null, dxAiText: null });
+    /* 드롭다운 값은 적용본(_ac) — 저장 왕복 뒤 반영이면 그 사이 그리기가 옛 값으로 되돌려 두 번 골라야 바뀜
+       선적용 후 이 값만 저장(_applyNow, 실패 시 되돌림) — 설정 탭 미저장 편집 배제 */
+    this._applyNow({ llmProvider: p });
   }
   /* ---- LLM 소견: 상세분석 전 차트의 실측값을 데이터팩으로 묶어 전문가 리포트 생성 ---- */
   // FFT 상위 피크(로컬 최대) N개 — 진폭 내림차순
@@ -3114,7 +3118,7 @@ export class App extends Component {
     var first = avg(rollup.slice(0, k)), last = avg(rollup.slice(-k));
     if (!(first > 0)) return null;
     var pct = (last - first) / first * 100;
-    return { dir: pct > 10 ? '상승' : pct < -10 ? '하락' : '안정', pct: pct, first: first, last: last };
+    return { dir: pct > 10 ? T('상승') : pct < -10 ? T('하락') : T('안정'), pct: pct, first: first, last: last };
   }
   // 구조화 근거(Evidence) — 동기/비동기 분류·라벨 지표·결함별 근거 강도(LLM·리포트 공용)
   _evidence(eq, det) {
@@ -3133,7 +3137,7 @@ export class App extends Component {
     peaks.forEach(function (p) { var c = cls(p.f); (c.sync ? syncP : asyncP).push({ f: p.f, o: c.o, r: c.r, m: p.m }); });
     var domO = peaks.length && fr > 0 ? peaks[0].f / fr : 0, domSync = peaks.length ? cls(peaks[0].f).sync : false;
     var domSub = domO > 0.4 && domO < 0.9, subAny = asyncP.some(function (p) { return p.o > 0.4 && p.o < 0.9; });
-    var pk = function (a) { return a.map(function (p) { return p.f.toFixed(1) + 'Hz(' + p.o.toFixed(2) + '×)'; }).join(', ') || '없음'; };
+    var pk = function (a) { return a.map(function (p) { return p.f.toFixed(1) + 'Hz(' + p.o.toFixed(2) + '×)'; }).join(', ') || T('없음'); };
     // 비지배 1×·2× 성분 존재 여부 — '동기 피크 없음' 오해 방지
     var peakMag = 0, i0; for (i0 = 0; i0 < (spec ? spec.mags.length : 0); i0++) if (spec.mags[i0] > peakMag) peakMag = spec.mags[i0];
     // 매칭 허용오차 ±1%(최소 1.5빈) — 넓히면 우연 일치 급증
@@ -3142,7 +3146,7 @@ export class App extends Component {
     var magNear = function (f) { if (!(f > 0) || !spec) return 0; var tol = Math.max(1.5 * sRes, f * 0.01), b = 0, i; for (i = 0; i < spec.freqs.length; i++) if (Math.abs(spec.freqs[i] - f) <= tol && spec.mags[i] > b) b = spec.mags[i]; return b; };
     var has1x = magNear(fr) > peakMag * 0.05, has2xE = magNear(2 * fr) > peakMag * 0.05;
     // 동기 피크 표기 — 1×·2× 성분이 있으면 '존재하나 비지배'(미관측과 구분)
-    var syncTxt = syncP.length ? pk(syncP) : ((has1x || has2xE) ? '지배 피크 중 없음 · 1×' + (has2xE ? '·2×' : '') + ' 성분은 존재하나 지배적이지 않음' : '관측되지 않음');
+    var syncTxt = syncP.length ? pk(syncP) : ((has1x || has2xE) ? T('지배 피크 중 없음 · 1×{0} 성분은 존재하나 지배적이지 않음', has2xE ? '·2×' : '') : T('관측되지 않음'));
     // 2) 대역 분배 — ISO 판정과 같은 방법(대역제한 RMS)·시계열 값, 에너지 비율이라 제곱합 정규화
     var bs = det.bandSet;
     var be = bs ? [bs.one, bs.fault, bs.high, bs.sub] : [0, 0, 0, 0];
@@ -3158,16 +3162,13 @@ export class App extends Component {
        미매칭은 반대 증거 아님(열화 말기엔 결함주파수가 흐려짐) */
     var bf = (eq.bearing && eq.bearing.n > 0 && eq.rpm > 0) ? VC.bearingFreqs(eq.rpm, eq.bearing) : null;
     var bm = det.bearMatch || VC.bearingMatch(det.envQ, bf, fr, det.envelope && det.envelope.res);
-    var envLine = !bm.known ? 'BPFO/BPFI/BSF/FTF 미상 (베어링 품번 미지정 — 대조 자체가 불가. 반복 성분이 있어도 베어링 근거로 쓸 수 없음)'
+    var envLine = !bm.known ? T('BPFO/BPFI/BSF/FTF 미상 (베어링 품번 미지정 — 대조 자체가 불가. 반복 성분이 있어도 베어링 근거로 쓸 수 없음)')
       : bm.hit ? (bm.hit.via === 'sideband'
         // 측대역 채택은 중앙 피크 부재 — '일치'와 다른 문구(더 강한 근거로 오독 방지)
-        ? bm.hit.key + '(' + bm.hit.freq.toFixed(1) + ' Hz) 자리의 하모닉·측대역 격자가 배경의 ' + bm.hit.ratio.toFixed(1) + '배 — 선 ' + bm.hit.harm + '개(지배 피크는 서지 않음: 변조된 결함의 전형)'
-          // 구름체는 부위 단정 안 함 — 결함 구름체는 레이스 손상 동반
-          + (bm.hit.siteUnknown ? ' · 부위 단정 불가(구름체 후보이나 실측 적중이 낮아 레이스 손상 동반 가능)' : '')
-        : '포락선 반복이 ' + bm.hit.key + '(' + bm.hit.freq.toFixed(1) + ' Hz)와 일치 — 오차 ' + bm.hit.relPct.toFixed(1) + '% · 하모닉 ' + bm.hit.harm + '개') + (bm.hit.sbValid ? ' · ' + bm.hit.sbValid : '')
-        : bm.weak ? bm.weak.key + '(' + bm.weak.freq.toFixed(1) + ' Hz)에 근접하나 하모닉 ' + bm.weak.harm + '개 — 우연 일치와 구분 불가(가점 없음)'
-          : '포락선 지배 성분이 결함주파수와 불일치: ' + bm.negatives.join('/') + ' 미지배 — 근거 없음이지 결함 없음이 아님'
-            + (bm.cage ? ' · 케이지 통과주파수(FTF ' + bm.cage.freq.toFixed(1) + ' Hz)는 관측되나 정상 베어링에서도 도므로 근거가 아님' : '');
+        ? T('{0}({1} Hz) 자리의 하모닉·측대역 격자가 배경의 {2}배 — 선 {3}개(지배 피크는 서지 않음: 변조된 결함의 전형){4}', bm.hit.key, bm.hit.freq.toFixed(1), bm.hit.ratio.toFixed(1), bm.hit.harm, bm.hit.siteUnknown ? T(' · 부위 단정 불가(구름체 후보이나 실측 적중이 낮아 레이스 손상 동반 가능)') : '')
+        : T('포락선 반복이 {0}({1} Hz)와 일치 — 오차 {2}% · 하모닉 {3}개', bm.hit.key, bm.hit.freq.toFixed(1), bm.hit.relPct.toFixed(1), bm.hit.harm)) + (bm.hit.sbValid ? ' · ' + bm.hit.sbValid : '')
+        : bm.weak ? T('{0}({1} Hz)에 근접하나 하모닉 {2}개 — 우연 일치와 구분 불가(가점 없음)', bm.weak.key, bm.weak.freq.toFixed(1), bm.weak.harm)
+          : T('포락선 지배 성분이 결함주파수와 불일치: {0} 미지배 — 근거 없음이지 결함 없음이 아님{1}', bm.negatives.join('/'), bm.cage ? T(' · 케이지 통과주파수(FTF {0} Hz)는 관측되나 정상 베어링에서도 도므로 근거가 아님', bm.cage.freq.toFixed(1)) : '');
     // 5) 결함별 근거 강도(규칙 기반) — 근거 가점(0~100) 누적 점수화. tags=점수 근거, s=★(0~5)
     var has2x = syncP.some(function (p) { return Math.abs(p.o - 2) < 0.1; });
     var mk = function (f, parts, caveat) { // parts: [[조건, 점수, 태그]…]
@@ -3176,14 +3177,14 @@ export class App extends Component {
       sc = Math.max(0, Math.min(100, sc));
       // 0점 = 근거 부족 명시(가능성 전무로 오해 방지). breakdown = 가점 내역(gains = 같은 내역의 항목별) · caveat = 확정 제약(예: 베어링 미지정)
       return { f: f, score: sc, s: Math.round(sc / 20), tags: tags, gains: gains, caveat: caveat || '',
-        breakdown: bd.length ? bd.join(' · ') + ' = ' + sc : '현재 근거 부족',
-        why: (tags.length ? tags.join('·') : '현재 근거 부족') + (caveat ? ' · ' + caveat : '') };
+        breakdown: bd.length ? bd.join(' · ') + ' = ' + sc : T('현재 근거 부족'),
+        why: (tags.length ? tags.join('·') : T('현재 근거 부족')) + (caveat ? ' · ' + caveat : '') };
     };
     // 임펄스성 = SK·Kurtosis·Crest 공통의 단일 관측 — 중복 가점 대신 최강 기준 단일항(상한 40)
     var impScore = sk > 20 ? 40 : sk > 8 ? 25 : (kurtW > 10 || bk > 10) ? 18 : (kurtW > 4 || bk > 4 || crestW > 5) ? 12 : 0;
-    var impTag = '임펄스성(단일항: SK ' + sk.toFixed(0) + '·Kurt ' + kurtW.toFixed(0) + '·Crest ' + crestW.toFixed(1) + ' 중 최강 기준)';
+    var impTag = T('임펄스성(단일항: SK {0}·Kurt {1}·Crest {2} 중 최강 기준)', sk.toFixed(0), kurtW.toFixed(0), crestW.toFixed(1));
     // 포락선 반복성 — 반복 충격 존재(무엇의 결함인지는 결함주파수 매칭 필요)
-    var eQ = det.envQ, envRep = !!(eQ && eQ.consistent), envTxt = eQ && eQ.f0 > 0 ? eQ.f0.toFixed(1) + 'Hz(' + eQ.order.toFixed(2) + '×)·하모닉 ' + eQ.harm + '개' : '';
+    var eQ = det.envQ, envRep = !!(eQ && eQ.consistent), envTxt = eQ && eQ.f0 > 0 ? T('{0}Hz({1}×)·하모닉 {2}개', eQ.f0.toFixed(1), eQ.order.toFixed(2), eQ.harm) : '';
     var matched = !!(bm && bm.hit); // 결함주파수 매칭 + 하모닉 2개 — 베어링 가점의 유일한 근거
     // 계측 구성·메타데이터 유무 — 판별 가능성 결정, 후보 정의보다 먼저 선언
     var hasPhase = false, hasAxial = false;            // 단채널 1방향(위상·타코·축방향 없음)
@@ -3235,49 +3236,47 @@ export class App extends Component {
     var domIsDriven = !!(beltF && peaks.length && !domSync
       && Math.abs(peaks[0].f - beltF.other) <= Math.max(beltTol, beltF.other * 0.02));
     var conf = [
-      mk('불평형(Imbalance)', [[domSync && Math.abs(domO - 1) < 0.1, 55, '1× 동기 지배'], [Math.abs(domO - 1) < 0.1 && frac(0) > 0.5, 30, '1× 대역 우세']]),
-      mk('정렬불량(Misalignment)', [[has2x, 40, '2× 동기 성분'], [has2x && frac(1) > 0.4, 30, '결함대역 우세']]),
-      mk('기계적 풀림(Looseness)', [[domSync && syncP.length >= 3, 55, '정수배 하모닉 다수'], [domSync && syncP.length === 2, 25, '하모닉 일부'], [domSync && subAny, 15, 'subharmonic']], domSync ? '' : '비동기 지배 — 하모닉 근거 약함'),
-      mk('베어링(Bearing)', [[matched, 45, bm.hit
+      mk(T('불평형(Imbalance)'), [[domSync && Math.abs(domO - 1) < 0.1, 55, T('1× 동기 지배')], [Math.abs(domO - 1) < 0.1 && frac(0) > 0.5, 30, T('1× 대역 우세')]]),
+      mk(T('정렬불량(Misalignment)'), [[has2x, 40, T('2× 동기 성분')], [has2x && frac(1) > 0.4, 30, T('결함대역 우세')]]),
+      mk(T('기계적 풀림(Looseness)'), [[domSync && syncP.length >= 3, 55, T('정수배 하모닉 다수')], [domSync && syncP.length === 2, 25, T('하모닉 일부')], [domSync && subAny, 15, 'subharmonic']], domSync ? '' : T('비동기 지배 — 하모닉 근거 약함')),
+      mk(T('베어링(Bearing)'), [[matched, 45, bm.hit
         ? (bm.hit.via === 'sideband'
-          ? bm.hit.key + ' 측대역 ' + bm.hit.harm + '개 · 배경 대비 ' + bm.hit.ratio.toFixed(1) + '배'
-          : bm.hit.key + ' 일치 · 하모닉 ' + bm.hit.harm + '개 · 오차 ' + bm.hit.relPct.toFixed(1) + '%')
+          ? T('{0} 측대역 {1}개 · 배경 대비 {2}배', bm.hit.key, bm.hit.harm, bm.hit.ratio.toFixed(1))
+          : T('{0} 일치 · 하모닉 {1}개 · 오차 {2}%', bm.hit.key, bm.hit.harm, bm.hit.relPct.toFixed(1)))
         : ''],
         [matched && !!(bm.hit && bm.hit.sbValid), 10, bm.hit && bm.hit.sbValid],
-        [matched && impScore > 0, Math.min(25, impScore), '임펄스성 보강(매칭 확인 후)']],
+        [matched && impScore > 0, Math.min(25, impScore), T('임펄스성 보강(매칭 확인 후)')]],
         // '반대 증거' 표현 금지 — 지배 피크 불일치일 뿐 결함 없음 아님(열화 말기엔 결함주파수 흐려짐)
-        !bm.known ? '베어링 품번 미지정 — 결함주파수 대조 불가라 원리상 귀속 불가'
-          : (!matched ? '포락선 지배 성분이 결함주파수와 불일치(' + (bm.weak ? bm.weak.key + ' 근접하나 하모닉 부족' : bm.negatives.join('/') + ' 미지배')
-            + ') — 근거 없음이지 결함 없음이 아님'
-            + (bm.cage ? ' · 케이지 통과주파수(FTF) 관측 — 정상 베어링에서도 나오므로 근거 아님' : '') : '')),
+        !bm.known ? T('베어링 품번 미지정 — 결함주파수 대조 불가라 원리상 귀속 불가')
+          : (!matched ? T('포락선 지배 성분이 결함주파수와 불일치({0}) — 근거 없음이지 결함 없음이 아님{1}', bm.weak ? T('{0} 근접하나 하모닉 부족', bm.weak.key) : T('{0} 미지배', bm.negatives.join('/')), bm.cage ? T(' · 케이지 통과주파수(FTF) 관측 — 정상 베어링에서도 나오므로 근거 아님') : '') : '')),
       /* 벨트·풀리 — 벨트 결함 근거는 벨트 통과주파수뿐(종동축 1× 일치는 아래 독립 회전원 귀속으로만)
          ⚠ mk 인자는 조건과 무관하게 전부 먼저 평가 — 문구도 조건과 같은 것을 확인해야 함(beltHit null 참조 시 리포트 생성 실패) */
-      mk('벨트·풀리(Belt)', [[!!beltHit && harmOf(beltHit.f) >= 2, 35, (beltHit && hasBeltLen) ? '벨트 통과주파수 ' + beltF.belt.toFixed(1) + 'Hz 일치 · 하모닉 ' + harmOf(beltHit.f) + '개' : ''],
-        [!!beltHit && harmOf(beltHit.f) < 2, 12, '벨트 통과주파수 근처 성분(하모닉 부족)']],
-        !hasBeltSpec ? '벨트 제원(풀리경) 미입력 — 벨트주파수 대조 불가'
-          : (!hasBeltLen ? '벨트길이 미입력 — 벨트 통과주파수 대조 불가(풀리비로 ' + beltF.otherKo + ' 1×만 대조됨)' : '')),
+      mk(T('벨트·풀리(Belt)'), [[!!beltHit && harmOf(beltHit.f) >= 2, 35, (beltHit && hasBeltLen) ? T('벨트 통과주파수 {0}Hz 일치 · 하모닉 {1}개', beltF.belt.toFixed(1), harmOf(beltHit.f)) : ''],
+        [!!beltHit && harmOf(beltHit.f) < 2, 12, T('벨트 통과주파수 근처 성분(하모닉 부족)')]],
+        !hasBeltSpec ? T('벨트 제원(풀리경) 미입력 — 벨트주파수 대조 불가')
+          : (!hasBeltLen ? T('벨트길이 미입력 — 벨트 통과주파수 대조 불가(풀리비로 {0} 1×만 대조됨)', beltF.otherKo) : '')),
       // 케이지(FTF) — 구름베어링 d/D 범위상 품번 없이도 0.35~0.45× 구간 판정 가능
-      mk('케이지 결함(FTF 추정)', [[domO >= 0.35 && domO <= 0.45, 30, '지배 ' + domO.toFixed(2) + '× — FTF 이론 구간(0.35~0.45×, 품번 무관)'], [!(domO >= 0.35 && domO <= 0.45) && ordHit(0.35, 0.45), 12, '0.35~0.45× 성분 관측']], '확정에는 포락선에서 FTF 하모닉 확인 필요 — 가설'),
-      mk('오일 훨(Oil whirl)',
-        rollingBrg ? [] : [[domOil, 45, '지배 ' + domO.toFixed(2) + '× — 오일훨 정통 구간(0.38~0.48×)'], [!domOil && anyOil, 15, '0.38~0.48× 성분 관측']],
-        rollingBrg ? '구름베어링(' + (this._bearingLabel(eq) || '형식 지정') + ') — 유막 베어링 현상이라 해당 없음'
-          : '유막 베어링 여부·기동정지 추적 필요 — 가설'),
+      mk(T('케이지 결함(FTF 추정)'), [[domO >= 0.35 && domO <= 0.45, 30, T('지배 {0}× — FTF 이론 구간(0.35~0.45×, 품번 무관)', domO.toFixed(2))], [!(domO >= 0.35 && domO <= 0.45) && ordHit(0.35, 0.45), 12, T('0.35~0.45× 성분 관측')]], T('확정에는 포락선에서 FTF 하모닉 확인 필요 — 가설')),
+      mk(T('오일 훨(Oil whirl)'),
+        rollingBrg ? [] : [[domOil, 45, T('지배 {0}× — 오일훨 정통 구간(0.38~0.48×)', domO.toFixed(2))], [!domOil && anyOil, 15, T('0.38~0.48× 성분 관측')]],
+        rollingBrg ? T('구름베어링({0}) — 유막 베어링 현상이라 해당 없음', this._bearingLabel(eq) || T('형식 지정'))
+          : T('유막 베어링 여부·기동정지 추적 필요 — 가설')),
       // 독립 회전원 — 비동기 기본파 + 자체 하모닉 열 = 다른 회전원(벨트·기어 종동축·인접 기계)의 1×
-      mk('독립 회전원(종동축·인접 기계)', [[!domSync && domHarm >= 3, 40, (peaks.length ? peaks[0].f.toFixed(1) : '?') + ' Hz(' + domO.toFixed(2) + '×) 기본파 + 하모닉 ' + (domHarm - 1) + '개 · ≈' + self._num(peaks.length ? Math.round(peaks[0].f * 60) : 0) + ' rpm'],
-        [!domSync && domHarm === 2, 18, '비동기 기본파 + 하모닉 1개'],
+      mk(T('독립 회전원(종동축·인접 기계)'), [[!domSync && domHarm >= 3, 40, T('{0} Hz({1}×) 기본파 + 하모닉 {2}개 · ≈{3} rpm', peaks.length ? peaks[0].f.toFixed(1) : '?', domO.toFixed(2), domHarm - 1, self._num(peaks.length ? Math.round(peaks[0].f * 60) : 0))],
+        [!domSync && domHarm === 2, 18, T('비동기 기본파 + 하모닉 1개')],
         // 풀리비 일치 시 귀속 확정
-        [domIsDriven, 15, beltF ? '벨트 ' + beltF.otherKo + ' 1× ' + beltF.other.toFixed(1) + 'Hz(풀리비 ' + beltF.ratio.toFixed(2) + ')와 일치 — 귀속 확정' : '']],
-        domIsDriven ? '' : '구동 계통도(풀리비·기어비)·인접 기계 배치 확인 필요 — 이 한 장이면 귀속이 닫힘'),
-      mk('베인/블레이드 통과(Vane pass)', [[hasVanes && vane, 35, '#날개 ' + nVanes + ' × 1× = ' + vaneF.toFixed(1) + 'Hz 일치'],
-        [!hasVanes && vane, 20, '정수배 3× 이상 성분 관측']],
-        hasVanes ? '' : '임펠러 날개수 미입력 — #날개×1× 대조 불가라 확정 불능'),
+        [domIsDriven, 15, beltF ? T('벨트 {0} 1× {1}Hz(풀리비 {2})와 일치 — 귀속 확정', beltF.otherKo, beltF.other.toFixed(1), beltF.ratio.toFixed(2)) : '']],
+        domIsDriven ? '' : T('구동 계통도(풀리비·기어비)·인접 기계 배치 확인 필요 — 이 한 장이면 귀속이 닫힘')),
+      mk(T('베인/블레이드 통과(Vane pass)'), [[hasVanes && vane, 35, T('#날개 {0} × 1× = {1}Hz 일치', nVanes, vaneF.toFixed(1))],
+        [!hasVanes && vane, 20, T('정수배 3× 이상 성분 관측')]],
+        hasVanes ? '' : T('임펠러 날개수 미입력 — #날개×1× 대조 불가라 확정 불능')),
       // 기어 결함 — 측대역이 결정 검사(메시 주파수만으론 정상과 구분 불가)
-      mk('기어 메시(Gear mesh)', [
-        [!!meshHit && meshSb >= 2, 40, meshF > 0 ? '메시 ' + meshF.toFixed(1) + 'Hz(잇수 ' + nVanes + '×1×) 일치 · 1× 간격 측대역 양측 확인 — 치면 손상 시그니처' : ''],
-        [!!meshHit && meshSb === 1, 20, '메시 주파수 일치 · 측대역 한쪽만 — 확정 부족'],
-        [!!meshHit && meshSb === 0, 8, '메시 주파수 관측 · 측대역 없음 — 정상 기어에서도 나타나는 성분'],
-      ], (isGear && nVanes > 0) ? '' : '기어 구동·잇수 미입력 — 메시 주파수 대조 불가'),
-      mk('전기적(Electrical)', [[elec, 20, elecF.toFixed(0) + ' Hz(2×계통 ' + lineHz + 'Hz) 근처 성분 관측']], '확정에는 전원 차단 시 소멸 시험 필요 — 가설'),
+      mk(T('기어 메시(Gear mesh)'), [
+        [!!meshHit && meshSb >= 2, 40, meshF > 0 ? T('메시 {0}Hz(잇수 {1}×1×) 일치 · 1× 간격 측대역 양측 확인 — 치면 손상 시그니처', meshF.toFixed(1), nVanes) : ''],
+        [!!meshHit && meshSb === 1, 20, T('메시 주파수 일치 · 측대역 한쪽만 — 확정 부족')],
+        [!!meshHit && meshSb === 0, 8, T('메시 주파수 관측 · 측대역 없음 — 정상 기어에서도 나타나는 성분')],
+      ], (isGear && nVanes > 0) ? '' : T('기어 구동·잇수 미입력 — 메시 주파수 대조 불가')),
+      mk(T('전기적(Electrical)'), [[elec, 20, T('{0} Hz(2×계통 {1}Hz) 근처 성분 관측', elecF.toFixed(0), lineHz)]], T('확정에는 전원 차단 시 소멸 시험 필요 — 가설')),
     ];
     // 구성상 해당 없는 후보 제외 — 직결 기계의 벨트 후보는 '측정 불가' 아닌 '해당 없음'
     if (meta.drive && meta.drive !== 'belt') conf = conf.filter(function (c) { return !/^벨트·풀리/.test(c.f); });
@@ -3295,101 +3294,91 @@ export class App extends Component {
         if (!test(c)) return;
         c.na = true; c.score = null; c.s = null;
         c.caveat = reason;
-        c.breakdown = '측정 불가 — 점수 산정 대상 아님(' + reason + ')';
-        c.why = reason + ' — 이 구성·정보로는 볼 수 없음';
+        c.breakdown = T('측정 불가 — 점수 산정 대상 아님({0})', reason);
+        c.why = T('{0} — 이 구성·정보로는 볼 수 없음', reason);
       });
     };
-    naIf(function (c) { return /^불평형|^정렬불량/.test(c.f) && !(hasPhase && hasAxial); }, '위상·축방향 데이터 없음 — 단일 채널로는 원리상 판별 불가');
-    naIf(function (c) { return /^베어링/.test(c.f) && !bm.known; }, '베어링 품번 미지정 — BPFO/BPFI/BSF 대조 불가(단, 케이지 FTF는 품번 무관하게 0.35~0.45× 구간 판정이 가능해 별도 후보로 평가함)');
+    naIf(function (c) { return /^불평형|^정렬불량/.test(c.f) && !(hasPhase && hasAxial); }, T('위상·축방향 데이터 없음 — 단일 채널로는 원리상 판별 불가'));
+    naIf(function (c) { return /^베어링/.test(c.f) && !bm.known; }, T('베어링 품번 미지정 — BPFO/BPFI/BSF 대조 불가(단, 케이지 FTF는 품번 무관하게 0.35~0.45× 구간 판정이 가능해 별도 후보로 평가함)'));
     // 샘플레이트 부족은 미검출 아닌 측정 불가 — 반대 증거로 쓰면 있는 결함을 부정(R7)
     var fsOk = VC.bearingFsOk(eq.fs, bf);
     if (!fsOk && bf) {
       var topBf = Math.max(bf.BPFO || 0, bf.BPFI || 0, bf.BSF || 0);
       naIf(function (c) { return /^베어링/.test(c.f); },
-        '샘플레이트 부족 — fs ' + self._num(eq.fs) + ' Hz로는 결함주파수 ' + topBf.toFixed(0) + ' Hz의 포락선 복조 불가(최소 '
-          + self._num(Math.round(topBf * VC.BEARING_FS_RATIO)) + ' Hz 필요)');
+        T('샘플레이트 부족 — fs {0} Hz로는 결함주파수 {1} Hz의 포락선 복조 불가(최소 {2} Hz 필요)', self._num(eq.fs), topBf.toFixed(0), self._num(Math.round(topBf * VC.BEARING_FS_RATIO))));
     }
-    naIf(function (c) { return /^베인/.test(c.f) && !hasVanes; }, '임펠러 날개수 미입력 — #날개×1× 대조 불가');
+    naIf(function (c) { return /^베인/.test(c.f) && !hasVanes; }, T('임펠러 날개수 미입력 — #날개×1× 대조 불가'));
     // 기어는 구동방식=기어 + 잇수 둘 다 필요, 기어 구동 아니면 후보 제외
     naIf(function (c) { return /^기어 메시/.test(c.f) && !(isGear && nVanes > 0); },
-      isGear ? '잇수 미입력 — 메시 주파수(잇수×1×) 대조 불가' : '기어 구동 여부 미입력 — 메시 주파수 대조 불가');
+      isGear ? T('잇수 미입력 — 메시 주파수(잇수×1×) 대조 불가') : T('기어 구동 여부 미입력 — 메시 주파수 대조 불가'));
     if (meta.drive && meta.drive !== 'gear') conf = conf.filter(function (c) { return !/^기어 메시/.test(c.f); });
     // 벨트 결함은 벨트 통과주파수로만 판별 → 길이 없으면 측정 불가, 벨트 구동 아니면 해당 없음
     naIf(function (c) { return /^벨트·풀리/.test(c.f) && !hasBeltLen; },
-      meta.drive && meta.drive !== 'belt' ? '벨트 구동이 아님 — 해당 없음'
-        : (!hasBeltSpec ? '벨트 제원(풀리경·벨트길이) 미입력 — 벨트주파수 대조 불가' : '벨트길이 미입력 — 벨트 통과주파수 대조 불가'));
+      meta.drive && meta.drive !== 'belt' ? T('벨트 구동이 아님 — 해당 없음')
+        : (!hasBeltSpec ? T('벨트 제원(풀리경·벨트길이) 미입력 — 벨트주파수 대조 불가') : T('벨트길이 미입력 — 벨트 통과주파수 대조 불가')));
     // 계측 게이트는 전역 상태(R6) — 단발 임펄스가 광대역으로 퍼져 전 피크 진폭이 잠정 → 전 후보 동일 상한(일부만 캡하면 미검증 후보 1위)
     if (gate) {
       conf.forEach(function (c) {
         if (c.na || c.score == null) return;
-        if (c.score > GATE_CAP) { c.breakdown += ' → 전역 상한 ' + GATE_CAP + '(계측 게이트)'; c.score = GATE_CAP; }
+        if (c.score > GATE_CAP) { c.breakdown += T(' → 전역 상한 {0}(계측 게이트)', GATE_CAP); c.score = GATE_CAP; }
         c.s = Math.round(c.score / 20);
         // 잠정 표기는 상단 배너 1회(행마다 반복 시 경고 묻힘)
         c.provisional = true;
-        c.why = (c.tags.length ? c.tags.join('·') : '현재 근거 부족') + (c.caveat ? ' · ' + c.caveat : '');
+        c.why = (c.tags.length ? c.tags.join('·') : T('현재 근거 부족')) + (c.caveat ? ' · ' + c.caveat : '');
       });
     } else {
-      conf.forEach(function (c) { if (!c.na && c.score != null) c.why = (c.tags.length ? c.tags.join('·') : '현재 근거 부족') + (c.caveat ? ' · ' + c.caveat : ''); });
+      conf.forEach(function (c) { if (!c.na && c.score != null) c.why = (c.tags.length ? c.tags.join('·') : T('현재 근거 부족')) + (c.caveat ? ' · ' + c.caveat : ''); });
     }
     conf.sort(function (a, b) { return (b.score == null ? -1 : b.score) - (a.score == null ? -1 : a.score); });
     // 6) 텍스트 블록
     var acq = det.acq || {};
     var B = [];
-    B.push('■ 취득 조건: 총 창 ' + (det.anaSec || acq.winSec || 0).toFixed(1) + '초 · 블록 ' + (acq.blockSec || 0).toFixed(1) + '초(' + (acq.window || 'Hann') + ' ' + (acq.overlapPct || 50) + '% 중첩) → 분해능 ' + (acq.res || 0).toFixed(2) + ' Hz · 평균 ' + (acq.averages || 1) + '회'
-      /* 평균 횟수 평가 — 규격 숫자(8회) 도달이 아닌 '이 설비에서 더 평균 가능했나' 기준
-         정상상태 벗어난 구간 포함 시 운전 상태 혼합 → 블록간 변동 작으면 설비 상한, 크면 경고 */
-      + (function () {
+    B.push(T('■ 취득 조건: 총 창 {0}초 · 블록 {1}초({2} {3}% 중첩) → 분해능 {4} Hz · 평균 {5}회{6}{7}', (det.anaSec || acq.winSec || 0).toFixed(1), (acq.blockSec || 0).toFixed(1), acq.window || 'Hann', acq.overlapPct || 50, (acq.res || 0).toFixed(2), acq.averages || 1, (function () {
         var n = acq.averages || 1, sp = (det.ordSpec && det.ordSpec.blockSpread) || 0;
-        if (n < 2) return ' — ⚠단일 블록: 충격성 신호에서 어느 스파이크가 걸렸느냐로 진폭이 변함';
-        if (det.ordSpec && det.ordSpec.trimmed) return ' — 블록간 변동 ×' + sp.toFixed(2) + '으로 정상상태 전제가 흔들려 앞구간만 평균(창 전체를 쓰면 다른 운전 상태가 섞임)';
+        if (n < 2) return T(' — ⚠단일 블록: 충격성 신호에서 어느 스파이크가 걸렸느냐로 진폭이 변함');
+        if (det.ordSpec && det.ordSpec.trimmed) return T(' — 블록간 변동 ×{0}으로 정상상태 전제가 흔들려 앞구간만 평균(창 전체를 쓰면 다른 운전 상태가 섞임)', sp.toFixed(2));
         if (n >= 8) return '';
-        if (sp > 0 && sp < 1.25) return ' — 정상상태(블록간 변동 ×' + sp.toFixed(2) + ') 유지 범위에서의 평균 상한 — 더 늘리려면 관측 창 확대가 필요하나 이 설비는 그 구간에서 정상상태 이탈';
-        return ' — 평균 8회 미만(측대역·저주파 정밀 진단 기준은 8초 창·0.125 Hz·8평균)';
-      })()
-      + (acq.isoBlocks ? ' · ISO 판정은 ' + acq.isoBlocks + '블록 에너지 평균' : ''));
+        if (sp > 0 && sp < 1.25) return T(' — 정상상태(블록간 변동 ×{0}) 유지 범위에서의 평균 상한 — 더 늘리려면 관측 창 확대가 필요하나 이 설비는 그 구간에서 정상상태 이탈', sp.toFixed(2));
+        return T(' — 평균 8회 미만(측대역·저주파 정밀 진단 기준은 8초 창·0.125 Hz·8평균)');
+      })(), acq.isoBlocks ? T(' · ISO 판정은 {0}블록 에너지 평균', acq.isoBlocks) : ''));
     // 실측 회전수 불확도 = 분해능(Δf=1Hz → ±60rpm) — 명판과의 차이가 불확도 안이면 구분 불가
-    B.push('■ 회전수: ' + (eq.rpmSrc === 'pulley' || eq.rpmSrc === 'measured' ? self._rpmText(eq) + ' — 모터 ' + eq.rpmMotor + ' RPM' : '명판 ' + eq.rpm + ' RPM') + '(1× ' + frNom.toFixed(1) + ' Hz) · 1× 실측 ' + (frM
+    B.push(T('■ 회전수: {0}(1× {1} Hz) · 1× 실측 {2}', eq.rpmSrc === 'pulley' || eq.rpmSrc === 'measured' ? T('{0} — 모터 {1} RPM', self._rpmText(eq), eq.rpmMotor) : T('명판 {0} RPM', eq.rpm), frNom.toFixed(1), frM
       ? frM.f.toFixed(1) + ' ± ' + (frM.tolHz || 0).toFixed(2) + ' Hz (' + Math.round(frM.rpm) + ' ± ' + Math.round(frM.rpmTol || 0) + ' RPM)'
-        + (frM.distinct ? ' — 명판과 유의하게 다름, 차수는 실측 기준' : ' — 불확도가 명판과의 차이보다 커서 명판값과 구분 불가(차수 해석 시 이 오차를 감안)')
-      : '유의 피크 없음 — 명판 기준 차수(슬립·오차 가능성 유의)'));
-    B.push('■ 동기 피크(정수배): ' + syncTxt);
-    B.push('■ 비동기 피크(비정수배): ' + pk(asyncP));
-    B.push('■ 지배 성분: ' + (domSync ? '동기(정수배)' : '비동기') + ' ' + domO.toFixed(2) + '× · 상위 ' + peaks.length + '개 중 동기 ' + syncP.length + '/비동기 ' + asyncP.length + (domSub ? ' · sub-synchronous 지배' : '') + ((has1x || has2xE) && !syncP.length ? ' (1×·2×는 존재하나 비지배)' : ''));
-    B.push('■ 측대역: ' + (eQ && eQ.sb1x ? '포락선에서 1× 간격 측대역 관측(단, 반송파가 결함주파수로 확인돼야 결함 근거가 됨)' : '미검출(주의: 분해능 ' + (sResTrue ? sResTrue.toFixed(2) : '?') + ' Hz라 이보다 좁은 간격은 물리적 부재가 아니라 분해능 한계로 안 보이는 것)') + ' · subharmonic(0.5×류): ' + (subAny ? '있음' : '없음'));
+        + (frM.distinct ? T(' — 명판과 유의하게 다름, 차수는 실측 기준') : T(' — 불확도가 명판과의 차이보다 커서 명판값과 구분 불가(차수 해석 시 이 오차를 감안)'))
+      : T('유의 피크 없음 — 명판 기준 차수(슬립·오차 가능성 유의)')));
+    B.push(T('■ 동기 피크(정수배): {0}', syncTxt));
+    B.push(T('■ 비동기 피크(비정수배): {0}', pk(asyncP)));
+    B.push(T('■ 지배 성분: {0} {1}× · 상위 {2}개 중 동기 {3}/비동기 {4}{5}{6}', domSync ? T('동기(정수배)') : T('비동기'), domO.toFixed(2), peaks.length, syncP.length, asyncP.length, domSub ? T(' · sub-synchronous 지배') : '', (has1x || has2xE) && !syncP.length ? T(' (1×·2×는 존재하나 비지배)') : ''));
+    B.push(T('■ 측대역: {0} · subharmonic(0.5×류): {1}', eQ && eQ.sb1x ? T('포락선에서 1× 간격 측대역 관측(단, 반송파가 결함주파수로 확인돼야 결함 근거가 됨)') : T('미검출(주의: 분해능 {0} Hz라 이보다 좁은 간격은 물리적 부재가 아니라 분해능 한계로 안 보이는 것)', sResTrue ? sResTrue.toFixed(2) : '?'), subAny ? T('있음') : T('없음')));
     // 측대역은 반송파가 결함주파수일 때만 근거 — 미상이면 관측까지만(내륜/외륜 미언급)
-    B.push('■ 포락선 정량: ' + (eQ && eQ.f0 > 0
-      ? '반복주파수 ' + eQ.f0.toFixed(1) + ' Hz(' + eQ.order.toFixed(2) + '×) · 하모닉 ' + eQ.harm + '개 · 1× 측대역 ' + (eQ.sb1x ? '관측' : '미관측')
-        + ' → ' + (eQ.consistent ? '일관된 반복 충격은 확인 — 단, 무엇의 결함인지는 결함주파수 매칭이 있어야 말할 수 있음' : '반복성 미확인 — 단발 스파이크와 구분 불가')
-      : '유의 반복 성분 없음'));
-    B.push('■ 포락선-베어링 대조: ' + envLine);
-    B.push('■ Spectral Kurtosis(커토그램): ' + sk.toFixed(1) + (det.kurtogram && det.kurtogram.best ? ' @ ' + (det.kurtogram.best.loHz / 1000).toFixed(1) + '–' + (det.kurtogram.best.hiHz / 1000).toFixed(1) + 'kHz' : ''));
-    B.push('■ 대역 분배(속도 RMS · ISO 판정과 동일 방법/시계열 · 에너지 비율): sub(<0.5×) ' + E.fmt(be[3]) + '(' + (frac(3) * 100).toFixed(0) + '%) · 1×대역(0.5~1.5×) ' + E.fmt(be[0]) + '(' + (frac(0) * 100).toFixed(0) + '%) · 결함(1.5~10×) ' + E.fmt(be[1]) + '(' + (frac(1) * 100).toFixed(0) + '%) · 고주파(10×~1kHz) ' + E.fmt(be[2]) + '(' + (frac(2) * 100).toFixed(0) + '%)'
-      + (det.parseval ? ' · 검산(허용 3%) ' + (det.parseval.ok ? '통과(제곱합 ' + E.fmt(det.parseval.sumSq) + ' vs 전대역 ' + E.fmt(det.parseval.isoRms) + ', 오차 ' + (det.parseval.relErr * 100).toFixed(1) + '%)' : '⚠실패 — 대역 분해가 전체와 불일치, 아래 비율 해석 금지') : ''));
-    B.push('■ 충격성(상관 지표 — 셋은 같은 관측의 세 표현이며 점수엔 단일항 반영): 파형 Kurtosis ' + kurtW.toFixed(1) + ' · Band Kurtosis ' + bk.toFixed(1) + ' · Spectral Kurtosis ' + sk.toFixed(1) + ' · 파형 Crest ' + crestW.toFixed(1) + ' · 롤업 최대 Crest ' + crestR.toFixed(1));
-    if (gate) B.push('■ ⚠계측 게이트(전역): 극단 Crest/첨도 — 단발 스파이크(ESD·케이블·접촉) 시그니처와 구분 불가 · 시간영역 임펄스가 주파수영역에서 광대역으로 퍼져 모든 스펙트럼 피크 진폭도 잠정 · 결함 진단 보류, 센서·케이블·마운팅 검증 우선');
+    B.push(T('■ 포락선 정량: {0}', eQ && eQ.f0 > 0
+      ? T('반복주파수 {0} Hz({1}×) · 하모닉 {2}개 · 1× 측대역 {3} → {4}', eQ.f0.toFixed(1), eQ.order.toFixed(2), eQ.harm, eQ.sb1x ? T('관측') : T('미관측'), eQ.consistent ? T('일관된 반복 충격은 확인 — 단, 무엇의 결함인지는 결함주파수 매칭이 있어야 말할 수 있음') : T('반복성 미확인 — 단발 스파이크와 구분 불가'))
+      : T('유의 반복 성분 없음')));
+    B.push(T('■ 포락선-베어링 대조: {0}', envLine));
+    B.push(T('■ Spectral Kurtosis(커토그램): {0}{1}', sk.toFixed(1), det.kurtogram && det.kurtogram.best ? ' @ ' + (det.kurtogram.best.loHz / 1000).toFixed(1) + '–' + (det.kurtogram.best.hiHz / 1000).toFixed(1) + 'kHz' : ''));
+    B.push(T('■ 대역 분배(속도 RMS · ISO 판정과 동일 방법/시계열 · 에너지 비율): sub(<0.5×) {0}({1}%) · 1×대역(0.5~1.5×) {2}({3}%) · 결함(1.5~10×) {4}({5}%) · 고주파(10×~1kHz) {6}({7}%){8}', E.fmt(be[3]), (frac(3) * 100).toFixed(0), E.fmt(be[0]), (frac(0) * 100).toFixed(0), E.fmt(be[1]), (frac(1) * 100).toFixed(0), E.fmt(be[2]), (frac(2) * 100).toFixed(0), det.parseval ? T(' · 검산(허용 3%) {0}', det.parseval.ok ? T('통과(제곱합 {0} vs 전대역 {1}, 오차 {2}%)', E.fmt(det.parseval.sumSq), E.fmt(det.parseval.isoRms), (det.parseval.relErr * 100).toFixed(1)) : T('⚠실패 — 대역 분해가 전체와 불일치, 아래 비율 해석 금지')) : ''));
+    B.push(T('■ 충격성(상관 지표 — 셋은 같은 관측의 세 표현이며 점수엔 단일항 반영): 파형 Kurtosis {0} · Band Kurtosis {1} · Spectral Kurtosis {2} · 파형 Crest {3} · 롤업 최대 Crest {4}', kurtW.toFixed(1), bk.toFixed(1), sk.toFixed(1), crestW.toFixed(1), crestR.toFixed(1)));
+    if (gate) B.push(T('■ ⚠계측 게이트(전역): 극단 Crest/첨도 — 단발 스파이크(ESD·케이블·접촉) 시그니처와 구분 불가 · 시간영역 임펄스가 주파수영역에서 광대역으로 퍼져 모든 스펙트럼 피크 진폭도 잠정 · 결함 진단 보류, 센서·케이블·마운팅 검증 우선'));
     /* 비어 있는 설비 정보와 그 영향 — 설정에 입력 칸이 있는 항목만(계측 방향·위상은 받지 못함)
        missNames = 이름만(세부 조치 '설비 정보 입력' 줄) */
     var missing = [], missNames = [];
     var miss = function (name, eff) { missing.push(name + '(' + eff + ')'); missNames.push(name); };
-    if (!(eq.rpm > 0)) miss('명판 회전수', '→ 1×·결함주파수 계산 불가');
-    if (!(eq.bearing && (eq.bearing.n > 0 || eq.bearing.model === 'sleeve'))) miss('베어링 품번', '→ BPFO/BPFI/BSF/FTF 대조 불가');
-    if (!det.mount) miss('마운팅 방식', '→ ' + (det.kurtogram && det.kurtogram.best && det.kurtogram.best.loHz > 2000 ? (det.kurtogram.best.loHz / 1000).toFixed(1) + ' kHz 대역 분석이 자석 마운트면 무효' : '고주파 대역 유효성 미상'));
-    if (!meta.drive) miss('구동방식', '직결/벨트/기어 → 비동기 성분 귀속 불가');
-    else if (meta.drive === 'belt' && !hasBeltSpec) miss('벨트 제원', '풀리경·벨트길이 → 벨트주파수 대조 불가');
-    else if (meta.drive === 'belt' && !hasBeltLen) miss('벨트길이', '→ 벨트 통과주파수 대조 불가');
-    if (!hasVanes) miss(isGear ? '잇수' : '날개수', isGear ? '→ 기어 메시 대조 불가' : '→ 베인 통과 확정 불가');
-    B.push(missing.length ? '■ 미입력 메타데이터와 그 영향: ' + missing.join(' · ') : '■ 메타데이터: 필요한 항목 입력 완료 — 위 판정은 계측 구성 한계(단채널·위상 없음)만 남음');
+    if (!(eq.rpm > 0)) miss(T('명판 회전수'), T('→ 1×·결함주파수 계산 불가'));
+    if (!(eq.bearing && (eq.bearing.n > 0 || eq.bearing.model === 'sleeve'))) miss(T('베어링 품번'), T('→ BPFO/BPFI/BSF/FTF 대조 불가'));
+    if (!det.mount) miss(T('마운팅 방식'), '→ ' + (det.kurtogram && det.kurtogram.best && det.kurtogram.best.loHz > 2000 ? T('{0} kHz 대역 분석이 자석 마운트면 무효', (det.kurtogram.best.loHz / 1000).toFixed(1)) : T('고주파 대역 유효성 미상')));
+    if (!meta.drive) miss(T('구동방식'), T('직결/벨트/기어 → 비동기 성분 귀속 불가'));
+    else if (meta.drive === 'belt' && !hasBeltSpec) miss(T('벨트 제원'), T('풀리경·벨트길이 → 벨트주파수 대조 불가'));
+    else if (meta.drive === 'belt' && !hasBeltLen) miss(T('벨트길이'), T('→ 벨트 통과주파수 대조 불가'));
+    if (!hasVanes) miss(isGear ? T('잇수') : T('날개수'), isGear ? T('→ 기어 메시 대조 불가') : T('→ 베인 통과 확정 불가'));
+    B.push(missing.length ? T('■ 미입력 메타데이터와 그 영향: {0}', missing.join(' · ')) : T('■ 메타데이터: 필요한 항목 입력 완료 — 위 판정은 계측 구성 한계(단채널·위상 없음)만 남음'));
     // 결함 대역 탐색 상한 명시 — 상한 = min(마운팅, 에일리어싱, AA 롤오프)
     if (det.kgFmax > 0 || det.mountFmax > 0 || det.aliasFmax > 0) {
       var _cap = [];
-      if (det.mountFmax > 0) _cap.push('마운팅(' + det.mount + ') ' + (det.mountFmax / 1000).toFixed(1) + ' kHz');
-      if (det.aliasFmax > 0) _cap.push('에일리어싱 의심(f_eff가 Nyquist의 ' + Math.round(det.accelNyqFrac * 100) + '%) ' + (det.aliasFmax / 1000).toFixed(1) + ' kHz');
-      if (det.rollFmax > 0) _cap.push('AA 롤오프(Nyquist의 ' + Math.round(VC.KG_NYQ_FRAC * 100) + '%) ' + (det.rollFmax / 1000).toFixed(1) + ' kHz');
-      var _capKo = { mount: '마운팅', alias: '에일리어싱', rolloff: 'AA 롤오프' }[det.kgCapSrc];
-      B.push('■ 결함 대역 탐색 상한: ' + (_cap.join(' · ') || '없음')
-        + (det.kgFmax > 0 ? ' → 적용 ' + (det.kgFmax / 1000).toFixed(1) + ' kHz' + (_capKo ? '(' + _capKo + ' 기준)' : '') : '')
-        + (det.kgCapped ? ' · 그 위 대역은 탐색에서 제외' : ' · 샘플링 상 제외된 대역 없음')
-        + (det.kurtogram && det.kurtogram.best ? ' · 선택 대역 ' + (det.kurtogram.best.loHz / 1000).toFixed(1) + '–' + (det.kurtogram.best.hiHz / 1000).toFixed(1) + ' kHz' : ''));
+      if (det.mountFmax > 0) _cap.push(T('마운팅({0}) {1} kHz', det.mount, (det.mountFmax / 1000).toFixed(1)));
+      if (det.aliasFmax > 0) _cap.push(T('에일리어싱 의심(f_eff가 Nyquist의 {0}%) {1} kHz', Math.round(det.accelNyqFrac * 100), (det.aliasFmax / 1000).toFixed(1)));
+      if (det.rollFmax > 0) _cap.push(T('AA 롤오프(Nyquist의 {0}%) {1} kHz', Math.round(VC.KG_NYQ_FRAC * 100), (det.rollFmax / 1000).toFixed(1)));
+      var _capKo = { mount: T('마운팅'), alias: T('에일리어싱'), rolloff: T('AA 롤오프') }[det.kgCapSrc];
+      B.push(T('■ 결함 대역 탐색 상한: {0}{1}{2}{3}', _cap.join(' · ') || T('없음'), det.kgFmax > 0 ? T(' → 적용 {0} kHz{1}', (det.kgFmax / 1000).toFixed(1), _capKo ? T('({0} 기준)', _capKo) : '') : '', det.kgCapped ? T(' · 그 위 대역은 탐색에서 제외') : T(' · 샘플링 상 제외된 대역 없음'), det.kurtogram && det.kurtogram.best ? T(' · 선택 대역 {0}–{1} kHz', (det.kurtogram.best.loHz / 1000).toFixed(1), (det.kurtogram.best.hiHz / 1000).toFixed(1)) : ''));
     }
     // 대역 베이스라인 이탈 — ISO 대역 분배(10–1000 Hz)에 없는 상한 위 대역 변화도 리포트에 표시
     var bnow = (this._bandNow || {})[eq.table + ':' + eq.name], bbls = this._bandBaselines(eq);
@@ -3406,37 +3395,33 @@ export class App extends Component {
     }
     if (bandDev && bandDev.length) {
       var _dOver = bandDev.filter(function (d) { return d.r > 1; });
-      B.push('■ 대역 베이스라인 이탈(학습된 한계 대비 비율 · 알람과 같은 값): '
-        + (_dOver.length
-          ? _dOver.map(function (d) { return d.ko + ' ×' + d.r.toFixed(2) + (d.soft ? '⚠상한 초과 — 잠정' : ''); }).join(' · ')
-            + ' · 나머지 ' + (bandDev.length - _dOver.length) + '개 대역 정상'
-          : '전 ' + bandDev.length + '개 대역 정상(최대 ×'
-            + bandDev.reduce(function (a, d) { return Math.max(a, d.r); }, 0).toFixed(2) + ')')
-        + (_dOver.some(function (d) { return d.soft; })
-          ? ' — 잠정 대역은 결함 대역 탐색에서 제외된 구간이다. 상승은 사실이나 설비 진동인지 센서 부착부 공진인지 구분할 수 없으므로, 결함으로 단정하지 말고 센서 부착 상태 확인을 먼저 권고할 것'
+      B.push(T('■ 대역 베이스라인 이탈(학습된 한계 대비 비율 · 알람과 같은 값): {0}{1}', _dOver.length
+          ? T('{0} · 나머지 {1}개 대역 정상', _dOver.map(function (d) { return d.ko + ' ×' + d.r.toFixed(2) + (d.soft ? T('⚠상한 초과 — 잠정') : ''); }).join(' · '), bandDev.length - _dOver.length)
+          : T('전 {0}개 대역 정상(최대 ×{1})', bandDev.length, bandDev.reduce(function (a, d) { return Math.max(a, d.r); }, 0).toFixed(2)), _dOver.some(function (d) { return d.soft; })
+          ? T(' — 잠정 대역은 결함 대역 탐색에서 제외된 구간이다. 상승은 사실이나 설비 진동인지 센서 부착부 공진인지 구분할 수 없으므로, 결함으로 단정하지 말고 센서 부착 상태 확인을 먼저 권고할 것')
           : ''));
     } else {
-      B.push('■ 대역 베이스라인 이탈: 비교 불가(' + (!bnow ? '대역 추출 미사용 또는 적재값 없음' : '대역 베이스라인 미학습') + ') — 대역별 변화는 이 리포트의 근거 아님');
+      B.push(T('■ 대역 베이스라인 이탈: 비교 불가({0}) — 대역별 변화는 이 리포트의 근거 아님', !bnow ? T('대역 추출 미사용 또는 적재값 없음') : T('대역 베이스라인 미학습')));
     }
     // 음성 소견(R4) — '찾았으나 없음'도 보고 대상. 같은 순서로 negShort = 짧은 이름(리포트 요약), negCard = '무엇 → 뜻' 한 줄(리포트 근거 카드)
     var negatives = [], negShort = [], negCard = [];
     var neg = function (t, s, c) { negatives.push(t); negShort.push(s); negCard.push(c); };
-    if (bm.known && !bm.hit) neg('베어링 결함주파수 ' + bm.negatives.join('/') + ' 미검출' + (bm.weak ? '(' + bm.weak.key + ' 근접하나 하모닉 ' + bm.weak.harm + '개로 부족)' : ''), bm.negatives.join('/'),
-      '베어링 결함주파수 ' + bm.negatives.join('/') + (bm.weak ? ' → ' + bm.weak.key + ' 근접하나 하모닉 부족' : ''));
-    if (!syncP.length) neg('지배 피크 중 정수배 동기 성분 없음', '정수배 동기 성분', '정수배 동기 성분 → 지배 피크가 모두 비동기');
-    if (!subAny) neg('0.5× subharmonic 미검출', '0.5×', '0.5× subharmonic');
-    if (!eQ || !eQ.sb1x) neg('포락선 1× 측대역 미검출(단, 분해능 ' + (sResTrue || 0).toFixed(2) + ' Hz 한계 내 — 이보다 좁은 간격은 원리상 관측 불가)', '포락선 1× 측대역',
-      '포락선 1× 측대역 → 분해능 ' + (sResTrue || 0).toFixed(2) + ' Hz보다 좁은 간격은 관측 불가');
-    else if (!(bm && bm.hit)) neg('측대역은 관측되나 반송파가 결함주파수로 확인되지 않아 결함 귀속 불가', '측대역 반송파의 결함주파수 귀속', '측대역 관측 → 반송파가 결함주파수 아님');
-    if (!elec) neg('100/120 Hz(2×계통주파수) 근처 성분 미검출 — 전기적 결함 정황 없음(전원 차단 시험으로 확정)', '2×계통주파수', '100/120 Hz 계통주파수 → 전기적 결함 정황 없음');
-    if (!vane) neg('3× 이상 정수배 성분 미검출 — 베인/블레이드 통과 정황 없음', '3× 이상 정수배', '3× 이상 정수배 → 베인/블레이드 통과 정황 없음');
+    if (bm.known && !bm.hit) neg(T('베어링 결함주파수 {0} 미검출{1}', bm.negatives.join('/'), bm.weak ? T('({0} 근접하나 하모닉 {1}개로 부족)', bm.weak.key, bm.weak.harm) : ''), bm.negatives.join('/'),
+      T('베어링 결함주파수 {0}{1}', bm.negatives.join('/'), bm.weak ? T(' → {0} 근접하나 하모닉 부족', bm.weak.key) : ''));
+    if (!syncP.length) neg(T('지배 피크 중 정수배 동기 성분 없음'), T('정수배 동기 성분'), T('정수배 동기 성분 → 지배 피크가 모두 비동기'));
+    if (!subAny) neg(T('0.5× subharmonic 미검출'), '0.5×', '0.5× subharmonic');
+    if (!eQ || !eQ.sb1x) neg(T('포락선 1× 측대역 미검출(단, 분해능 {0} Hz 한계 내 — 이보다 좁은 간격은 원리상 관측 불가)', (sResTrue || 0).toFixed(2)), T('포락선 1× 측대역'),
+      T('포락선 1× 측대역 → 분해능 {0} Hz보다 좁은 간격은 관측 불가', (sResTrue || 0).toFixed(2)));
+    else if (!(bm && bm.hit)) neg(T('측대역은 관측되나 반송파가 결함주파수로 확인되지 않아 결함 귀속 불가'), T('측대역 반송파의 결함주파수 귀속'), T('측대역 관측 → 반송파가 결함주파수 아님'));
+    if (!elec) neg(T('100/120 Hz(2×계통주파수) 근처 성분 미검출 — 전기적 결함 정황 없음(전원 차단 시험으로 확정)'), T('2×계통주파수'), T('100/120 Hz 계통주파수 → 전기적 결함 정황 없음'));
+    if (!vane) neg(T('3× 이상 정수배 성분 미검출 — 베인/블레이드 통과 정황 없음'), T('3× 이상 정수배'), T('3× 이상 정수배 → 베인/블레이드 통과 정황 없음'));
     // 기어 '메시 있음·측대역 없음'은 정상 기어 소견
-    if (meshF > 0 && !meshHit) neg('기어 메시 ' + meshF.toFixed(0) + ' Hz(잇수 ' + nVanes + '×1×) 미검출', '기어 메시 ' + meshF.toFixed(0) + ' Hz', '기어 메시 ' + meshF.toFixed(0) + ' Hz');
-    else if (meshHit && meshSb === 0) neg('기어 메시는 관측되나 1× 간격 측대역 없음 — 정상 기어 범위(치면 손상 정황 없음)', '기어 메시 1× 측대역', '기어 메시 1× 측대역 → 정상 기어 범위');
-    if (negatives.length) B.push('■ 음성 소견(찾았으나 없음 — 반대 증거): ' + negatives.join(' · '));
-    if (unexplained.length) B.push('■ 미설명 성분(사전으로 설명되지 않음 — 삭제하지 않고 남김): ' + unexplained.join(', ') + ' — 구동 계통도(풀리비·기어비)·인접 기계·유막 확인 시 대부분 해소');
+    if (meshF > 0 && !meshHit) neg(T('기어 메시 {0} Hz(잇수 {1}×1×) 미검출', meshF.toFixed(0), nVanes), T('기어 메시 {0} Hz', meshF.toFixed(0)), T('기어 메시 {0} Hz', meshF.toFixed(0)));
+    else if (meshHit && meshSb === 0) neg(T('기어 메시는 관측되나 1× 간격 측대역 없음 — 정상 기어 범위(치면 손상 정황 없음)'), T('기어 메시 1× 측대역'), T('기어 메시 1× 측대역 → 정상 기어 범위'));
+    if (negatives.length) B.push(T('■ 음성 소견(찾았으나 없음 — 반대 증거): {0}', negatives.join(' · ')));
+    if (unexplained.length) B.push(T('■ 미설명 성분(사전으로 설명되지 않음 — 삭제하지 않고 남김): {0} — 구동 계통도(풀리비·기어비)·인접 기계·유막 확인 시 대부분 해소', unexplained.join(', ')));
     var confLines = conf.map(function (c) {
-      return '■ ' + c.f + ' ' + (c.na ? '측정 불가 — 점수 없음(' + (c.caveat || '판별 조건 미충족') + ')' : star(c.s) + ' · 근거점수 ' + c.score + '/100 [' + c.breakdown + ']' + (c.caveat ? ' · ' + c.caveat : ''));
+      return '■ ' + c.f + ' ' + (c.na ? T('측정 불가 — 점수 없음({0})', c.caveat || T('판별 조건 미충족')) : T('{0} · 근거점수 {1}/100 [{2}]{3}', star(c.s), c.score, c.breakdown, c.caveat ? ' · ' + c.caveat : ''));
     });
     var unmeasurable = conf.filter(function (c) { return c.na; }).map(function (c) { return c.f; });
     // 1순위 점수가 채택 기준 미달이면 weakTop 표시 — 점수 순 표의 맨 위를 원인 지목으로 오독 방지
@@ -3592,9 +3577,9 @@ export class App extends Component {
     // 1차 판정은 화면 문구와 동일해야 함 — 지표(_m) 전달 필수
     var _m = VC.sevMetrics(this._rollFor(eq).roll, { zones: eq.zones, fs: eq.fs, gate: !!VC.gateReason(det.quality, null) });
     var dx = this._dx(eq, det, _m);
-    var p = this._opinionPrompt(eq, det, dx, this._kurtSat(eq));
+    var p = this._opinionPrompt(eq, det, dx, this._kurtSat(eq)) + this._opinionLang(getLang());
     llm.complete(p).then(function (txt) { self.setState({ dxAiText: txt || '__fallback__' }); })
-      .catch(function (e) { console.warn('[vibe] llm opinion failed', e); self.setState({ dxAiText: '__fallback__' }); self._toast('LLM 소견 생성 실패: ' + (e.message || e), 'err'); });
+      .catch(function (e) { console.warn('[vibe] llm opinion failed', e); self.setState({ dxAiText: '__fallback__' }); self._toast(T('LLM 소견 생성 실패: {0}', e.message || e), 'err'); });
   }
   _win() {
     if (this.state.period === 'custom') {
@@ -3678,7 +3663,7 @@ export class App extends Component {
     };
     if (kurtC && tr && tr.kurt && tr.kurt.length) {
       var kV = tr.kurt;
-      var dk = function (s, e) { var w = kWin(s, e); var r = E.drawLine(kurtC, { values: kV.slice(s, e), times: kTs.slice(s, e), xFrom: w.xFrom, xTo: w.xTo, xLabels: kxl.slice(s, e), tipLabels: kxt.slice(s, e), color: '#fdb532', height: 220, smooth: true, refLines: [{ val: 3, color: '#8a8d99', label: '정상=3' }, { val: 4.5, color: '#e07b39', label: '충격성 경계' }] }, CC); if (r) E.addTip(kurtC, C('vt-kurt'), null, r.pts); };
+      var dk = function (s, e) { var w = kWin(s, e); var r = E.drawLine(kurtC, { values: kV.slice(s, e), times: kTs.slice(s, e), xFrom: w.xFrom, xTo: w.xTo, xLabels: kxl.slice(s, e), tipLabels: kxt.slice(s, e), color: '#fdb532', height: 220, smooth: true, refLines: [{ val: 3, color: '#8a8d99', label: T('정상=3') }, { val: 4.5, color: '#e07b39', label: T('충격성 경계') }] }, CC); if (r) E.addTip(kurtC, C('vt-kurt'), null, r.pts); };
       E.zoomDraw(kurtC, kV.length, dk, zk);
     } else if (kurtC) {
       // 그릴 것 없으면 캔버스 지움 — 옛 픽셀이 새 구간 그래프처럼 남는 것 방지(빈 값이면 drawLine이 지움)
@@ -3701,7 +3686,7 @@ export class App extends Component {
         if (!(lim > 0)) return null;
         return { label: s.label, color: s.color, dash: s.dash, vals: s.vals.map(function (v) { return v == null ? null : v / lim; }) };
       }).filter(Boolean);
-      var refs = _norm ? [{ val: 1, color: '#e07b39', label: '알람 기준' }] : null;
+      var refs = _norm ? [{ val: 1, color: '#e07b39', label: T('알람 기준') }] : null;
       var db = function (s, e) { var w = kWin(s, e); E.drawMultiLine(band, { series: bS.map(function (sr) { return { label: sr.label, color: sr.color, dash: sr.dash, vals: sr.vals.slice(s, e) }; }), times: kTs.slice(s, e), xFrom: w.xFrom, xTo: w.xTo, xLabels: kxl.slice(s, e), height: 220, refLines: refs }, CC); };
       E.zoomDraw(band, kxl.length, db, zk);
     } else if (band) {
@@ -3715,6 +3700,8 @@ export class App extends Component {
     clearTimeout(this._tt);
     this._tt = setTimeout(function () { self.setState({ toast: null }); }, kind === 'err' ? 9000 : 2600);
   }
+  // 캔버스 안내 문구 — 차트 모듈은 리포트에도 내장돼 번역을 모름
+  _chartLabels() { CH.setLabels({ noData: T('데이터 없음'), past: T('과거'), now: T('현재') }); }
   toggleTheme() { var n = this.state.theme === 'light' ? 'dark' : 'light'; try { localStorage.setItem('vibeTheme', n); } catch (e) {} this.setState({ theme: n }); }
   // dirty 동시 설정 필수 — 회전수·베어링·형상은 결함 패턴 격자 입력값이라 저장 안내 누락 시 입력 소실
   /* 베어링 모델 — 직접 입력으로 바꾸면 직전 품번의 형상·이름을 직접 입력 값으로 채움(화면에 보이는 값 = 저장되는 값)
@@ -3815,7 +3802,7 @@ export class App extends Component {
       n++;
     });
     this.setState({ equipUnit: unit, equipCls: cls, equipRpm: rpm, equipBearing: bear, equipGeo: geo, equipMeta: meta, equipBulk: null, dirty: true });
-    this._toast('태그 ' + n + '개에 적용했습니다');
+    this._toast(T('태그 {0}개에 적용했습니다', n));
   }
   _toggleNotifCh(k) { var m = Object.assign({}, this.state.notifCh); m[k] = !m[k]; this.setState({ notifCh: m, dirty: true }); }
   _toggleSrcTable(name) {
@@ -3832,7 +3819,7 @@ export class App extends Component {
     if (!cols || cols.length < 3) return '';
     var need = ['NAME', 'TIME', 'VALUE'];
     var ok = need.every(function (k, i) { return String(cols[i] || '').toUpperCase() === k; });
-    return ok ? '' : '컬럼 구성 미지원 (' + cols.slice(0, 3).join(' · ') + ') — 이 앱은 NAME · TIME · VALUE만 조회합니다';
+    return ok ? '' : T('컬럼 구성 미지원 ({0}) — 이 앱은 NAME · TIME · VALUE만 조회합니다', cols.slice(0, 3).join(' · '));
   }
   // 컬럼 구성 일괄 조회(실패 시 전부 선택 가능 유지) — 선택된 미지원 테이블은 제외(매 틱 조회 실패 방지)
   _loadSchemas() {
@@ -3846,7 +3833,7 @@ export class App extends Component {
         // 편집본·적용본 모두에서 제외(판정은 적용본 기준)
         self.setState({ srcSel: sel.filter(keep) });
         if (self._applied) self._setApplied({ srcSel: asel.filter(keep) }, ['srcSel']);
-        self._toast('컬럼 구성이 다른 table을 감시에서 제외했습니다 — ' + drop.join(', '), 'warn');
+        self._toast(T('컬럼 구성이 다른 table을 감시에서 제외했습니다 — {0}', drop.join(', ')), 'warn');
       }
       self.forceUpdate();
     }).catch(function () { self.liveSchemas = null; });
@@ -3966,16 +3953,16 @@ export class App extends Component {
   _holdOf(eq) {
     var key = eq.table + ':' + eq.name, rs = (this._runState || {})[key];
     if (rs) {
-      if (rs.lost) return { kind: 'lost', label: '신호 두절' };
+      if (rs.lost) return { kind: 'lost', label: T('신호 두절') };
       if (rs.gate) return { kind: 'gate', label: rs.gate.label || '계측 이상' };
-      if (!rs.run) return { kind: 'stop', label: '정지' };
+      if (!rs.run) return { kind: 'stop', label: T('정지') };
     }
     var gs = (this._gradeState || {})[key];
-    if (!gs) return { kind: 'wait', label: '판정 대기' };
+    if (!gs) return { kind: 'wait', label: T('판정 대기') };
     // 측정 가능한데 이번에 못 잰 태그 — 등급은 직전 값 유지 중(calc.patternRound)
-    if (gs.patMiss) return { kind: 'patmiss', label: gs.patWait ? '결함 패턴 첫 측정 대기' : '결함 패턴 측정 실패' };
+    if (gs.patMiss) return { kind: 'patmiss', label: gs.patWait ? T('결함 패턴 첫 측정 대기') : T('결함 패턴 측정 실패') };
     // 결함 패턴 측정 불가 태그(회전수·기하 없음)도 보류 — 양호 표시 방지, 사유는 카드 호버
-    if (gs.patOk === false) return { kind: 'nojudge', label: '판정 못 함' };
+    if (gs.patOk === false) return { kind: 'nojudge', label: T('판정 못 함') };
     return null;
   }
   /* 원본 단위 존 — 사용자 임계값은 입력 문자열 그대로 저장(_setThreshRaw), 여기서 숫자화(빈 값·비숫자면 규격 기본값)
@@ -4054,18 +4041,18 @@ export class App extends Component {
     var put = function (p, fromV, toV) {
       self.setState(rep ? { genPeriod: p, genFrom: fromV, genTo: toV } : { period: p, from: fromV, to: toV });
     };
-    var spanTxt = sp.spanH === Infinity ? '알 수 없음'
-      : sp.spanH < 1 ? Math.max(1, Math.round(sp.spanH * 60)) + '분'
-        : sp.spanH < 48 ? sp.spanH.toFixed(1) + '시간' : (sp.spanH / 24).toFixed(1) + '일';
-    return [['1h', '1시간'], ['6h', '6시간'], ['24h', '24시간'], ['all', '전체']].map(function (p) {
+    var spanTxt = sp.spanH === Infinity ? T('알 수 없음')
+      : sp.spanH < 1 ? T('{0}분', Math.max(1, Math.round(sp.spanH * 60)))
+        : sp.spanH < 48 ? T('{0}시간', sp.spanH.toFixed(1)) : T('{0}일', (sp.spanH / 24).toFixed(1));
+    return [['1h', T('1시간')], ['6h', T('6시간')], ['24h', T('24시간')], ['all', T('전체')]].map(function (p) {
       var a = cur === p[0];
       var need = PERIOD_H[p[0]];
       var dis = need != null && sp.spanH < need; // 데이터가 그 길이에 못 미치면 선택 불가
       return {
         label: p[1],
-        title: dis ? who + '의 데이터는 ' + spanTxt + '뿐이라 선택할 수 없습니다' : '',
+        title: dis ? T('{0}의 데이터는 {1}뿐이라 선택할 수 없습니다', who, spanTxt) : '',
         onClick: function () {
-          if (dis) { self._toast('데이터가 부족합니다', 'warn'); return; }
+          if (dis) { self._toast(T('데이터가 부족합니다'), 'warn'); return; }
           var s2 = self._presetSpan(eqs); // 클릭 시점 기준 재계산(lastSeen 전진)
           var toMs = s2.toMs || self.data.now;
           var fromMs = (PERIOD_H[p[0]] == null)
@@ -4098,25 +4085,26 @@ export class App extends Component {
     this._genRun = (this._genRun || 0) + 1; // 진행 중 체인 전부 무효화
     if (this._genAC) { try { this._genAC.abort(); } catch (e) { /* 이미 끝난 요청 */ } this._genAC = null; }
     this.setState({ genRunning: false, genStep: 0 });
-    this._toast('생성 중단 · ' + (this._genSaved || 0) + '건 저장됨', 'warn');
+    this._toast(T('생성 중단 · {0}건 저장됨', this._genSaved || 0), 'warn');
     this._loadReports();
   }
   /* 리포트 생성 — 태그별 데이터 조회(0) → 지표 계산(1) → 소견 생성(2, 옵션) → 저장(3)
      저장: <워크스페이스 루트>/<계정>/vibration-reports/<태그>_<생성일시>.html (파일 API) */
   _genReport() {
     var self = this, S = this.state;
-    if (!S.genTags.length) { this._toast('태그를 1개 이상 선택하세요', 'warn'); return; }
+    if (!S.genTags.length) { this._toast(T('태그를 1개 이상 선택하세요'), 'warn'); return; }
     if (S.genRunning) return;
     // 데이터 없는 태그는 제외 — 빈 리포트가 '분석했고 이상 없음' 기록으로 남는 것 방지
     var gap = this._genGapIds || [];
     var ids0 = S.genTags.filter(function (id) { return gap.indexOf(id) < 0; });
-    if (!ids0.length) { this._toast('선택한 기간에 데이터가 없습니다 — 기간을 데이터가 있는 구간으로 바꾸세요', 'warn'); return; }
-    if (ids0.length < S.genTags.length) this._toast((S.genTags.length - ids0.length) + '개 태그는 이 기간에 데이터가 없어 제외합니다', 'warn');
+    if (!ids0.length) { this._toast(T('선택한 기간에 데이터가 없습니다 — 기간을 데이터가 있는 구간으로 바꾸세요'), 'warn'); return; }
+    if (ids0.length < S.genTags.length) this._toast(T('{0}개 태그는 이 기간에 데이터가 없어 제외합니다', S.genTags.length - ids0.length), 'warn');
     var run = this._genRun = (this._genRun || 0) + 1;
     this._genSaved = 0;
     this._genLlmErr = null;
     this._genFails = [];
     this._genSkips = [];
+    this._genLang = getLang();   // 리포트 언어 = 생성 시작 때 화면 언어(도중에 바꿔도 이번 묶음은 같은 언어)
     this._genAC = (typeof AbortController !== 'undefined') ? new AbortController() : null;
     this.setState({ genRunning: true, genStep: 0 });
     var ids = ids0; // 데이터 없는 태그는 위에서 제외됨
@@ -4150,20 +4138,18 @@ export class App extends Component {
         self.setState({ genRunning: false, genStep: 0 });
         var _f = self._genFails, _sk = self._genSkips;
         if (!_f.length && _sk.length) {
-          self._toast('리포트 ' + self._genSaved + '건 저장 · ' + _sk.length + '건 건너뜀 — ' + _sk.join(', ')
-            + ': 선택 기간에 표본이 없습니다', 'warn');
+          self._toast(T('리포트 {0}건 저장 · {1}건 건너뜀 — {2}: 선택 기간에 표본이 없습니다', self._genSaved, _sk.length, _sk.join(', ')), 'warn');
         } else if (_f.length) {
-          self._toast('리포트 ' + self._genSaved + '건 저장 · ' + _f.length + '건 실패 — ' + _f[0].tag + ': ' + _f[0].msg
-            + (_f[0].at ? '  [' + _f[0].at + ']' : '') + (_f.length > 1 ? ' 외 ' + (_f.length - 1) + '건' : ''), 'err');
-        } else if (self._genLlmErr) self._toast('리포트 ' + self._genSaved + '건 저장 — LLM 소견 실패로 지표만 저장됨 · ' + self._genLlmErr, 'err');
-        else self._toast('리포트 ' + self._genSaved + '건 저장 · ' + reportDir().replace(/^\//, '') + '/');
+          self._toast(T('리포트 {0}건 저장 · {1}건 실패 — {2}: {3}{4}{5}', self._genSaved, _f.length, _f[0].tag, _f[0].msg, _f[0].at ? '  [' + _f[0].at + ']' : '', _f.length > 1 ? T(' 외 {0}건', _f.length - 1) : ''), 'err');
+        } else if (self._genLlmErr) self._toast(T('리포트 {0}건 저장 — LLM 소견 실패로 지표만 저장됨 · {1}', self._genSaved, tx(self._genLlmErr)), 'err');
+        else self._toast(T('리포트 {0}건 저장 · {1}/', self._genSaved, reportDir().replace(/^\//, '')));
         self._loadReports();
       })
       .catch(function (e) {
         if (self._genRun !== run) return;
         self._genAC = null;
         self.setState({ genRunning: false, genStep: 0 });
-        self._toast('리포트 생성 실패: ' + (e && e.message || e), 'err');
+        self._toast(T('리포트 생성 실패: {0}', e && e.message || e), 'err');
         self._loadReports();
       });
   }
@@ -4180,7 +4166,7 @@ export class App extends Component {
     // 태그별 보유량도 함께 조회 — '감시 대상 밖 N건' 표시용
     return Promise.all([usageStats(exact), tagUsage(exact).catch(function () { return null; })])
       .then(function (r) { self.setState({ usage: r[0], tagUsage: r[1], usageBusy: false }); })
-      .catch(function (e) { self.setState({ usageBusy: false }); self._toast('현황 조회 실패: ' + (e.message || e), 'err'); });
+      .catch(function (e) { self.setState({ usageBusy: false }); self._toast(T('현황 조회 실패: {0}', e.message || e), 'err'); });
   }
   /* 감시 대상 밖 태그 데이터 삭제 — 대역 계열 전부 + 이벤트 + 판정 상태
      순서: 데이터 먼저, 태그 메타는 뒤(메타 정리는 데이터 0인 이름만 삭제, db.deleteBandOfTag·deleteEventsOfTag가 순서 보장)
@@ -4202,12 +4188,12 @@ export class App extends Component {
     }, Promise.resolve()).then(function () {
       // 판정 상태 캐시도 비움 — 지운 태그가 '감시 대상 밖'으로 계속 세지는 것 방지
       rows.forEach(function (r) { if (self._monState) delete self._monState[r.key]; });
-      self._toast(one ? rows[0].key + ' 데이터를 지웠습니다' : rows.length + '개 태그의 데이터를 지웠습니다', 'ok');
+      self._toast(one ? T('{0} 데이터를 지웠습니다', rows[0].key) : T('{0}개 태그의 데이터를 지웠습니다', rows.length), 'ok');
       self.setState({ orphanBusy: null });
       return self._refreshUsage(true);
     }).catch(function (e) {
       self.setState({ orphanBusy: null });
-      self._toast('정리 실패: ' + (e.message || e), 'err');
+      self._toast(T('정리 실패: {0}', e.message || e), 'err');
     });
   }
   // 삭제 확인 — 실제 건수를 먼저 센 뒤 대화상자 표시
@@ -4220,7 +4206,7 @@ export class App extends Component {
       self.setState({ purge: { kind: kind, fromMs: fromMs, toMs: toMs, counting: false, n: n, keep: Math.max(0, tot - n) } });
     }).catch(function (e) {
       self.setState({ purge: null });
-      self._toast('건수 조회 실패: ' + (e.message || e), 'err');
+      self._toast(T('건수 조회 실패: {0}', e.message || e), 'err');
     });
   }
   _closePurge() { this.setState({ purge: null, purgeTyped: null }); }
@@ -4235,13 +4221,13 @@ export class App extends Component {
     return (isBand ? deleteBandRange(p.fromMs, p.toMs) : deleteEventsRange(p.fromMs, p.toMs))
       .then(function () {
         self.setState({ purge: null, purgeTyped: null });
-        self._toast(self._num(n) + (isBand ? '행' : '건') + ' 삭제했습니다', 'ok');
+        self._toast(T('{0} 삭제했습니다', self._num(n) + (isBand ? T('행') : T('건'))), 'ok');
         if (!isBand) self._loadEventsLive();          // 목록도 삭제 후 상태로 갱신
         return new Promise(function (r) { setTimeout(r, 1200); }).then(function () { return self._refreshUsage(true); });
       })
       .catch(function (e) {
         self.setState({ purge: null, purgeTyped: null });
-        self._toast('삭제 실패: ' + (e.message || e), 'err');
+        self._toast(T('삭제 실패: {0}', e.message || e), 'err');
       });
   }
   // 감시 대상 밖 판정 상태 정리 — 다음 판정 주기에 재생성되므로 확인 없이 삭제(학습값은 대상 아님)
@@ -4251,12 +4237,12 @@ export class App extends Component {
     (this.data ? this._activeEqs() : []).forEach(function (e) { live[e.table + ':' + e.name] = 1; });
     // '__' 시작 예약 키(타이머·탭 조율용) 제외 — 태그 키만 정리
     var keys = Object.keys(this._monState || {}).filter(function (k) { return !live[k] && k.indexOf('__') !== 0; });
-    if (!keys.length) { this._toast('정리할 항목이 없습니다'); return Promise.resolve(); }
+    if (!keys.length) { this._toast(T('정리할 항목이 없습니다')); return Promise.resolve(); }
     return keys.reduce(function (pr, k) {
       return pr.then(function () { return deleteMonState(k).catch(function () { }); });
     }, Promise.resolve()).then(function () {
       keys.forEach(function (k) { delete self._monState[k]; });
-      self._toast(keys.length + '개 정리했습니다', 'ok');
+      self._toast(T('{0}개 정리했습니다', keys.length), 'ok');
       return self._refreshUsage();
     });
   }
@@ -4264,13 +4250,13 @@ export class App extends Component {
   _userVals(base) {
     var self = this, S = this.state;
     base.userName = S.user || '';
-    base.userAuthMsg = S.authMsg || '';
+    base.userAuthMsg = tx(S.authMsg || '');
     base.tokenHintText = S.user ? tokenHint() : '';
     base.tokenFormShow = !!S.needsToken || (!!S.user && !!S.tokenEdit);
     base.tokenFor = S.user || consoleUser();
     base.tokenInput = S.tokenInput || '';
     base.tokenBusy = !!S.tokenBusy;
-    base.tokenMsg = S.tokenMsg || '';
+    base.tokenMsg = tx(S.tokenMsg || '');
     base.tokenCancelShow = !!S.user && !!S.tokenEdit;
     base.onTokenInput = function (ev) { self.setState({ tokenInput: ev.target.value, tokenMsg: '' }); };
     // 토큰 입력 블록의 change를 설정 폼 변경 감지(저장 안 한 변경)에서 제외 — 토큰은 확인 즉시 별도 저장
@@ -4282,18 +4268,18 @@ export class App extends Component {
     base.onTokenClear = function () { self._tokenClear(); };
     base.needsDb = !!S.needsDb;
     base.dbExists = !!S.dbExists;      // 저장소는 있으나 권한 없음 — 안내 분기
-    base.dbWhy = S.dbWhy || '';
+    base.dbWhy = tx(S.dbWhy || '');
     // 저장소 준비 후에도 권한 쿼리 표시 유지 — 유저 추가 때마다 필요
     var setup = setupSql();
     base.dbReady = !S.needsDb && !!S.user;
     base.dbAdmin = (S.user === 'SYS');
     base.dbName = setup.db;
-    base.dbGrantSql = '-- 권한 주기\n' + setup.grant + '\n\n-- 권한 회수\n' + setup.revoke + '\n\n-- 권한 확인\n' + setup.check;
+    base.dbGrantSql = T('-- 권한 주기\n{0}\n\n-- 권한 회수\n{1}\n\n-- 권한 확인\n{2}', setup.grant, setup.revoke, setup.check).replace(/<계정>/g, T('<계정>'));
     /* 계정별 권한 표 — 상태 = 대상 5곳(DB·공용 표 4) 중 권한 있는 곳 수, 다 있으면 회수만·하나도 없으면 부여만
        상태를 못 읽었으면 두 버튼 모두(재실행 무해) */
     var gst = S.grantStatus;
     base.grantLoading = !S.grantUsers;
-    base.grantMsg = S.grantMsg || '';
+    base.grantMsg = tx(S.grantMsg || '');
     base.grantBusy = !!S.grantBusy;
     base.onGrantRefresh = function () { self.setState({ grantMsg: '' }); self._loadGrantUsers(true); };
     base.grantRows = (S.grantUsers || []).map(function (u) {
@@ -4302,12 +4288,11 @@ export class App extends Component {
       var tm = st && st.timers > 0 ? st.timers : 0;
       return {
         user: u, busy: S.grantBusy === u, ask: S.grantAsk === u,
-        statusText: !st ? '확인 불가' : full ? '권한 있음' : none ? '권한 없음' : '일부만 있음 (' + st.n + '/' + st.total + ')',
+        statusText: !st ? T('확인 불가') : full ? T('권한 있음') : none ? T('권한 없음') : T('일부만 있음 ({0}/{1})', st.n, st.total),
         statusColor: !st ? 'var(--text-muted)' : full ? '#3aa76d' : none ? 'var(--text-muted)' : '#d99a2b',
-        timersText: tm ? '타이머 ' + tm + '개' : '',
+        timersText: tm ? T('타이머 {0}개', tm) : '',
         canGrant: !full, canRevoke: !none,
-        askText: (tm ? '이 계정의 이 패키지 타이머 ' + tm + '개는 회수 뒤 매 회차 실패합니다 — 먼저 그 계정으로 알람과 대역 추출을 끄십시오. ' : '')
-          + '설정·이벤트·학습값은 지우지 않으며, 다시 권한을 주면 그대로 이어집니다.',
+        askText: T('{0}설정·이벤트·학습값은 지우지 않으며, 다시 권한을 주면 그대로 이어집니다.', tm ? T('이 계정의 이 패키지 타이머 {0}개는 회수 뒤 매 회차 실패합니다 — 먼저 그 계정으로 알람과 대역 추출을 끄십시오. ', tm) : ''),
         onGrant: function () { self._grantRun(u, false); },
         onRevoke: function () { self.setState({ grantAsk: u, grantMsg: '' }); },
         onRevokeYes: function () { self._grantRun(u, true); },
@@ -4326,7 +4311,7 @@ export class App extends Component {
     base.usageReady = !!u;
     base.onUsageRefresh = function () { self._refreshUsage(); };
     var span = function (s) {
-      return (s && s.from > 0 && s.to > 0) ? E.fmtDT(s.from).slice(0, 10) + ' ~ ' + E.fmtDT(s.to).slice(0, 10) : '데이터 없음';
+      return (s && s.from > 0 && s.to > 0) ? E.fmtDT(s.from).slice(0, 10) + ' ~ ' + E.fmtDT(s.to).slice(0, 10) : T('데이터 없음');
     };
     // 감시 대상 밖 키 — 지금 선택된 테이블에 없는 태그의 판정 상태/학습값
     var live = {};
@@ -4349,34 +4334,32 @@ export class App extends Component {
     var openOrphan = function () { self.setState({ orphanOpen: true, orphanBusy: null }); };
     base.dataRows = u ? [
       {
-        id: 'events', name: '이벤트 이력', table: 'EVENTS', kind: 'TAG',
-        stat: this._num(u.events.rows || 0) + '건 · ' + span(u.events.span)
-          + (orphanTot.events ? ' · 감시 대상 밖 ' + this._num(orphanTot.events) + '건' : ''),
-        note: '알람 이력입니다. 지우면 그 기간을 다룬 리포트를 다시 만들 수 없습니다. 설비를 철거했다면 그 태그의 이력만 따로 지울 수 있습니다.',
-        act: { label: '기간 삭제…', danger: true, sub: '기간 안 모든 태그', onClick: function () { openPick('events'); } },
-        act2: orphanRows.length ? { label: '태그별 정리…', onClick: openOrphan } : null,
+        id: 'events', name: T('이벤트 이력'), table: 'EVENTS', kind: 'TAG',
+        stat: T('{0}건 · {1}{2}', this._num(u.events.rows || 0), span(u.events.span), orphanTot.events ? T(' · 감시 대상 밖 {0}건', this._num(orphanTot.events)) : ''),
+        note: T('알람 이력입니다. 지우면 그 기간을 다룬 리포트를 다시 만들 수 없습니다. 설비를 철거했다면 그 태그의 이력만 따로 지울 수 있습니다.'),
+        act: { label: T('기간 삭제…'), danger: true, sub: T('기간 안 모든 태그'), onClick: function () { openPick('events'); } },
+        act2: orphanRows.length ? { label: T('태그별 정리…'), onClick: openOrphan } : null,
       },
       {
-        id: 'band', name: '대역 에너지 추이', table: 'BAND', kind: 'TAG',
-        stat: this._num(u.band.rows || 0) + '행 · ' + span(u.band.span)
-          + (orphanTot.band ? ' · 감시 대상 밖 ' + this._num(orphanTot.band) + '행' : ''),
-        note: '대역 이탈 판정과 추세 차트가 쓰는 데이터입니다. 넷 중 유일하게 시간에 비례해 커집니다 — 학습에 쓰인 구간을 지우면 대역 베이스라인을 다시 학습해야 합니다.',
-        act: { label: '기간 삭제…', danger: true, sub: '학습 구간 포함 주의', onClick: function () { openPick('band'); } },
-        act2: orphanRows.length ? { label: '태그별 정리…', onClick: openOrphan } : null,
+        id: 'band', name: T('대역 에너지 추이'), table: 'BAND', kind: 'TAG',
+        stat: T('{0}행 · {1}{2}', this._num(u.band.rows || 0), span(u.band.span), orphanTot.band ? T(' · 감시 대상 밖 {0}행', this._num(orphanTot.band)) : ''),
+        note: T('대역 이탈 판정과 추세 차트가 쓰는 데이터입니다. 넷 중 유일하게 시간에 비례해 커집니다 — 학습에 쓰인 구간을 지우면 대역 베이스라인을 다시 학습해야 합니다.'),
+        act: { label: T('기간 삭제…'), danger: true, sub: T('학습 구간 포함 주의'), onClick: function () { openPick('band'); } },
+        act2: orphanRows.length ? { label: T('태그별 정리…'), onClick: openOrphan } : null,
       },
       {
-        id: 'monstate', name: '판정 상태', table: 'MONSTATE', kind: 'LOOKUP',
-        stat: this._num(u.monstate.rows || 0) + '행' + (msOrphan ? ' · 감시 대상 밖 ' + msOrphan + '행' : ''),
-        note: '직전 판정 결과입니다. 지워도 다음 판정 주기에 다시 만들어집니다 — 넷 중 유일하게 잃을 것이 없는 데이터라 확인 없이 정리합니다.',
+        id: 'monstate', name: T('판정 상태'), table: 'MONSTATE', kind: 'LOOKUP',
+        stat: T('{0}행{1}', this._num(u.monstate.rows || 0), msOrphan ? T(' · 감시 대상 밖 {0}행', msOrphan) : ''),
+        note: T('직전 판정 결과입니다. 지워도 다음 판정 주기에 다시 만들어집니다 — 넷 중 유일하게 잃을 것이 없는 데이터라 확인 없이 정리합니다.'),
         // 재생성 가능 데이터라 확인 대화상자 없음
         act: msOrphan
-          ? { label: '안 쓰는 데이터 정리', danger: false, sub: '확인 없이 즉시 실행', onClick: function () { self._cleanMonStateOrphans(); } }
+          ? { label: T('안 쓰는 데이터 정리'), danger: false, sub: T('확인 없이 즉시 실행'), onClick: function () { self._cleanMonStateOrphans(); } }
           : null,
       },
     ] : [];
     // 학습값(BASELINE)은 행 없이 각주만 — 재학습이 같은 키를 덮어써 증가 없음, 관리는 판정 기준 화면에서
     base.dataFootnote = u
-      ? '학습값(BASELINE · ' + this._num(u.baseline.rows || 0) + '행)은 재학습이 같은 자리를 덮어써 늘지 않습니다 — 정리 대상이 아니라 판정 기준에서 관리합니다.'
+      ? T('학습값(BASELINE · {0}행)은 재학습이 같은 자리를 덮어써 늘지 않습니다 — 정리 대상이 아니라 판정 기준에서 관리합니다.', this._num(u.baseline.rows || 0))
       : '';
     base.onGoCriteria = function () { self.setState({ setSection: 'criteria' }); self._refreshBandCov(); };
     // 태그별 정리 — 기간 삭제로 불가한 설비 단위 정리, 대상이 감시 밖·건수 명시라 확인 절차는 가볍게
@@ -4386,40 +4369,40 @@ export class App extends Component {
       var parts = r.key.split(':');
       return {
         key: r.key, table: parts[0], tag: parts[1],
-        stat: [r.band ? self._num(r.band) + '행' : '', r.events ? self._num(r.events) + '건' : ''].filter(Boolean).join(' · '),
+        stat: [r.band ? T('{0}행', self._num(r.band)) : '', r.events ? T('{0}건', self._num(r.events)) : ''].filter(Boolean).join(' · '),
         busy: S.orphanBusy === r.key,
         onDelete: function () { self._purgeOrphan([r]); },
       };
     });
     base.orphanTotalText = orphanRows.length
-      ? orphanRows.length + '개 태그 · 대역 ' + this._num(orphanTot.band) + '행 · 이벤트 ' + this._num(orphanTot.events) + '건'
+      ? T('{0}개 태그 · 대역 {1}행 · 이벤트 {2}건', orphanRows.length, this._num(orphanTot.band), this._num(orphanTot.events))
       : '';
     base.onOrphanClose = function () { self.setState({ orphanOpen: false }); };
     base.onOrphanAll = function () { self._purgeOrphan(orphanRows); };
     // 기간 고르기 — 기본은 보관 전체 구간(min~max), 보관 정보 없으면 빈칸·버튼 잠금(실행 전 표 이름 입력 관문 존재)
     var pick = S.purgePick;
     base.purgePickShow = !!pick;
-    base.purgePickTitle = pick === 'band' ? '대역 에너지 추이 삭제' : '이벤트 이력 삭제';
+    base.purgePickTitle = pick === 'band' ? T('대역 에너지 추이 삭제') : T('이벤트 이력 삭제');
     var _sp = pick === 'band' ? (u && u.band.span) : (u && u.events.span);
     var _hasSpan = !!(_sp && _sp.from > 0 && _sp.to > 0);
     var _pgFrom = S.purgeFrom || (_hasSpan ? this._dtVal(_sp.from).slice(0, 10) : '');
     var _pgTo = S.purgeTo || (_hasSpan ? this._dtVal(_sp.to).slice(0, 10) : '');
     base.purgePickReady = !!(_pgFrom && _pgTo);
     base.purgeHaveText = _sp && _sp.from > 0
-      ? '보관 중: ' + E.fmtDT(_sp.from).slice(0, 10) + ' ~ ' + E.fmtDT(_sp.to).slice(0, 10) : '';
+      ? T('보관 중: {0} ~ {1}', E.fmtDT(_sp.from).slice(0, 10), E.fmtDT(_sp.to).slice(0, 10)) : '';
     base.purgeRange = {
       from: _pgFrom, to: _pgTo, mode: 'date', full: true,
       minMs: _hasSpan ? _sp.from : 0, maxMs: _hasSpan ? _sp.to : 0,
-      placeholder: '지울 기간 선택', title: '지울 기간을 고릅니다',
+      placeholder: T('지울 기간 선택'), title: T('지울 기간을 고릅니다'),
       onApply: function (f, t) { self.setState({ purgeFrom: f, purgeTo: t }); },
     };
     base.onPurgePickCancel = function () { self.setState({ purgePick: null, purgeFrom: null, purgeTo: null }); };
     base.onPurgePickNext = function () {
-      if (!base.purgePickReady) { self._toast('시작·종료 날짜를 모두 고르세요', 'warn'); return; }
+      if (!base.purgePickReady) { self._toast(T('시작·종료 날짜를 모두 고르세요'), 'warn'); return; }
       // 종료일은 그날 23:59:59.999까지 포함
       var a = CH.parseDT(_pgFrom + 'T00:00:00'), b = CH.parseDT(_pgTo + 'T23:59:59.999');
-      if (!isFinite(a) || !isFinite(b)) { self._toast('날짜를 확인하세요', 'warn'); return; }
-      if (a > b) { self._toast('기간이 올바르지 않습니다 (시작 ≤ 종료)', 'warn'); return; }
+      if (!isFinite(a) || !isFinite(b)) { self._toast(T('날짜를 확인하세요'), 'warn'); return; }
+      if (a > b) { self._toast(T('기간이 올바르지 않습니다 (시작 ≤ 종료)'), 'warn'); return; }
       self.setState({ purgePick: null });
       self._askPurge(pick, a, b);
     };
@@ -4428,24 +4411,24 @@ export class App extends Component {
     base.purgeShow = !!p;
     if (p) {
       var isBand = p.kind === 'band';
-      base.purgeTitle = isBand ? '대역 에너지 추이 삭제' : '이벤트 이력 삭제';
+      base.purgeTitle = isBand ? T('대역 에너지 추이 삭제') : T('이벤트 이력 삭제');
       base.purgeSub = isBand ? 'BAND' : 'EVENTS';
-      var unit = isBand ? '행' : '건';
+      var unit = isBand ? T('행') : T('건');
       base.purgeWhen = E.fmtDT(p.fromMs).slice(0, 10) + ' ~ ' + E.fmtDT(p.toMs).slice(0, 10);
       base.purgeCounting = !!p.counting;
       base.purgeN = p.counting ? '—' : this._num(p.n || 0) + unit;
-      base.purgeKeep = p.counting ? '—' : '삭제 후 남는 데이터 ' + this._num(p.keep || 0) + unit;
+      base.purgeKeep = p.counting ? '—' : T('삭제 후 남는 데이터 {0}{1}', this._num(p.keep || 0), unit);
       base.purgeNone = !p.counting && !p.n;
-      base.purgeAsk = '정말 삭제하시겠습니까?';
+      base.purgeAsk = T('정말 삭제하시겠습니까?');
       // 결과를 항목별로 — 마지막 항목(내보내기 권장)은 대안이라 tip 톤
       base.purgeBullets = isBand
-        ? [{ t: '영구 삭제되며 복구할 수 없습니다' },
-          { t: '학습에 쓰인 구간이 포함되면 대역 베이스라인을 다시 학습해야 합니다' },
-          { t: '추세 차트에서 이 구간이 비어 보입니다' }]
-        : [{ t: '영구 삭제되며 복구할 수 없습니다' },
-          { t: '이 기간을 다룬 리포트는 다시 만들 수 없습니다' },
-          { t: '기간 조회에서 이 구간은 빈 결과로 나옵니다' },
-          { t: '삭제 전 이벤트 기록 내보내기로 저장한 뒤 제거하는 것을 권장합니다', tip: true }];
+        ? [{ t: T('영구 삭제되며 복구할 수 없습니다') },
+          { t: T('학습에 쓰인 구간이 포함되면 대역 베이스라인을 다시 학습해야 합니다') },
+          { t: T('추세 차트에서 이 구간이 비어 보입니다') }]
+        : [{ t: T('영구 삭제되며 복구할 수 없습니다') },
+          { t: T('이 기간을 다룬 리포트는 다시 만들 수 없습니다') },
+          { t: T('기간 조회에서 이 구간은 빈 결과로 나옵니다') },
+          { t: T('삭제 전 이벤트 기록 내보내기로 저장한 뒤 제거하는 것을 권장합니다'), tip: true }];
       // 최종 관문 — 테이블 이름 직접 입력 시에만 버튼 활성(비가역 삭제)
       base.purgeTable = isBand ? 'BAND' : 'EVENTS';
       base.purgeTyped = S.purgeTyped || '';
@@ -4453,9 +4436,9 @@ export class App extends Component {
       base.onPurgeType = function (ev) { self.setState({ purgeTyped: ev.target.value }); };
       base.purgeRunning = !!p.running;
       base.purgeReady = !p.counting && !p.running && !!p.n && base.purgeTypeOk;
-      base.purgeBtnLabel = p.running ? '삭제 중…'
-        : p.counting ? '건수 확인 중…'
-          : (p.n ? this._num(p.n) + unit + ' 삭제' : '지울 데이터 없음');
+      base.purgeBtnLabel = p.running ? T('삭제 중…')
+        : p.counting ? T('건수 확인 중…')
+          : (p.n ? T('{0} 삭제', this._num(p.n) + unit) : T('지울 데이터 없음'));
       base.onPurgeCancel = function () { self._closePurge(); };
       base.onPurgeConfirm = function () { if (base.purgeReady) self._runPurge(); };
     }
@@ -4463,15 +4446,15 @@ export class App extends Component {
   // 통계 요약 한 줄 — 문장형 근거(등급 축·이탈 대역·지속 최악) 조립, 화면·리포트 공용(문구 일치)
   // 대역 배수 문구 — 진동(주파수 대역)·베어링(포락선) 축별, 학습 전·이탈 정보 없으면 빈 배열
   _bandAxText(dx) {
-    var bandKo = { sub: '서브동기', one: '1× 대역', fault: '결함 대역', high: '고주파',
+    var bandKo = { sub: T('서브동기'), one: T('1× 대역'), fault: T('결함 대역'), high: T('고주파'),
       vh1: '1~2 kHz', vh2: '2~4 kHz', vh3: '4~8 kHz', vh4: '8 kHz+',
-      envBPFO: 'BPFO(외륜)', envBPFI: 'BPFI(내륜)', envBSF: 'BSF(볼·롤러)' };
+      envBPFO: T('BPFO(외륜)'), envBPFI: T('BPFI(내륜)'), envBSF: T('BSF(볼·롤러)') };
     var ax = dx.bandAx, axTxt = [];
-    if (ax && ax.freqR > 0) axTxt.push('진동 ×' + ax.freqR.toFixed(2) + ' (' + (bandKo[ax.freqKey] || ax.freqKey) + ')');
+    if (ax && ax.freqR > 0) axTxt.push(T('진동 ×{0} ({1})', ax.freqR.toFixed(2), bandKo[ax.freqKey] || ax.freqKey));
     if (ax && ax.envR > 0) {
       var ek = (bandKo[ax.envKey] || ax.envKey)
-        + (ax.envAlt ? ' / ' + (bandKo[ax.envAlt] || ax.envAlt) + ' — 구분 불충분' : '');
-      axTxt.push('베어링 ×' + ax.envR.toFixed(2) + ' (' + ek + ')');
+        + (ax.envAlt ? T(' / {0} — 구분 불충분', bandKo[ax.envAlt] || ax.envAlt) : '');
+      axTxt.push(T('베어링 ×{0} ({1})', ax.envR.toFixed(2), ek));
     }
     return axTxt;
   }
@@ -4499,7 +4482,7 @@ export class App extends Component {
       return this._applyNow({ equipMeta: put(this._ac().equipMeta) }).then(function (ok) {
         if (!ok) return false;
         self.setState({ equipMeta: put(self.state.equipMeta) });
-        self._toast((eq.alias || eq.name) + ' 종동축 회전수를 ' + rpm + ' rpm으로 저장했습니다 — 측정 시점 부하 기준');
+        self._toast(T('{0} 종동축 회전수를 {1} rpm으로 저장했습니다 — 측정 시점 부하 기준', eq.alias || eq.name, rpm));
         self._reloadLive(true);
         return true;
       });
@@ -4509,7 +4492,7 @@ export class App extends Component {
     return this._applyNow({ equipRpm: applied }).then(function (ok) {
       if (!ok) return false;
       self.setState({ equipRpm: draft });
-      self._toast((eq.alias || eq.name) + ' 회전수를 ' + rpm + ' rpm으로 저장했습니다 — 측정 시점 부하 기준');
+      self._toast(T('{0} 회전수를 {1} rpm으로 저장했습니다 — 측정 시점 부하 기준', eq.alias || eq.name, rpm));
       self._reloadLive(true);
       return true;
     });
@@ -4520,16 +4503,16 @@ export class App extends Component {
     var E = this.E, nat = !!(eq.unit && eq.unit !== 'mm/s');
     if (!nat) return det.isoRms != null ? E.fmt(det.isoRms) + ' mm/s' : '';
     if (det.isoRaw != null && isFinite(det.isoRaw)) return E.fmt(det.isoRaw) + ' ' + eq.unit;
-    return det.isoRms != null ? E.fmt(det.isoRms) + ' mm/s(속도 환산)' : '';
+    return det.isoRms != null ? T('{0} mm/s(속도 환산)', E.fmt(det.isoRms)) : '';
   }
   // 기간 지표 표의 짧은 비고 — 상세분석 표·리포트 공용(전문은 _sevCards 각주)
   _sevBrief(m, stepSec) {
     var E = this.E, n = m.n, t = m.trend;
     return {
-      crest: '최댓값 ' + n.wCrest.toFixed(2) + ' · ' + this._stepText(stepSec) + ' 롤업',
-      p95: '중앙 ' + E.fmt(n.rMed) + ' · 평균 ' + E.fmt(n.wAvg) + ' · 최대 ' + E.fmt(n.wMax) + ' · B/C 초과 ' + n.overBC + '/' + n.buckets + ' 버킷',
-      trend: !t.winOk ? '관측 ' + this._durText(n.durMin) + ' · 기준선 없음(60분 이상 필요)'
-        : !t.cmp ? '운전 상태 변화 포함 — 정지·기동 구간이 섞임' : '최근 1/4 ÷ 직전 1/4',
+      crest: T('최댓값 {0} · {1} 롤업', n.wCrest.toFixed(2), this._stepText(stepSec)),
+      p95: T('중앙 {0} · 평균 {1} · 최대 {2} · B/C 초과 {3}/{4} 버킷', E.fmt(n.rMed), E.fmt(n.wAvg), E.fmt(n.wMax), n.overBC, n.buckets),
+      trend: !t.winOk ? T('관측 {0} · 기준선 없음(60분 이상 필요)', this._durText(n.durMin))
+        : !t.cmp ? T('운전 상태 변화 포함 — 정지·기동 구간이 섞임') : T('최근 1/4 ÷ 직전 1/4'),
     };
   }
   /* 기간 지표 카드 4장 — 상세분석·리포트 공용(값·등급은 VC.sevMetrics, 여기선 서식·각주만), 반환은 중립 모양
@@ -4543,37 +4526,36 @@ export class App extends Component {
       return { label: label, grade: d.grade, note: !!d.note,
         badgeKo: d.badge || (noGrade ? '' : E.STATUS[d.grade].ko), override: !!d.badge || noGrade,
         valueText: (prefix || '') + E.fmt(d.value), unit: u || '',
-        thrText: '기준 < ' + (prefix || '') + E.fmt(d.thr),
+        thrText: T('기준 < {0}{1}', prefix || '', E.fmt(d.thr)),
         over: over, arrow: noGrade ? '' : (over ? '▲' : '▼'),
         deltaText: noGrade ? '' : E.fmt(Math.abs(d.value - d.thr)), foot2: '' };
     };
     var c = [
-      mk('평균 RMS · ' + _rollTxt + ' 롤업(광대역)', m.avg, unit),
-      mk('P95 RMS · ' + _rollTxt + ' 롤업(광대역)', m.p95, unit),
-      mk('Crest P95 · ' + _rollTxt + ' 롤업', m.crest, ''),
-      mk('변화율 (최근 1/4 ÷ 직전 1/4)', m.trend, '', '×'),
+      mk(T('평균 RMS · {0} 롤업(광대역)', _rollTxt), m.avg, unit),
+      mk(T('P95 RMS · {0} 롤업(광대역)', _rollTxt), m.p95, unit),
+      mk(T('Crest P95 · {0} 롤업', _rollTxt), m.crest, ''),
+      mk(T('변화율 (최근 1/4 ÷ 직전 1/4)'), m.trend, '', '×'),
     ];
-    c[0].foot2 = 'ISO 판정은 별도(10–1000 Hz 대역제한) — 이 값은 광대역 감시용 · 평균은 조용한 구간이 고진동을 희석하므로 등급 없음';
+    c[0].foot2 = T('ISO 판정은 별도(10–1000 Hz 대역제한) — 이 값은 광대역 감시용 · 평균은 조용한 구간이 고진동을 희석하므로 등급 없음');
     // 최댓값은 등급 없이 사실만, 발생 횟수 병기
-    c[1].foot2 = '최댓값 ' + E.fmt(n.wMax) + ' ' + unit + '(등급 없음) · 광대역 B/C 초과 ' + n.overBC + '/' + n.buckets + '버킷';
+    c[1].foot2 = T('최댓값 {0} {1}(등급 없음) · 광대역 B/C 초과 {2}/{3}버킷', E.fmt(n.wMax), unit, n.overBC, n.buckets);
     var _cArt = m.crest.artifact || 15;
-    c[2].foot2 = '기준 = √(2·ln N) + 1 = ' + n.cThr.toFixed(1) + ' (N=버킷당 ' + this._num(n.perBucket) + '샘플, 잡음만으로는 거의 안 넘는 값) · 최댓값 ' + n.wCrest.toFixed(1)
-      + (n.wCrest > _cArt && m.crest.value <= _cArt ? ' — 최댓값은 아티팩트 경계(' + _cArt + ') 초과 · 단발 계측 잡음 가능' : '')
-      + (m.crest.impOk ? '' : ' · 버킷이 10초보다 길어 부하 변동이 섞임 — 충격성 판단 안 함');
+    c[2].foot2 = T('기준 = √(2·ln N) + 1 = {0} (N=버킷당 {1}샘플, 잡음만으로는 거의 안 넘는 값) · 최댓값 {2}{3}{4}', n.cThr.toFixed(1), this._num(n.perBucket), n.wCrest.toFixed(1), n.wCrest > _cArt && m.crest.value <= _cArt ? T(' — 최댓값은 아티팩트 경계({0}) 초과 · 단발 계측 잡음 가능', _cArt) : '', m.crest.impOk ? '' : T(' · 버킷이 10초보다 길어 부하 변동이 섞임 — 충격성 판단 안 함'));
     // 변화율 — 등급 없음, 비교가 성립할 때만 기준(×2) 대조
-    if (!m.trend.winOk) c[3].thrText = '관측 ' + Math.round(n.durMin) + '분 — 기준선 없음(정상상태·동일 계측조건 전제 미충족)';
-    else if (!m.trend.cmp) c[3].thrText = '운전 상태 변화 포함 — 비교 불가(정지·기동 구간이 섞임)';
+    if (!m.trend.winOk) c[3].thrText = T('관측 {0}분 — 기준선 없음(정상상태·동일 계측조건 전제 미충족)', Math.round(n.durMin));
+    else if (!m.trend.cmp) c[3].thrText = T('운전 상태 변화 포함 — 비교 불가(정지·기동 구간이 섞임)');
     // 계측 사유가 값을 튼 방향을 해당 카드에 기재 — 클리핑은 Crest·진폭 과소, DC 드리프트는 RMS 과대
     if (held && held.key === 'clip') {
-      c[2].foot2 = '클리핑은 꼭대기를 잘라 Crest를 낮춤 — 이 값이 낮다고 정상은 아님';
-      c[1].foot2 = c[1].foot2 + ' · 클리핑으로 진폭 과소 가능';
+      c[2].foot2 = T('클리핑은 꼭대기를 잘라 Crest를 낮춤 — 이 값이 낮다고 정상은 아님');
+      c[1].foot2 = T('{0} · 클리핑으로 진폭 과소 가능', c[1].foot2);
     } else if (held && held.key === 'dc') {
-      c[0].foot2 = 'DC 드리프트로 기준선이 어긋나 RMS 과대 가능 — 계측 확인 후 재평가';
+      c[0].foot2 = T('DC 드리프트로 기준선이 어긋나 RMS 과대 가능 — 계측 확인 후 재평가');
     }
     return c;
   }
   _genOne(eq, run) {
     var self = this, S = this.state, E = this.E, LA = this._ac();   // LA: 적용된 설정(LLM 모델 표기)
+    var rptLang = this._genLang || getLang();
     var live = function () { if (self._genRun !== run) throw { __abort: true }; }; // 중단된 실행이면 여기서 끝
     this.setState({ genStep: 0 });
     // 리포트도 선택 기간의 롤업을 직접 조회(렌더용 비동기 캐시에 의존하지 않음)
@@ -4594,7 +4576,7 @@ export class App extends Component {
     var winFrom = rf.fromMs ? E.fmtDT(rf.fromMs) : S.genFrom;
     var winTo = rf.toMs ? E.fmtDT(rf.toMs) : S.genTo;
     var trP = loadTrendChunks(E, eq, roll).catch(function () { return { kurt: [], bands: [], xLabels: [] }; });
-    return Promise.all([detP, trP, self._logoDataURL(), self._chartLibSrc()]).then(function (rr) {
+    return Promise.all([detP, trP, self._logoDataURL(), self._chartLibSrc()]).then(koFn(function (rr) {
       live();
       var det = rr[0], tr = rr[1], logo = rr[2], chartSrc = rr[3];
       // 진단이 같은 상세를 보도록 캐시 시드 — 기존 스냅샷 프리즈(eqSnap/snapNow)는 보존
@@ -4621,18 +4603,18 @@ export class App extends Component {
       });
       var _rzIso = self._isoZones(eq);
       var specs = [
-        { k: '데이터 건수', v: self._num(cnt), unit: '건' },
-        { k: '표시 구간', v: self._rangeText(roll, winFrom + ' ~ ' + winTo, rf) },
-        { k: '샘플레이트', v: (det.raw.fs / 1000).toFixed(2), unit: 'kHz' },
-        { k: '롤업 단위', v: rf.label },
+        { k: T('데이터 건수'), v: self._num(cnt), unit: T('건') },
+        { k: T('표시 구간'), v: self._rangeText(roll, winFrom + ' ~ ' + winTo, rf) },
+        { k: T('샘플레이트'), v: (det.raw.fs / 1000).toFixed(2), unit: 'kHz' },
+        { k: T('롤업 단위'), v: rf.label },
       ];
 
       self.setState({ genStep: 2 });
       var _rptSat = self._kurtSat(eq); // 첨도 포화 판정을 소견·리포트에 함께
       var _ev = self._evidence(eq, det); // 근거표·음성 소견·미설명 성분을 리포트에도 결정론적으로 인쇄
-      var opP = self._reportOpinion(eq, det, dx, _rptSat, winFrom, winTo);
+      var opP = self._reportOpinion(eq, det, dx, _rptSat, winFrom, winTo, rptLang);
 
-      return opP.then(function (opinion) {
+      return opP.then(koFn(function (opinion) {
         live(); // 중단됐으면 소견도 폐기
         self.setState({ genStep: 3 });
         // 소견을 실제로 낸 모델 표기(ornith:9b → ornith 9B) — LLM 소견 절·측정 정보 공용
@@ -4686,9 +4668,10 @@ export class App extends Component {
           data: Object.assign({ tz: CH.zoneName() }, data), chartLibSrc: chartSrc,
           // 재현성 도장 모델명은 소견을 실제로 낸 경우만
           build: self._reportBuild(eq, det, docNo, llmName),
-          fftHint: det.fft.freqs.length ? '해상도 ' + det.fft.res.toFixed(2) + ' Hz' : '',
+          fftHint: det.fft.freqs.length ? T('해상도 {0} Hz', det.fft.res.toFixed(2)) : '',
           // 포락선 복조 대역 — 고정 대역이 안 서면 빈 값(전대역 복조)
           envBand: det.envelope.band || '',
+          i18n: self._i18nFor(rptLang),
         });
         // 파일명은 짧게(태그_생성일시) — 기간·별칭·LLM 여부는 .index.json에 기록해 보관함 컬럼 유지
         var fname = eq.name.replace(/[^A-Za-z0-9._-]/g, '-') + '_' + ts + '.html';
@@ -4698,25 +4681,25 @@ export class App extends Component {
             idx[fname] = { tag: eq.alias || eq.name, from: winFrom, to: winTo, llm: !!opinion, ms: genMs };
           });
         });
-      });
-    });
+      }));
+    }));
     });
   }
   /* 리포트용 LLM 소견 — 끔·미설정·실패·빈 응답 모두 null, 실패 셋은 _genLlmErr에 사유 기록(결정론 소견이 LLM 소견으로 오인되는 것 방지)
      소견 없어도 리포트는 생성 */
-  _reportOpinion(eq, det, dx, sat, winFrom, winTo) {
+  _reportOpinion(eq, det, dx, sat, winFrom, winTo, lang) {
     var self = this, S = this.state;
     if (!S.genLLM) return Promise.resolve(null);
     // 프로바이더 미선택·API 키 없음 — 호출이 없어 catch에 안 걸리므로 별도 처리
     var llm = LLM.createLLM(this._llmCfg());
-    if (!llm) { this._genLlmErr = 'LLM 미설정 — 설정 → LLM 연동에서 프로바이더와 API 키를 확인하세요'; return Promise.resolve(null); }
-    return llm.complete(this._opinionPrompt(eq, det, dx, sat) + '\n[조회 기간] ' + winFrom + ' ~ ' + winTo,
+    if (!llm) { this._genLlmErr = Tk('LLM 미설정 — 설정 → LLM 연동에서 프로바이더와 API 키를 확인하세요'); return Promise.resolve(null); }
+    return llm.complete(this._opinionPrompt(eq, det, dx, sat) + '\n[조회 기간] ' + winFrom + ' ~ ' + winTo + this._opinionLang(lang),
       { signal: this._genAC && this._genAC.signal })
       // 빈 응답('')은 예외가 아니므로 여기서 실패 처리
       .then(function (txt) {
         var s = String(txt == null ? '' : txt).trim();
         if (s) return s;
-        self._genLlmErr = '모델이 빈 응답을 반환했습니다 — 모델명이 올바른지 확인하세요';
+        self._genLlmErr = Tk('모델이 빈 응답을 반환했습니다 — 모델명이 올바른지 확인하세요');
         return null;
       })
       .catch(function (e) {
@@ -4724,6 +4707,27 @@ export class App extends Component {
         console.warn('[vibe] report opinion failed', e);
         return null;
       });
+  }
+  /* 특정 언어 번역기 { lang, T, tx } — 리포트(엔진·조립은 한국어로 돌고 report.js가 표시 지점에서 번역)·알림 문구. 한국어면 null
+     호출 시점의 화면 언어와 무관하게 lang 고정 */
+  _i18nFor(lang) {
+    if (!lang || lang === 'ko') return null;
+    return {
+      lang: lang,
+      T: function () { var a = arguments; return withLang(lang, function () { return T.apply(null, a); }); },
+      tx: function (s) { return withLang(lang, function () { return tx(s); }); },
+    };
+  }
+  /* LLM 소견 출력 언어 — 프롬프트 본문(한국어)은 그대로, 끝에 언어 지시만 덧붙임. 한국어면 빈 문자열
+     머리말도 그 언어 — 리포트는 번역된 '핵심 요약' 머리말도 인식 */
+  _opinionLang(lang) {
+    if (!lang || lang === 'ko') return '';
+    var nm = lang === 'ja' ? '일본어' : '영어';
+    return withLang(lang, function () {
+      return '\n\n[출력 언어] 소견 전체를 ' + nm + '로 쓴다. [출력 형식]의 머리말도 ' + nm + ' — "' + T('핵심 요약') + ':" · "## ' + T('지금 상태')
+        + '" · "## ' + T('그렇게 보는 이유') + '" · "## ' + T('권장 행동') + '".\n말투 규칙(~함/~임)은 ' + nm + '의 간결한 개조식으로 바꿔 지킨다.'
+        + (lang === 'ja' ? ' 일본어 표기에 필요한 한자는 쓴다(중국어 간체는 쓰지 않는다).' : '');
+    });
   }
   /* 리포트 data 중 eq·det·근거로 정해지는 부분(요약 블록·ISO·재현성 바 등) — _genOne·검증 하네스 공용(필드 불일치 방지)
      차트 계열은 롤업·추세 청크 의존이라 _genOne 담당
@@ -4758,24 +4762,24 @@ export class App extends Component {
       summary: (function () {
         var kurtW = 0; (det.indics || []).forEach(function (x) { if (/Kurtosis|커토시스/.test(x.k)) kurtW = parseFloat(x.v) || 0; });
         var scored = ev.conf.filter(function (c) { return !c.na; });
-        var gateReasonTxt = 'Crest P95 ' + cP95.toFixed(2) + ' · 파형 첨도 ' + kurtW.toFixed(1) + ' (기준 ' + cThr.toFixed(1) + ' = √(2·ln ' + self._num(nTot) + ') + 1)';
+        var gateReasonTxt = T('Crest P95 {0} · 파형 첨도 {1} (기준 {2} = √(2·ln {3}) + 1)', cP95.toFixed(2), kurtW.toFixed(1), cThr.toFixed(1), self._num(nTot));
         return {
           gate: !!(det.quality && det.quality.gate),
           gateReason: gateReasonTxt,
           gateCap: GATE_CAP,
           cands: scored.slice(0, 3).map(function (c) { return { f: c.f, score: c.score, s: c.s, why: (c.tags && c.tags.length ? c.tags[0] : c.why) }; }),
           unmeasurable: ev.conf.filter(function (c) { return c.na; }).map(function (c) { return { f: c.f, why: c.caveat || '' }; }),
-          rpmTxt: det.frMeas ? Math.round(det.frMeas.rpm) + ' ± ' + Math.round(det.frMeas.rpmTol || 0) + ' rpm (' + (eq.rpmSrc === 'pulley' || eq.rpmSrc === 'measured' ? self._rpmText(eq) : '명판 ' + eq.rpm) + ')' : (eq.rpmSrc === 'pulley' || eq.rpmSrc === 'measured' ? self._rpmText(eq) : '명판 ' + eq.rpm + ' rpm') + ' (실측 피크 없음)',
-          acqTxt: '8초 창 · 0.125 Hz · Hanning 50% 중첩 · 8회 평균',
+          rpmTxt: det.frMeas ? Math.round(det.frMeas.rpm) + ' ± ' + Math.round(det.frMeas.rpmTol || 0) + ' rpm (' + (eq.rpmSrc === 'pulley' || eq.rpmSrc === 'measured' ? self._rpmText(eq) : T('명판 {0}', eq.rpm)) + ')' : T('{0} (실측 피크 없음)', eq.rpmSrc === 'pulley' || eq.rpmSrc === 'measured' ? self._rpmText(eq) : T('명판 {0} rpm', eq.rpm)),
+          acqTxt: T('8초 창 · 0.125 Hz · Hanning 50% 중첩 · 8회 평균'),
           // 지금 할 일 한 줄 — 상세분석과 같은 함수
           action: self._todoText(eq, det, dx),
           // 게이트 편향 방향 — 가산형은 상한, 감산형은 하한 명시
           bias: (function () {
             var ks = ((det.quality && det.quality.issues) || []).map(function (i) { return i.key; });
             if (ks.indexOf('flatline') >= 0 || ks.indexOf('clip') >= 0 || ks.indexOf('sparse') >= 0)
-              return '센서 정지·포화는 진폭을 과소 표시 — 이 값은 하한, 실제는 이상일 수 있음';
+              return T('센서 정지·포화는 진폭을 과소 표시 — 이 값은 하한, 실제는 이상일 수 있음');
             if (ks.indexOf('spike') >= 0 || ks.indexOf('kurtx') >= 0)
-              return '아티팩트는 에너지를 더하기만 함 — 이 값은 상한, 실제 기계 상태는 이하';
+              return T('아티팩트는 에너지를 더하기만 함 — 이 값은 상한, 실제 기계 상태는 이하');
             return '';
           })(),
           // 1단계 검산 — 롤업 평균과 ISO 블록 평균이 크게 벌어지면 창 차이 명시
@@ -4783,7 +4787,7 @@ export class App extends Component {
             if (!(det.isoRms > 0) || !(wAvg > 0)) return '';
             var r = det.isoRms / wAvg;
             if (r < 1.5 && r > 0.67) return '';
-            return '롤업 평균 ' + E.fmt(wAvg) + ' 대비 ×' + r.toFixed(2) + ' — 창이 다름(롤업=관측 ' + Math.round(_durMinT) + '분 전체, ISO=최신 시점 앵커 ' + (det.isoBlocks || 1) + '블록).';
+            return T('롤업 평균 {0} 대비 ×{1} — 창이 다름(롤업=관측 {2}분 전체, ISO=최신 시점 앵커 {3}블록).', E.fmt(wAvg), r.toFixed(2), Math.round(_durMinT), det.isoBlocks || 1);
           })(),
         };
       })(),
@@ -4808,9 +4812,9 @@ export class App extends Component {
           subs: ['Thresholds ' + eq.zones.map(function (z) { return E.fmt(z); }).join(' / ') + ' ' + eq.unit] },
         { k: 'Acquisition', v: blkN ? 'FFT ' + self._num(blkN) : '—',
           // 평균 1회(단일 블록)만 경고 — 충격성 신호에서 진폭이 스파이크에 좌우됨
-          subs: det.acq ? [(det.acq.res || 0).toFixed(2) + ' Hz · 창 ' + (det.acq.winSec || 0).toFixed(1) + ' s', 'Avg ×' + (det.acq.averages || 1) + ' · ISO ' + (det.acq.isoBlocks || 1) + '블록']
-            .concat((det.acq.averages || 1) < 2 ? ['단일 블록 — 진폭이 스파이크에 좌우'] : []) : [] },
-        { k: 'LLM', v: llmName || '미사용', subs: [llmName ? '규칙 + LLM 소견' : '규칙 기반만'] },
+          subs: det.acq ? [T('{0} Hz · 창 {1} s', (det.acq.res || 0).toFixed(2), (det.acq.winSec || 0).toFixed(1)), T('Avg ×{0} · ISO {1}블록', det.acq.averages || 1, det.acq.isoBlocks || 1)]
+            .concat((det.acq.averages || 1) < 2 ? [T('단일 블록 — 진폭이 스파이크에 좌우')] : []) : [] },
+        { k: 'LLM', v: llmName || T('미사용'), subs: [llmName ? T('규칙 + LLM 소견') : T('규칙 기반만')] },
         { k: 'Report ID', v: docNo, subs: [], narrow: true },
       ],
     };
@@ -4901,7 +4905,7 @@ export class App extends Component {
   _openReport(r) {
     var self = this;
     var w = window.open('', '_blank');
-    if (!w) { this._toast('팝업이 차단되었습니다 — 브라우저에서 허용 후 다시 시도하세요', 'err'); return; }
+    if (!w) { this._toast(T('팝업이 차단되었습니다 — 브라우저에서 허용 후 다시 시도하세요'), 'err'); return; }
     if (this._rvBlobUrl) { URL.revokeObjectURL(this._rvBlobUrl); this._rvBlobUrl = null; }
     readFileBlob((r.dir || reportDir()) + '/' + r.fname).then(function (blob) {
       // 서버 형식 무관하게 HTML로 해석(iframe 안에서만 렌더)
@@ -4914,15 +4918,15 @@ export class App extends Component {
       setTimeout(function () { if (self._rvBlobUrl) { URL.revokeObjectURL(self._rvBlobUrl); self._rvBlobUrl = null; } }, 60000);
     }).catch(function (e) {
       try { w.close(); } catch (e2) { /* 이미 닫힘 */ }
-      self._toast('리포트 열기 실패: ' + (e && e.message || e), 'err');
+      self._toast(T('리포트 열기 실패: {0}', e && e.message || e), 'err');
     });
   }
   _delReport(id, dir) {
     var self = this;
     deleteFile((dir || reportDir()) + '/' + id)
       .then(function () { return self._updateReportIndex(function (idx) { delete idx[id]; }).catch(function () {}); })
-      .then(function () { self._toast('리포트 삭제됨'); self._loadReports(); })
-      .catch(function (e) { self._toast('삭제 실패: ' + (e && e.message || e), 'err'); });
+      .then(function () { self._toast(T('리포트 삭제됨')); self._loadReports(); })
+      .catch(function (e) { self._toast(T('삭제 실패: {0}', e && e.message || e), 'err'); });
   }
   // 헤더 알람 pill 토글 — 설정탭의 저장 버튼 흐름과 달리 즉시 적용·즉시 저장
   _toggleMonitorNow() {
@@ -4931,7 +4935,7 @@ export class App extends Component {
     this._applyNow({ monitorOn: on }).then(function (ok) {
       if (ok && on) self._judgeLive().then(function () { self._loadEventsLive(); }); // 켜는 즉시 1회 판정
     });
-    this._toast(on ? '알람이 켜졌습니다' : '알람이 꺼졌습니다 — 등급은 계속 표시되지만 이벤트 기록과 알림은 멈춥니다', on ? 'ok' : 'warn');
+    this._toast(on ? T('알람이 켜졌습니다') : T('알람이 꺼졌습니다 — 등급은 계속 표시되지만 이벤트 기록과 알림은 멈춥니다'), on ? 'ok' : 'warn');
   }
   _navTo(id) {
     if (this.state.tab === 'settings' && this.state.dirty && id !== 'settings') { this.setState({ pendingNav: id }); return; }
@@ -4947,7 +4951,7 @@ export class App extends Component {
     this._scrollTop();
   }
   _scrollTop() { setTimeout(function () { var m = document.querySelector('main'); if (m) m.scrollTop = 0; }, 30); }
-  _confirmNav(action) { var self = this; var p = this.state.pendingNav; if (action === 'save') { this.setState({ pendingNav: null }); this._persistCfg().then(function (ok) { if (!ok) return; self.setState({ dirty: false, tab: p }); self._toast('설정이 저장되었습니다'); if (self.live) self._reloadLive(); }); } else if (action === 'discard') { this._discardEdits({ tab: p, pendingNav: null }); } else { this.setState({ pendingNav: null }); } }
+  _confirmNav(action) { var self = this; var p = this.state.pendingNav; if (action === 'save') { this.setState({ pendingNav: null }); this._persistCfg().then(function (ok) { if (!ok) return; self.setState({ dirty: false, tab: p }); self._toast(T('설정이 저장되었습니다')); if (self.live) self._reloadLive(); }); } else if (action === 'discard') { this._discardEdits({ tab: p, pendingNav: null }); } else { this.setState({ pendingNav: null }); } }
   _markDirty() { if (!this.state.dirty) this.setState({ dirty: true }); }
   // 저장 안 함 — 폼 편집을 적용본으로 되돌림(표시만 지우면 편집값이 다음 저장에 포함)
   _discardEdits(extra) {
@@ -4960,7 +4964,7 @@ export class App extends Component {
     this._persistCfg().then(function (ok) {
       if (!ok) return;                      // 실패 사유는 _persistCfg가 표시, dirty 유지
       self.setState({ dirty: false });
-      self._toast('설정이 저장되었습니다');
+      self._toast(T('설정이 저장되었습니다'));
       if (self.live) self._reloadLive();
     });
   }
@@ -4968,7 +4972,7 @@ export class App extends Component {
   _notifyCfg() {
     var C = this._ac();   // 적용된 설정 — 폼의 미저장 편집 배제
     var S = this.state;
-    return Notify.notifyCfgFrom({ notifCh: C.notifCh, notifTo: C.notifTo, routes: C.routes }, ROUTE_DEFS);
+    return Notify.notifyCfgFrom({ notifCh: C.notifCh, notifTo: C.notifTo, notifLang: C.notifLang, routes: C.routes }, ROUTE_DEFS);
   }
   /* 발송 대기열 — 실제 발송은 회차 종료 후 _flushNotify가 일괄 처리
      폭주 방지 2겹: 상태머신(시간축) + 묶음(같은 순간 동시 다발) */
@@ -4989,7 +4993,7 @@ export class App extends Component {
     if (!q || !q.length) return;
     var cfg = this._notifyCfg(), to = cfg.channels.webhook.to;
     if (!to) return;
-    var msgs = Notify.planNotifications(q, cfg, 'webhook', this.E.fmtDT(nowMs || Date.now()));
+    var msgs = Notify.planNotifications(q, cfg, 'webhook', this.E.fmtDT(nowMs || Date.now()), this._i18nFor(cfg.lang));
     msgs.forEach(function (msg) {
       runTql(Notify.buildWebhookTql(to, Notify.payloadFor(msg, to))).catch(function () {});
     });
@@ -4999,29 +5003,31 @@ export class App extends Component {
     var self = this, to = (this.state.notifTo || {})[ch];
     if (!to) return;
     this.setState({ notifTesting: ch, notifTest: null });
+    // 폼에서 고른 알림 언어 그대로(저장 전 확인용) — 등급·유형은 한국어 원문을 넘기고 문구 조립 때 번역
+    var lang = this.state.notifLang || getLang();
     var msg = Notify.eventMessage({
-      alias: '테스트 알림', tag: 'TEST', typeKo: '연결 테스트', gradeKo: '주의',
+      alias: withLang(lang, function () { return T('테스트 알림'); }), tag: 'TEST', typeKo: '연결 테스트', gradeKo: '주의',
       val: 1.23, lim: 1.12, unit: 'mm/s', timeText: this.E.fmtDT(Date.now()),
-    });
+    }, this._i18nFor(lang));
     runTql(Notify.buildWebhookTql(to, Notify.payloadFor(msg, to))).then(function (t) {
       var out = String(t || '').trim();
       var ok = /^OK\b/.test(out);
-      self.setState({ notifTesting: null, notifTest: { ch: ch, ok: ok, msg: ok ? '발송 성공 — 수신함을 확인하세요' : '발송 실패 (' + (out || '응답 없음').slice(0, 60) + ')' } });
-      self._toast(ok ? '테스트 알림을 보냈습니다' : '테스트 발송 실패', ok ? 'ok' : 'err');
+      self.setState({ notifTesting: null, notifTest: { ch: ch, ok: ok, msg: ok ? Tk('발송 성공 — 수신함을 확인하세요') : Tk('발송 실패 ({0})', (out || Tk('응답 없음')).slice(0, 60)) } });
+      self._toast(ok ? T('테스트 알림을 보냈습니다') : T('테스트 발송 실패'), ok ? 'ok' : 'err');
     }).catch(function (e) {
-      self.setState({ notifTesting: null, notifTest: { ch: ch, ok: false, msg: '발송 실패: ' + (e.message || e) } });
-      self._toast('테스트 발송 실패', 'err');
+      self.setState({ notifTesting: null, notifTest: { ch: ch, ok: false, msg: Tk('발송 실패: {0}', e.message || e) } });
+      self._toast(T('테스트 발송 실패'), 'err');
     });
   }
   _testLLM() {
     var self = this;
     this.setState({ llmTesting: true, llmTest: null });
     LLM.testConnection(this._llmCfg(this.state)).then(function (r) {   // 저장 전 입력값 확인용 — 편집본
-      self.setState({ llmTesting: false, llmTest: { ok: true, msg: '응답 ' + r.ms + 'ms · "' + r.sample + '"' }, llmConfigured: true });
-      self._toast('LLM 연결 성공');
+      self.setState({ llmTesting: false, llmTest: { ok: true, msg: Tk('응답 {0}ms · "{1}"', r.ms, r.sample) }, llmConfigured: true });
+      self._toast(T('LLM 연결 성공'));
     }).catch(function (e) {
       self.setState({ llmTesting: false, llmTest: { ok: false, msg: String(e && e.message || e) }, llmConfigured: false });
-      self._toast('LLM 연결 실패', 'err');
+      self._toast(T('LLM 연결 실패'), 'err');
     });
   }
   renderVals() {
@@ -5038,29 +5044,35 @@ export class App extends Component {
       // 알람 ON일 때 감시 방식 배지 — 서버 상시(앱 닫아도 동작) / 앱(열린 동안만)
       monModeBadgeShow: AC.monitorOn,
       // 앱 모드 표시 탭 — 판정·알림은 같은 계정의 담당 탭(또는 PC)이 맡음
-      monModeBadgeText: AC.monMode === 'server' ? '서버 상시' : (this._isLead() ? '앱' : '앱 · 보기 전용'),
+      monModeBadgeText: AC.monMode === 'server' ? T('서버 상시') : (this._isLead() ? T('앱') : T('앱 · 보기 전용')),
       // 두 모드 모두 파란 배지 — 문구('서버 상시'/'앱')로 구분되므로 색은 통일
       monModeBadgeStyle: 'font-size: 10px; font-weight: 700; padding: 1px 6px; border-radius: 4px; color: var(--primary-light); background: rgba(0,108,210,.14); border: 1px solid rgba(0,108,210,.3);',
       monPillTitle: AC.monitorOn
-        ? (AC.monMode === 'server' ? '서버 상시 감시 — 앱을 닫아도 Neo 타이머가 계속 감지합니다'
-          : this._isLead() ? '앱 감시 — 앱이 열려 있는 동안만 감지합니다'
-            : '앱 감시 — 같은 계정의 다른 탭(또는 PC)이 판정·알림을 맡고 이 탭은 결과만 표시합니다. 그 탭이 닫히면 1분 안에 이 탭이 이어받습니다')
-        : '클릭하여 알람 켜기/끄기',
+        ? (AC.monMode === 'server' ? T('서버 상시 감시 — 앱을 닫아도 Neo 타이머가 계속 감지합니다')
+          : this._isLead() ? T('앱 감시 — 앱이 열려 있는 동안만 감지합니다')
+            : T('앱 감시 — 같은 계정의 다른 탭(또는 PC)이 판정·알림을 맡고 이 탭은 결과만 표시합니다. 그 탭이 닫히면 1분 안에 이 탭이 이어받습니다'))
+        : T('클릭하여 알람 켜기/끄기'),
       // 다른 계정으로 로그인됨 — 이 탭 쓰기 중단·새로고침 안내(원래 계정으로 돌아오면 사라짐)
       idSwitchShow: !!S.idSwitch,
       idSwitchTo: S.idSwitch || '',
       idSwitchFrom: this.user || '',
       idSwitchMon: !AC.monitorOn ? ''
-        : AC.monMode === 'server' ? (this.user || '') + ' 계정의 서버 상시 감시는 그대로 계속됩니다.'
-          : (this.user || '') + ' 계정의 앱 감시는 이 탭에서 멈춥니다 — 다른 탭·PC에 ' + (this.user || '') + '(으)로 열린 화면이 있으면 그쪽이 이어받습니다.',
+        : AC.monMode === 'server' ? T('{0} 계정의 서버 상시 감시는 그대로 계속됩니다.', this.user || '')
+          : T('{0} 계정의 앱 감시는 이 탭에서 멈춥니다 — 다른 탭·PC에 {1}(으)로 열린 화면이 있으면 그쪽이 이어받습니다.', this.user || '', this.user || ''),
       onIdReload: function () { window.location.reload(); },
       goSettings: function () { self._navTo('settings'); },
       onToggleMonitor: function () { self._toggleMonitorNow(); },
       toggleTheme: function () { self.toggleTheme(); },
+      // 언어 선택 — 버튼엔 현재 언어 약칭, 목록 이름은 각 언어 표기
+      langShort: (LANGS.filter(function (l) { return l.id === S.lang; })[0] || LANGS[0]).short,
+      langOpen: !!S.langOpen,
+      langOptions: LANGS.map(function (l) { return { id: l.id, label: l.label, on: l.id === S.lang, onClick: function () { self.setState({ langOpen: false }); setLang(l.id); } }; }),
+      onLangToggle: function () { self.setState({ langOpen: !self.state.langOpen }); },
+      onLangClose: function () { self.setState({ langOpen: false }); },
       settingsActiveStyle: S.tab === 'settings' ? 'border-color: var(--primary-light); color: var(--text-primary);' : '',
       // 준비 전엔 탭·알람 버튼 없음 — 설정(유저 정보)만
       monPillShow: this._appReady(),
-      navTabs: (this._appReady() ? [{ id: 'monitor', label: '모니터링', icon: 'dashboard' }, { id: 'detail', label: '상세분석', icon: 'graph-line' }, { id: 'report', label: '리포트 생성', icon: 'file' }] : []).map(function (t) {
+      navTabs: (this._appReady() ? [{ id: 'monitor', label: T('모니터링'), icon: 'dashboard' }, { id: 'detail', label: T('상세분석'), icon: 'graph-line' }, { id: 'report', label: T('리포트 생성'), icon: 'file' }] : []).map(function (t) {
         var a = S.tab === t.id;
         return { label: t.label, icon: t.icon, onClick: function () { self._navTo(t.id); }, style: 'display: inline-flex; align-items: center; gap: 7px; height: 52px; padding: 0 14px; background: transparent; border: none; border-bottom: 2px solid ' + (a ? 'var(--primary-light)' : 'transparent') + '; color: ' + (a ? 'var(--text-primary)' : 'var(--text-tertiary)') + '; font-size: 13px; font-weight: ' + (a ? '600' : '500') + '; cursor: pointer;' };
       }),
@@ -5069,14 +5081,14 @@ export class App extends Component {
       isMonitor: S.ready && !S.cfgFail && S.tab === 'monitor', isDetail: S.ready && !S.cfgFail && S.tab === 'detail',
       isDiag: S.ready && !S.cfgFail && S.tab === 'diag', isReport: S.ready && !S.cfgFail && S.tab === 'report',
       isSettings: S.ready && !S.cfgFail && S.tab === 'settings',
-      toast: S.toast, toastMsg: S.toast ? S.toast.msg : '',
+      toast: S.toast, toastMsg: S.toast ? tx(S.toast.msg) : '',
       toastIcon: S.toast && S.toast.kind === 'err' ? 'error' : (S.toast && S.toast.kind === 'warn' ? 'warning' : 'check'),
       // 오류 토스트는 길어질 수 있어 폭 제한
       toastStyle: 'position: fixed; bottom: 26px; left: 50%; transform: translateX(-50%); z-index: 100; display: flex; align-items: flex-start; gap: 9px; padding: 11px 18px; border-radius: 8px; font-size: 13px; font-weight: 500; color: #fff; box-shadow: 0 8px 24px rgba(0,0,0,.35); animation: vtoast .25s cubic-bezier(.21,1.02,.73,1); max-width: min(880px, calc(100vw - 40px)); line-height: 1.5; word-break: break-word; background: ' + (S.toast && S.toast.kind === 'err' ? 'var(--toast-err)' : (S.toast && S.toast.kind === 'warn' ? 'var(--toast-warn)' : 'var(--toast-ok)')) + ';'
     };
     base.showAdvanced = true; // 전체 그래프 표시(포락선·켑스트럼·스펙트로그램·첨도·대역)
-    base.indicsTitle = this.live ? '진단 지표 (시간영역)' : '스펙트럴 진단 지표';
-    base.indicsDesc = this.live ? '원시 파형 구간에서 직접 산출한 충격·에너지 특성 지표' : '스펙트럼에서 직접 산출된 충격·에너지 특성 지표';
+    base.indicsTitle = this.live ? T('진단 지표 (시간영역)') : T('스펙트럴 진단 지표');
+    base.indicsDesc = this.live ? T('원시 파형 구간에서 직접 산출한 충격·에너지 특성 지표') : T('스펙트럼에서 직접 산출된 충격·에너지 특성 지표');
     if (!S.ready || !this.data) return base;
     // 등급은 판정 결과(_severityOf) 그대로 — gradeFor(e.rms)로 재산정 시 모니터링·상세 등급 불일치
     this.data.equipment.forEach(function (e) { e.cls = (AC.equipCls || {})[e.id] || e.baseCls || e.cls; e.zones = self._effZones(e); e.grade = self._severityOf(e); });
@@ -5094,20 +5106,14 @@ export class App extends Component {
     base.sumTotal = eqs.length;
     base.onTotalClick = function () { self.setState({ gradeFilter: null }); };
     base.totalStyle = 'flex: 1 1 0; min-width: 118px; padding: 14px 18px; border: none; border-right: 1px solid var(--border-default); background: transparent; text-align: left; cursor: pointer; font-family: inherit;';
-    var kpiDef = [0, 1, 2, 3].map(function (g) { return { g: g, label: E.STATUS[g].ko, color: E.STATUS[g].color }; });
+    var kpiDef = [0, 1, 2, 3].map(function (g) { return { g: g, label: tx(E.STATUS[g].ko), color: E.STATUS[g].color }; });
     // 판정 보류 칸 — 클릭 시 해당 태그만 필터, 심각도 팔레트 미사용(감시 상태 ≠ 설비 상태)
-    kpiDef.push({ g: 'hold', label: '판정 보류', color: 'var(--text-muted)' });
+    kpiDef.push({ g: 'hold', label: T('판정 보류'), color: 'var(--text-muted)' });
     base.kpiCells = kpiDef.map(function (k) {
       var act = S.gradeFilter === k.g;
       if (k.g === 'hold') {
         return { label: k.label, color: k.color, count: holdN, active: act,
-          tip: '지금 등급을 매기지 않는 설비입니다 — 카드의 값이 그 설비를 대표하지 않습니다.'
-            + '\n\n계측 이상 ' + holdBy.gate + '대 — 파형을 못 믿습니다. 센서·케이블 확인이 필요합니다.'
-            + '\n신호 두절 ' + holdBy.lost + '대 — 데이터가 안 들어옵니다. 수집 경로 확인이 필요합니다.'
-            + '\n정지 ' + holdBy.stop + '대 — 설비가 서 있습니다. 조치는 필요 없고, 운전이 재개되면 판정도 재개됩니다.'
-            + '\n판정 못 함 ' + holdBy.nojudge + '대 — 회전수·베어링이 없어 결함주파수 격자를 못 세웁니다. 설비 정보를 채우십시오.'
-            + (holdBy.patmiss ? '\n결함 패턴 측정 대기·실패 ' + holdBy.patmiss + '대 — 원본 파형을 이번에 재지 못해 직전 판정을 유지합니다. 다음 추출 주기에 다시 잽니다.' : '')
-            + (holdBy.wait ? '\n판정 대기 ' + holdBy.wait + '대 — 첫 판정 회차를 기다리는 중입니다.' : ''),
+          tip: T('지금 등급을 매기지 않는 설비입니다 — 카드의 값이 그 설비를 대표하지 않습니다.\n\n계측 이상 {0}대 — 파형을 못 믿습니다. 센서·케이블 확인이 필요합니다.\n신호 두절 {1}대 — 데이터가 안 들어옵니다. 수집 경로 확인이 필요합니다.\n정지 {2}대 — 설비가 서 있습니다. 조치는 필요 없고, 운전이 재개되면 판정도 재개됩니다.\n판정 못 함 {3}대 — 회전수·베어링이 없어 결함주파수 격자를 못 세웁니다. 설비 정보를 채우십시오.{4}{5}', holdBy.gate, holdBy.lost, holdBy.stop, holdBy.nojudge, holdBy.patmiss ? T('\n결함 패턴 측정 대기·실패 {0}대 — 원본 파형을 이번에 재지 못해 직전 판정을 유지합니다. 다음 추출 주기에 다시 잽니다.', holdBy.patmiss) : '', holdBy.wait ? T('\n판정 대기 {0}대 — 첫 판정 회차를 기다리는 중입니다.', holdBy.wait) : ''),
           style: 'flex: 1 1 0; min-width: 96px; padding: 14px 18px; border: none; border-right: 1px solid var(--border-default); background: ' + (act ? 'rgba(0,108,210,.10)' : 'transparent') + '; text-align: left; cursor: pointer; font-family: inherit;' + (act ? ' box-shadow: inset 0 -2px 0 var(--primary-light);' : ''),
           onClick: function () { self.setState({ gradeFilter: act ? null : 'hold' }); } };
       }
@@ -5123,15 +5129,15 @@ export class App extends Component {
     base.monEmptyFail = !!S.loadFail;   // 조회 실패로 빈 상태 — '소스 없음'과 구분
     // 설정 읽기 실패 화면(_initCfgFail) — 조회 실패는 재시도만, 조각 손상은 해당 영역 기본값 열기 추가
     var _cf = S.cfgFail;
-    var _cfDoms = (_cf && _cf.domains || []).map(function (d) { return (CFG_DOMAIN_UI[d] || [d])[0]; }).join('·');
+    var _cfDoms = (_cf && _cf.domains || []).map(function (d) { return tx((CFG_DOMAIN_UI[d] || [d])[0]); }).join('·');
     base.cfgFailShow = !!_cf && S.ready;
-    base.cfgFailTitle = !_cf ? '' : _cf.kind === 'broken' ? _cfDoms + ' 설정을 읽을 수 없습니다' : '설정을 불러오지 못했습니다';
+    base.cfgFailTitle = !_cf ? '' : _cf.kind === 'broken' ? T('{0} 설정을 읽을 수 없습니다', _cfDoms) : T('설정을 불러오지 못했습니다');
     base.cfgFailText = !_cf ? '' : _cf.kind === 'broken'
-      ? '저장 도중 끊겨 설정 일부가 손상된 것으로 보입니다. 다시 시도해도 같다면 이 영역만 기본값으로 열어 다시 설정하세요 — 나머지 설정은 그대로 불러오고, 누르는 것만으로는 아무것도 저장되지 않습니다.'
-      : '일시적인 연결 문제일 수 있습니다. 설정은 DB에 그대로 있으니 다시 시도하세요. 그동안 화면을 기본값으로 띄우지 않는 것은, 그 상태에서 저장하면 실제 설정을 덮어쓰기 때문입니다.';
-    base.cfgFailWhy = _cf ? _cf.msg : '';
+      ? T('저장 도중 끊겨 설정 일부가 손상된 것으로 보입니다. 다시 시도해도 같다면 이 영역만 기본값으로 열어 다시 설정하세요 — 나머지 설정은 그대로 불러오고, 누르는 것만으로는 아무것도 저장되지 않습니다.')
+      : T('일시적인 연결 문제일 수 있습니다. 설정은 DB에 그대로 있으니 다시 시도하세요. 그동안 화면을 기본값으로 띄우지 않는 것은, 그 상태에서 저장하면 실제 설정을 덮어쓰기 때문입니다.');
+    base.cfgFailWhy = _cf ? tx(_cf.msg) : '';
     base.cfgRepairShow = !!_cf && _cf.kind === 'broken';
-    base.cfgRepairLabel = _cfDoms + '만 기본값으로 열기';
+    base.cfgRepairLabel = T('{0}만 기본값으로 열기', _cfDoms);
     base.onCfgRetry = function () { self._retryCfg(); };
     base.onCfgRepair = function () { self._repairCfg(); };
     base.monEventsShow = base.isMonitor && !base.monEmpty;
@@ -5152,8 +5158,8 @@ export class App extends Component {
     base.tblAllOn = _hide.length === 0;
     base.tblSelCount = _vis.length;
     base.tblTotal = _tblAll.length;
-    base.tblCaption = base.tblAllOn ? '전체 테이블 표시 중' : '';
-    base.tblTip = '표시할 테이블만 고릅니다 — 화면만 좁힐 뿐,\n감시·알람은 선택한 소스 전체에서 그대로 돕니다.';
+    base.tblCaption = base.tblAllOn ? T('전체 테이블 표시 중') : '';
+    base.tblTip = T('표시할 테이블만 고릅니다 — 화면만 좁힐 뿐,\n감시·알람은 선택한 소스 전체에서 그대로 돕니다.');
     base.tblQuery = S.tblQuery || '';
     base.onTblQuery = function (ev) { self.setState({ tblQuery: ev.target.value }); };
     // 열고 닫을 때 검색어 초기화 — 재오픈 시 잘린 목록 오독 방지
@@ -5196,14 +5202,14 @@ export class App extends Component {
     base.onGoSource = function () { self.setState({ tab: 'settings', setSection: 'source' }); };
     // 최근 이벤트 — 목록 필터 무관(_loadEventsLive가 따로 둠), 조회 전엔 목록 첫 행. 벽시계 기준
     var _le = this._lastEvt !== undefined ? this._lastEvt : (S.events[0] || null);
-    base.lastEventText = _le ? E.ago(_le.ms, Date.now()) + ' · ' + _le.tagAlias : '없음';
-    base.srcNotice = S.srcNotice;
+    base.lastEventText = _le ? tx(E.ago(_le.ms, Date.now())) + ' · ' + _le.tagAlias : T('없음');
+    base.srcNotice = tx(S.srcNotice);
     // 감시 이상 배너 — 알람 부재가 정상 때문인지 감시 사망 때문인지 표시(err = 실제 정지, warn = 의심)
     base.healthWarns = this._loadFailWarns().concat(S.health || []).map(function (w) {
       return {
-        text: w.text,
+        text: tx(w.text),
         err: w.lv === 'err',
-        act: w.act || '',
+        act: tx(w.act || ''),
         onAct: w.onAct || null,
         style: 'display: flex; align-items: center; gap: 10px; padding: 11px 14px; border-radius: 8px; margin-bottom: 10px; '
           + (w.lv === 'err'
@@ -5247,8 +5253,8 @@ export class App extends Component {
       // 등급 필터에서 보류 제외 — 집계와 일치
       sorted = sorted.filter(function (e) { return !self._holdOf(e) && self._severityOf(e) === S.gradeFilter; });
     }
-    base.filterNotice = S.gradeFilter === 'hold' ? ('판정 보류 ' + sorted.length + '대만 표시 중')
-      : (S.gradeFilter !== null && S.gradeFilter !== undefined) ? (E.STATUS[S.gradeFilter].ko + ' ' + sorted.length + '대만 표시 중') : '';
+    base.filterNotice = S.gradeFilter === 'hold' ? (T('판정 보류 {0}대만 표시 중', sorted.length))
+      : (S.gradeFilter !== null && S.gradeFilter !== undefined) ? (T('{0} {1}대만 표시 중', tx(E.STATUS[S.gradeFilter].ko), sorted.length)) : '';
     base.onClearFilter = function () { self.setState({ gradeFilter: null }); };
     base.cards = sorted.map(function (e) {
       var g = E.STATUS[self._severityOf(e)];
@@ -5260,11 +5266,8 @@ export class App extends Component {
       if (_fl) {
         var _perMin = Math.ceil(_fl.periodMs / 60000);
         flap = {
-          text: '등급 반복 ' + _fl.round + '회',
-          tip: '최근 2시간에 등급 악화가 ' + _fl.round + '회 반복됐습니다 (약 ' + _perMin + '분 주기).'
-            + '\n결함 근거가 채택 기준선 근처에서 오가는 상태입니다 — 부하가 변하면 결함 신호가 켜졌다 꺼질 수 있습니다.'
-            + '\n결함 초기일 수 있으니 설정으로 가리지 말고 원인을 확인하십시오.'
-            + '\n\n클릭하면 마지막 악화 시점의 상세분석(결함 근거·포락선 스펙트럼)을 엽니다.',
+          text: T('등급 반복 {0}회', _fl.round),
+          tip: T('최근 2시간에 등급 악화가 {0}회 반복됐습니다 (약 {1}분 주기).\n결함 근거가 채택 기준선 근처에서 오가는 상태입니다 — 부하가 변하면 결함 신호가 켜졌다 꺼질 수 있습니다.\n결함 초기일 수 있으니 설정으로 가리지 말고 원인을 확인하십시오.\n\n클릭하면 마지막 악화 시점의 상세분석(결함 근거·포락선 스펙트럼)을 엽니다.', _fl.round, _perMin),
           onOpen: function (ev3) { ev3.stopPropagation(); self._gotoDetail(e.id, _fl.lastMs); },
         };
       }
@@ -5272,22 +5275,15 @@ export class App extends Component {
       var _rs = (self._runState || {})[e.table + ':' + e.name];
       var runBadge = null;
       if (_rs && _rs.lost) {
-        runBadge = { text: '신호 두절', err: true,
-          tip: '새 데이터가 ' + durKo(_rs.age) + ' 동안 들어오지 않았습니다.'
-            + '\n\n화면의 값은 마지막으로 받은 값이라 현재 상태가 아닙니다. 판정도 멈춰 있습니다.'
-            + '\n센서·수집기·네트워크를 확인하십시오.' };
+        runBadge = { text: T('신호 두절'), err: true,
+          tip: T('새 데이터가 {0} 동안 들어오지 않았습니다.\n\n화면의 값은 마지막으로 받은 값이라 현재 상태가 아닙니다. 판정도 멈춰 있습니다.\n센서·수집기·네트워크를 확인하십시오.', tx(durKo(_rs.age))) };
       } else if (_rs && _rs.gate) {
         // 계측 이상은 정지보다 우선 — 플랫라인은 값이 낮아도 센서 고장(무기한 무감시)
         runBadge = { text: '계측 이상', err: true,
-          tip: _rs.gate.label + (_rs.gate.detail ? '\n\n' + _rs.gate.detail : '')
-            + '\n\n파형을 믿을 수 없어 진동 판정을 멈췄습니다 — 이 상태의 값으로 등급을 매기면'
-            + ' 헛경보(접촉·스파이크는 값이 과대)나 놓침(클리핑은 과소)이 됩니다.'
-            + '\n센서·케이블·마운팅을 확인하십시오.' };
+          tip: T('{0}\n\n파형을 믿을 수 없어 진동 판정을 멈췄습니다 — 이 상태의 값으로 등급을 매기면 헛경보(접촉·스파이크는 값이 과대)나 놓침(클리핑은 과소)이 됩니다.\n센서·케이블·마운팅을 확인하십시오.', _rs.gate.label + (_rs.gate.detail ? '\n\n' + _rs.gate.detail : '')) };
       } else if (_rs && !_rs.run) {
-        runBadge = { text: '정지', err: false,
-          tip: '값이 정지 수준입니다(정상 기준의 20% 미만).'
-            + '\n\n설비가 서 있는 동안은 판정을 얼립니다 — 정지를 "좋아졌다"로 읽으면 복귀 알림이 나가고, 설비가 고쳐진 것으로 오해하게 됩니다.'
-            + '\n운전이 재개되면 판정도 이어서 재개됩니다.' };
+        runBadge = { text: T('정지'), err: false,
+          tip: T('값이 정지 수준입니다(정상 기준의 20% 미만).\n\n설비가 서 있는 동안은 판정을 얼립니다 — 정지를 "좋아졌다"로 읽으면 복귀 알림이 나가고, 설비가 고쳐진 것으로 오해하게 됩니다.\n운전이 재개되면 판정도 이어서 재개됩니다.') };
       }
       var _gs = (self._gradeState || {})[e.table + ':' + e.name] || {};
       /* 등급 칩 옆 확정 상태 — 카드는 원시 등급이라 웹훅 미발송 이유 표시, 악화·복귀 대칭
@@ -5298,10 +5294,10 @@ export class App extends Component {
       var gradeNote = '';
       var _confirmed = _st && _st.g > 0;
       if (_gs.gi > 0) {
-        if (_confirmed && _st.since) gradeNote = durKo(Date.now() - _st.since) + '째';
-        else gradeNote = (_st && _st.candN > 1) ? (_st.candN + '회차') : '1회차';
+        if (_confirmed && _st.since) gradeNote = T('{0}째', tx(durKo(Date.now() - _st.since)));
+        else gradeNote = (_st && _st.candN > 1) ? (T('{0}회차', _st.candN)) : T('1회차');
       } else if (_confirmed) {
-        gradeNote = '복귀 ' + ((_st.candN > 1) ? _st.candN : 1) + '회차';
+        gradeNote = T('복귀 {0}회차', (_st.candN > 1) ? _st.candN : 1);
       }
       // 판정 보류면 등급 칩 대체 — 직전 확정 등급은 호버로
       var _hold = self._holdOf(e);
@@ -5309,12 +5305,10 @@ export class App extends Component {
       var holdTip = '';
       if (_hold) {
         holdTip = _hold.kind === 'patmiss'
-          ? '지금 등급을 새로 매기지 않습니다 — ' + _hold.label + '. 결함 패턴(원본 파형)을 이번에 재지 못해 직전 판정을 그대로 유지합니다.'
-            + '\n다음 측정(대역 추출 주기)에서 다시 판정합니다. 이 동안 복귀·악화 알림은 나가지 않습니다.'
-          : '지금 등급을 매기지 않습니다 — ' + _hold.label + ' 상태라 이 값이 설비를 대표하지 않습니다.';
+          ? T('지금 등급을 새로 매기지 않습니다 — {0}. 결함 패턴(원본 파형)을 이번에 재지 못해 직전 판정을 그대로 유지합니다.\n다음 측정(대역 추출 주기)에서 다시 판정합니다. 이 동안 복귀·악화 알림은 나가지 않습니다.', _hold.label)
+          : T('지금 등급을 매기지 않습니다 — {0} 상태라 이 값이 설비를 대표하지 않습니다.', _hold.label);
         if (_ms && _ms.g != null) {
-          holdTip += '\n\n직전 확정 ' + (GRADE_WORDS[_ms.g] || '-')
-            + (_ms.since ? ' · ' + agoText(_ms.since) : '');
+          holdTip += T('\n\n직전 확정 {0}{1}', tx(GRADE_WORDS[_ms.g]) || '-', _ms.since ? ' · ' + agoText(_ms.since) : '');
         }
       }
       /* 큰 숫자 = 판정값(원본 단위) — 가속도·변위 설비는 존 판정을 속도 환산(_gs.iso)으로 하되 표시는 같은 대역 원본 단위 RMS(_gs.isoRaw)
@@ -5325,32 +5319,25 @@ export class App extends Component {
       // 라벨 = 측정 대역(주파수 표기), Nyquist ≤ 1 kHz 태그는 실제 범위
       var _nyq = e.fs > 0 ? Math.round(e.fs / 2) : 0;
       var mainUnit = (_gs.basis === 'iso' && _isoHas) ? '10~1000 Hz'
-        : _nyq > 0 ? ('2~' + _nyq + ' Hz') : '전대역';
+        : _nyq > 0 ? ('2~' + _nyq + ' Hz') : T('전대역');
       // 베이스라인·대역 값은 카드 대신 호버로(미학습이 대부분이라 카드 잡음)
       var _ax = [];
       // 결함 패턴이 맨 위(등급 축) — 못 잰 경우도 사유 기재(빈칸은 정상으로 오독)
-      if (_gs.patOk) _ax.push('결함 패턴 ' + (_gs.patOn ? '검출' : '없음') + (_gs.patR != null ? ' (격자 ' + _gs.patR.toFixed(1) + ')' : '')
-        // 전대역 복조는 근거 약함 명시 — 조기 베어링 결함 미검출
-        + (_gs.patWide ? ' · 전대역 복조(샘플레이트 부족으로 1–5 kHz 대역 불성립) — 근거 약함, 조기 베어링 결함은 검출되지 않습니다' : ''));
-      else if (_gs.patMiss) _ax.push('결함 패턴 — ' + (_gs.patWait ? '첫 측정 대기' : '이번 측정 실패') + ' · 직전 판정 유지');
-      else if (_gs.patOk === false) _ax.push('결함 패턴 — 판정 못 함(회전수·기하·샘플레이트 확인)');
-      if (_gs.blR != null && isFinite(_gs.blR)) _ax.push('베이스라인 한계 대비 ×' + _gs.blR.toFixed(1));
-      if (_gs.bandR != null && isFinite(_gs.bandR)) _ax.push('대역 최대 ×' + _gs.bandR.toFixed(1));
+      if (_gs.patOk) _ax.push(T('결함 패턴 {0}{1}{2}', _gs.patOn ? T('검출') : T('없음'), _gs.patR != null ? T(' (격자 {0})', _gs.patR.toFixed(1)) : '', _gs.patWide ? T(' · 전대역 복조(샘플레이트 부족으로 1–5 kHz 대역 불성립) — 근거 약함, 조기 베어링 결함은 검출되지 않습니다') : ''));
+      else if (_gs.patMiss) _ax.push(T('결함 패턴 — {0} · 직전 판정 유지', _gs.patWait ? T('첫 측정 대기') : T('이번 측정 실패')));
+      else if (_gs.patOk === false) _ax.push(T('결함 패턴 — 판정 못 함(회전수·기하·샘플레이트 확인)'));
+      if (_gs.blR != null && isFinite(_gs.blR)) _ax.push(T('베이스라인 한계 대비 ×{0}', _gs.blR.toFixed(1)));
+      if (_gs.bandR != null && isFinite(_gs.bandR)) _ax.push(T('대역 최대 ×{0}', _gs.bandR.toFixed(1)));
       var valTip = '';
       if (_gs.limited && _isoHas && isFinite(_gs.wide)) {
-        valTip = 'ISO 10~1000 Hz  ' + E.fmt(_isoShow) + ' ' + (e.unit || '')
-          + '\n전대역          ' + E.fmt(_gs.wide) + ' ' + (e.unit || '')
-          + '\n\n존 등급은 ISO 대역제한 값으로 매깁니다 — 표준의 존 경계가 10~1000 Hz 기준이라 전대역 값을 대면 다른 양을 재게 됩니다.'
-          + ((e.unit && e.unit !== 'mm/s') ? '\n존 경계는 속도(mm/s) 규격이라 이 설비는 속도로 환산해 비교합니다 — 표시는 원본 단위입니다.' : '')
-          + '\n베이스라인 이탈은 전대역으로 봅니다 — 어느 주파수든 평소보다 커지면 잡히도록.'
-          + '\n\n두 값 차이가 크면 1 kHz 위(충격·베어링·기어)에 에너지가 몰려 있다는 뜻입니다.';
+        valTip = T('ISO 10~1000 Hz  {0} {1}\n전대역          {2} {3}\n\n존 등급은 ISO 대역제한 값으로 매깁니다 — 표준의 존 경계가 10~1000 Hz 기준이라 전대역 값을 대면 다른 양을 재게 됩니다.{4}\n베이스라인 이탈은 전대역으로 봅니다 — 어느 주파수든 평소보다 커지면 잡히도록.\n\n두 값 차이가 크면 1 kHz 위(충격·베어링·기어)에 에너지가 몰려 있다는 뜻입니다.', E.fmt(_isoShow), e.unit || '', E.fmt(_gs.wide), e.unit || '', (e.unit && e.unit !== 'mm/s') ? T('\n존 경계는 속도(mm/s) 규격이라 이 설비는 속도로 환산해 비교합니다 — 표시는 원본 단위입니다.') : '');
       }
       if (_ax.length) valTip = (valTip ? valTip + '\n\n' : '') + _ax.join('\n');
       // 카드 클릭 시 감시가 판정한 시점(_patAt)으로 상세 이동 — 없으면(보류) 기간 스윕
       var _patAt = ((self._patNow || {})[e.table + ':' + e.name] || {}).at || null;
       // 큰 글씨 = 별칭, 작은 글씨 = 태그명(소스 2개 이상이면 테이블 병기 — 같은 태그명 구분)
       return { mainUnit: mainUnit, hold: !!_hold, holdTip: holdTip, gradeNote: gradeNote, valTip: valTip, runBadge: runBadge, flap: flap, id: e.id, alias: e.alias || e.name, name: e.name,
-        sub: e.name + (base.tblFilterShow ? ' (' + e.table + ')' : ''), unit: e.unit, cls: e.cls, gradeKo: g.ko, gradeColor: g.color, gradeSoft: g.soft, rmsText: E.fmt(mainVal), sparkLine: e.spark.line, sparkArea: e.spark.area, sparkColor: g.color, sparkFill: g.soft, sparkH: sparkH, lastText: E.ago(e.lastSeen, self.data.now), onClick: function () { self._gotoDetail(e.id, _patAt); }, cardStyle: 'border-left: 3px solid ' + g.color + ';' };
+        sub: e.name + (base.tblFilterShow ? ' (' + e.table + ')' : ''), unit: e.unit, cls: e.cls, gradeKo: tx(g.ko), gradeColor: g.color, gradeSoft: g.soft, rmsText: E.fmt(mainVal), sparkLine: e.spark.line, sparkArea: e.spark.area, sparkColor: g.color, sparkFill: g.soft, sparkH: sparkH, lastText: tx(E.ago(e.lastSeen, self.data.now)), onClick: function () { self._gotoDetail(e.id, _patAt); }, cardStyle: 'border-left: 3px solid ' + g.color + ';' };
     });
     /* 설비 카드 드래그 — 미리보기 순서로 렌더(끌고 간 자리에 실제 삽입), 놓으면 확정·저장, 취소 시 원복
        순서는 저장된 전체 목록 기준(필터로 안 보이는 카드의 상대 순서 유지) */
@@ -5409,7 +5396,7 @@ export class App extends Component {
     };
     // 상세분석 기간 — 앵커는 선택 태그 1개
     var _pEq = this._activeEq(S.selTag);
-    base.periodPresets = this._presetChips([_pEq], '이 태그', 'detail');
+    base.periodPresets = this._presetChips([_pEq], T('이 태그'), 'detail');
     var _dtTxt = function (s) { return String(s || '').replace('T', ' '); }; // 표시용(입력값의 T 제거)
     // 달력 버튼 표시 구간 — 프리셋은 현재 시각 기준으로 매번 재계산(저장된 from/to는 옛 구간)
     var _pSpan = this._presetSpan([_pEq]);
@@ -5420,13 +5407,13 @@ export class App extends Component {
     base.periodRange = {
       from: pFrom, to: pTo, active: S.period === 'custom', showTime: false,
       minMs: _pSpan.minMs || 0, maxMs: _pSpan.toMs || 0,
-      title: '달력에서 조회 기간을 직접 고릅니다',
+      title: T('달력에서 조회 기간을 직접 고릅니다'),
       onApply: function (f, t) {
         self.setState({ period: 'custom', from: f, to: t });
-        self._toast('조회 기간 적용됨 · ' + _dtTxt(f) + ' ~ ' + _dtTxt(t));
+        self._toast(T('조회 기간 적용됨 · {0} ~ {1}', _dtTxt(f), _dtTxt(t)));
       },
     };
-    base.onRefresh = function () { var eq2 = self._activeEq(self.state.selTag); if (eq2) { delete self._detailCache[eq2.id]; } self._rfCache = {}; self._trCacheL = {}; self._toast('새로고침 완료 · ' + E.fmtClock(Date.now())); self.setState({ dxOpen: false, dxAiText: null }); };
+    base.onRefresh = function () { var eq2 = self._activeEq(self.state.selTag); if (eq2) { delete self._detailCache[eq2.id]; } self._rfCache = {}; self._trCacheL = {}; self._toast(T('새로고침 완료 · {0}', E.fmtClock(Date.now()))); self.setState({ dxOpen: false, dxAiText: null }); };
     var eq = this._activeEq(S.selTag);
     if (eq) {
     base.selTag = eq.id;
@@ -5435,11 +5422,11 @@ export class App extends Component {
     if (_dc && _dc.eqSnap) eq = _dc.eqSnap; // 이후 게이지·판정·진단·추세는 캡처 스냅샷 값 사용(실시간 미반영)
     // 계산 중 표시 — 계측 검증 전 화면이 '이상 없음'으로 읽히는 것 방지
     base.detBusy = !!(_dc && _dc.state === 'loading');
-    base.detBusyText = '분석 중 — 파형·스펙트럼과 계측 검증을 계산하고 있습니다. 아래 판정은 계산이 끝난 뒤 확정됩니다.';
+    base.detBusyText = T('분석 중 — 파형·스펙트럼과 계측 검증을 계산하고 있습니다. 아래 판정은 계산이 끝난 뒤 확정됩니다.');
     // 캡처 실패·빈 구간 배너 — 설비 문제와 데이터 문제 구분
-    base.detWarn = (_dc && _dc.state === 'error') ? '상세분석 조회에 실패했습니다 — 네트워크·DB 상태를 확인하고 새로고침하세요.'
+    base.detWarn = (_dc && _dc.state === 'error') ? T('상세분석 조회에 실패했습니다 — 네트워크·DB 상태를 확인하고 새로고침하세요.')
       : (_dc && _dc.state === 'ready' && det.raw && !det.raw.values.length)
-        ? '선택 구간에 원시 파형이 없습니다 — 파형·스펙트럼 카드가 비어 있습니다. 마지막 수집: ' + (eq.lastSeen ? E.fmtDT(eq.lastSeen) : '알 수 없음')
+        ? T('선택 구간에 원시 파형이 없습니다 — 파형·스펙트럼 카드가 비어 있습니다. 마지막 수집: {0}', eq.lastSeen ? E.fmtDT(eq.lastSeen) : T('알 수 없음'))
         : '';
     /* 계측 보류 — 감시 사유(캡처 시점 _dc.gate) 우선, 분석 창 사유와 OR(한쪽만 보면 카드·상세 불일치)
        캡처 후 감시 상태가 바뀌면 화면 대신 배너(detStale)로 알림 */
@@ -5447,8 +5434,7 @@ export class App extends Component {
     var _held = VC.gateReason(det.quality, _gSnap);
     var _gLive = this._gateOf(eq);
     base.detStale = (_dc && _dc.state === 'ready' && (_gSnap && _gSnap.label) !== (_gLive && _gLive.label))
-      ? ('감시가 본 계측 상태가 이 스냅샷 이후 달라졌습니다 — 지금: ' + (_gLive ? _gLive.label : '이상 없음')
-        + ' / 이 화면: ' + (_gSnap ? _gSnap.label : '이상 없음') + '. 아래 판정은 캡처 시점 기준이며, 새로고침하면 반영됩니다.')
+      ? (T('감시가 본 계측 상태가 이 스냅샷 이후 달라졌습니다 — 지금: {0} / 이 화면: {1}. 아래 판정은 캡처 시점 기준이며, 새로고침하면 반영됩니다.', _gLive ? _gLive.label : T('이상 없음'), _gSnap ? _gSnap.label : T('이상 없음')))
       : '';
     /* 입력 회전수 점검 — 실측 1×가 또렷하고(분해능 밖) 입력과 2% 넘게 다르면 경고
        결함 패턴은 입력 RPM을 허용오차 1%로 대조 → 이대로면 결함을 놓침. 실측값 저장은 사용자 확인 후(측정 시점 부하 기준) */
@@ -5457,9 +5443,8 @@ export class App extends Component {
     if (_fm && _fm.distinct && eq.rpm > 0 && Math.abs(_fm.rpm - eq.rpm) / eq.rpm > RPM_WARN_FRAC) {
       var _rpmM = Math.round(_fm.rpm), _pct = ((_fm.rpm - eq.rpm) / eq.rpm * 100);
       var _drv = eq.rpmSrc === 'pulley' || eq.rpmSrc === 'measured';
-      base.rpmWarn = (_drv ? '종동축 회전수 ' + eq.rpm + ' rpm(' + (eq.rpmSrc === 'pulley' ? '풀리 환산' : '입력값') + ')이' : '입력 회전수 ' + eq.rpm + ' rpm이') + ' 스펙트럼에서 잰 ' + _rpmM + ' rpm과 ' + (_pct > 0 ? '+' : '') + _pct.toFixed(1)
-        + '% 다릅니다. 결함 패턴은 입력값으로 결함 주파수를 계산해 허용오차 1%로 대조하므로, 이대로면 결함을 놓칠 수 있습니다. ' + (_drv ? '벨트 슬립·풀리 지름(피치 지름 기준인지)을 확인하거나 종동축 회전수를 직접 입력하세요.' : '동기속도(예: 1800)를 넣었다면 정격 회전수로 고치세요.');
-      base.rpmWarnAct = '실측값 ' + _rpmM + ' rpm으로 저장';
+      base.rpmWarn = T('{0} 스펙트럼에서 잰 {1} rpm과 {2}{3}% 다릅니다. 결함 패턴은 입력값으로 결함 주파수를 계산해 허용오차 1%로 대조하므로, 이대로면 결함을 놓칠 수 있습니다. {4}', _drv ? T('종동축 회전수 {0} rpm({1})이', eq.rpm, eq.rpmSrc === 'pulley' ? T('풀리 환산') : T('입력값')) : T('입력 회전수 {0} rpm이', eq.rpm), _rpmM, _pct > 0 ? '+' : '', _pct.toFixed(1), _drv ? T('벨트 슬립·풀리 지름(피치 지름 기준인지)을 확인하거나 종동축 회전수를 직접 입력하세요.') : T('동기속도(예: 1800)를 넣었다면 정격 회전수로 고치세요.'));
+      base.rpmWarnAct = T('실측값 {0} rpm으로 저장', _rpmM);
       base.onRpmWarnAct = function () { self._setRpmFromMeas(eq, _rpmM); };
     }
     // 기간 지표 — 리포트와 같은 함수(VC.sevMetrics)
@@ -5479,7 +5464,7 @@ export class App extends Component {
     var _trBusy = _tr && _tr.state === 'loading';
     // 조회 실패와 표본 부족 구분
     var _trErr = _tr && _tr.state === 'error';
-    var _trEmpty = function (note) { return _trBusy ? '계산 중…' : _trErr ? '계산에 실패했습니다 — 새로고침으로 다시 시도하세요' : (note || ''); };
+    var _trEmpty = function (note) { return _trBusy ? T('계산 중…') : _trErr ? T('계산에 실패했습니다 — 새로고침으로 다시 시도하세요') : tx(note || ''); };
     base.kurtNote = (_tr && (_tr.kurt || []).length) ? '' : _trEmpty(_tr && _tr.kurtNote);
     var _bandHas = _tr && (_tr.bands || []).some(function (s) { return (s.vals || []).some(function (v) { return v != null; }); });
     base.bandNote = _bandHas ? '' : _trEmpty(_tr && _tr.bandNote);
@@ -5487,35 +5472,35 @@ export class App extends Component {
     // 사양 한 줄 — 구간은 짧게, 전체 시각은 hover
     var _rangeFull = this._rangeText(_roll, _dtTxt(S.from) + ' ~ ' + _dtTxt(S.to), _rf);
     base.detSpec = [
-      { k: '데이터', v: this._num(_wCount) + '건' },
-      { k: '구간', v: this._rangeShort(_roll, _rf) || _rangeFull, t: _rangeFull },
-      { k: '샘플레이트', v: (det.raw.fs / 1000).toFixed(2) + ' kHz' },
-      { k: '롤업', v: this._stepText(_rf.stepSec) + (_rf.raw ? ' · 원본 집계' : '') }
+      { k: T('데이터'), v: T('{0}건', this._num(_wCount)) },
+      { k: T('구간'), v: this._rangeShort(_roll, _rf) || _rangeFull, t: _rangeFull },
+      { k: T('샘플레이트'), v: (det.raw.fs / 1000).toFixed(2) + ' kHz' },
+      { k: T('롤업'), v: this._stepText(_rf.stepSec) + (_rf.raw ? T(' · 원본 집계') : '') }
     ];
     // 롤업 없는 테이블 — 원본 집계·구간 축소 사실을 사양 칸 아래에 안내
     base.rollupNote = !_rf.raw ? ''
-      : _rf.capped ? 'ROLLUP이 없는 테이블이라 원본 데이터를 직접 집계해, 추이 그래프는 선택 기간 중 최근 2시간만 표시합니다 — 테이블에 ROLLUP을 만들면 전체 기간을 볼 수 있습니다'
-        : 'ROLLUP이 없는 테이블이라 원본 데이터를 직접 집계합니다 — 2시간보다 긴 기간은 최근 2시간만 표시합니다';
+      : _rf.capped ? T('ROLLUP이 없는 테이블이라 원본 데이터를 직접 집계해, 추이 그래프는 선택 기간 중 최근 2시간만 표시합니다 — 테이블에 ROLLUP을 만들면 전체 기간을 볼 수 있습니다')
+        : T('ROLLUP이 없는 테이블이라 원본 데이터를 직접 집계합니다 — 2시간보다 긴 기간은 최근 2시간만 표시합니다');
     var g = E.STATUS[_gi];
     // 보류 중엔 등급어 유지·색만 중립 — 마지막 판정 정보는 남기되 현재 상태로 주장하지 않음
     base.sevHold = !!_held;
     base.sevHoldWhy = _held ? _held.label : '';
-    base.sevHoldDetail = _held ? (_held.detail || '') : '';
+    base.sevHoldDetail = _held ? tx(_held.detail || '') : '';
     base.sevHoldNote = _held
-      ? (_held.src === 'mon' ? '감시가 이 사유로 판정 동결 — 모니터링 카드도 같은 상태'
-        : '분석 창에서 계측 이상 관측 — 계측 확인 후 재평가')
+      ? (_held.src === 'mon' ? T('감시가 이 사유로 판정 동결 — 모니터링 카드도 같은 상태')
+        : T('분석 창에서 계측 이상 관측 — 계측 확인 후 재평가'))
       : '';
-    base.sevHoldAgo = _held ? ('마지막 판정 · ' + E.ago(eq.lastSeen, this.data.now)) : '';
+    base.sevHoldAgo = _held ? (T('마지막 판정 · {0}', tx(E.ago(eq.lastSeen, this.data.now)))) : '';
     // 지금 할 일 · 근거 사실 — 리포트 판정 카드와 같은 함수·같은 줄(계산 중엔 비움)
     base.sevTodo = base.detBusy ? '' : this._todoText(eq, det, dx, _held);
     // 필수 축 누락은 명시(근거보다 강한 '양호' 방지), 보강 축(학습 필요)은 '더해진 것'으로 표기
     var _cov = (_held || !dx.cov) ? ''
-      : dx.cov.n < dx.cov.total ? '판정 기준 ' + dx.cov.n + '/' + dx.cov.total + '(' + dx.cov.missing.join('·') + ' 미적용)'
-        : (dx.cov.extra && dx.cov.extra.length) ? '평소 대비 판정 적용(' + dx.cov.extra.join('·') + ')' : '';
+      : dx.cov.n < dx.cov.total ? T('판정 기준 {0}/{1}({2} 미적용)', dx.cov.n, dx.cov.total, dx.cov.missing.map(tx).join('·'))
+        : (dx.cov.extra && dx.cov.extra.length) ? T('평소 대비 판정 적용({0})', dx.cov.extra.map(tx).join('·')) : '';
     var _ab = this._anchorBrief(this._detailCache[S.selTag], '');
     base.sevFacts = base.detBusy ? [] : [
-      dx.topScore != null ? { k: '근거 점수', v: dx.topScore + '/100', t: _held ? '잠정' : Report.evidLevel(dx.topScore) } : null,
-      _ab ? { k: '판정 기준', v: _ab.at, t: _ab.note } : null,
+      dx.topScore != null ? { k: T('근거 점수'), v: dx.topScore + '/100', t: _held ? T('잠정') : tx(Report.evidLevel(dx.topScore)) } : null,
+      _ab ? { k: T('판정 기준'), v: _ab.at, t: _ab.note } : null,
       _cov ? { k: _cov } : null,
     ].filter(Boolean);
     base.sevMachine = eq.name + ' · Class ' + eq.cls + ' · ' + self._rpmText(eq);
@@ -5530,6 +5515,7 @@ export class App extends Component {
     var _sm = Report.sevModel({ gi: _gi, gradeKo: g.ko, judge: _sj,
       iso: _zi >= 0 ? { idx: _zi, val: this._isoDisp(eq, det) } : null,
       zones: [E.fmt(_isoZ[0]), E.fmt(_isoZ[1]), E.fmt(_isoZ[2])], unit: 'mm/s' });
+    var _smT = txAll(_sm);   // 화면 표시본 — 비교는 원본 _sm
     // 등급색 칠 — 테두리 불투명(바탕과 섞여 탁해짐 방지) · 미측정(-1)·보류는 중립
     var _GS = E.STATUS;
     var _tone = function (t) {
@@ -5537,7 +5523,7 @@ export class App extends Component {
       return c ? 'color: ' + c + '; background: ' + _GS[t].soft + '; border: 1px solid ' + c + ';'
         : 'color: var(--text-secondary); background: var(--bg-input); border: 1px solid var(--border-medium);';
     };
-    base.sevGradeKo = _sm.ko;
+    base.sevGradeKo = _smT.ko;
     base.sevBadgeStyle = _tone(_sm.tone);
     base.sevBadgeIcon = (_held || _sm.tone < 0) ? '' : _sm.tone > 0 ? 'codicon-warning' : 'codicon-pass';
     // 단계 막대 — 네 등급 중 위치(판정 불가는 생략, 보류는 회색)
@@ -5549,36 +5535,36 @@ export class App extends Component {
     base.sevHoldTag = !!_held && _sm.ko !== '판정 보류';
     // 판정식 — 두 축이 등급을 만든 방식 한 줄
     base.sevFormula = base.detBusy ? ''
-      : _sj.patNa ? '결함 패턴 미측정 → ' + _sm.ko
-        : _sj.patOn ? '결함 패턴 있음' + (_zk ? ' + ISO ' + _zk + ' 구간' : '') + ' → ' + _sm.ko
-          : '결함 패턴 없음 → ' + _sm.ko + (_zk && _sj.isoOnly > 0 ? ' · ISO ' + _zk + ' 구간은 등급에 반영 안 함' : '');
+      : _sj.patNa ? T('결함 패턴 미측정 → {0}', _smT.ko)
+        : _sj.patOn ? T('결함 패턴 있음{0} → {1}', _zk ? T(' + ISO {0} 구간', _zk) : '', _smT.ko)
+          : T('결함 패턴 없음 → {0}{1}', _smT.ko, _zk && _sj.isoOnly > 0 ? T(' · ISO {0} 구간은 등급에 반영 안 함', _zk) : '');
     // 사유 문장은 판정식이 못 담는 경우만 — 미측정 사유·패턴 없는 고진동·ISO 미계산
-    base.sevWhy = (base.detBusy || (_sj.patOn && _zi >= 0)) ? null : _sm.why;
+    base.sevWhy = (base.detBusy || (_sj.patOn && _zi >= 0)) ? null : _smT.why;
     base.sevPat = {
-      pills: _sm.pat.pills.map(function (q) {
+      pills: _smT.pat.pills.map(function (q) {
         return { label: (q.on && q.tone >= 0 ? '✓ ' : '') + q.label, style: 'padding: 3px 10px; border-radius: 4px; font-size: 12.5px; '
           + (q.on ? 'font-weight: 700; ' + _tone(q.tone) : 'color: var(--text-muted); border: 1px solid var(--border-medium);') };
       }),
-      fact: base.detBusy ? '스펙트럼 계산이 끝나면 확정' : _sm.pat.fact,
+      fact: base.detBusy ? T('스펙트럼 계산이 끝나면 확정') : _smT.pat.fact,
     };
     var _pos = _sm.iso.pos;
     var _resOn = _sm.iso.res.some(function (r) { return r.on; });
     base.sevIso = {
       title: 'ISO 10816 Class ' + eq.cls,
-      val: _sm.iso.val,
+      val: _smT.iso.val,
       segs: [0, 1, 2, 3].map(function (k) {
         return 'height: 6px; border-radius: 3px; background: ' + (k === _zi ? 'var(--primary-base);' : 'var(--border-medium); opacity: 0.6;');
       }),
       knobStyle: _pos != null ? 'left: ' + _pos.toFixed(1) + '%;' : '',
-      zones: _sm.iso.zones.map(function (z, k) {
+      zones: _smT.iso.zones.map(function (z, k) {
         return { k: z.k, ko: z.ko, range: _zr[k], style: 'padding-right: 6px; font-size: 11.5px; line-height: 1.5; ' + (z.cur ? 'color: var(--text-primary); font-weight: 700;' : 'color: var(--text-muted);') };
       }),
-      resCap: _sm.iso.resCap,
+      resCap: _smT.iso.resCap,
       // 결과 줄에 '현재'가 없을 때만 사유 캡션(결함 패턴 없음·미측정)
-      resNote: _resOn ? '' : _sm.iso.resCap,
-      res: _sm.iso.res.map(function (r) {
+      resNote: _resOn ? '' : _smT.iso.resCap,
+      res: _smT.iso.res.map(function (r) {
         var st = _GS[r.gi];
-        return { label: r.on ? r.ko + ' · 현재' : r.ko,
+        return { label: r.on ? T('{0} · 현재', r.ko) : r.ko,
           style: 'grid-column: span ' + r.span + '; padding: 7px 0 6px; border-radius: 5px; text-align: center; font-size: 12px; color: ' + st.color + '; '
             + (r.on ? 'font-weight: 800; background: ' + st.soft + '; border: 1px solid ' + st.color + ';' : 'font-weight: 600; border: 1px solid var(--border-default);') };
       }),
@@ -5592,55 +5578,53 @@ export class App extends Component {
     // 카드 배지(잠정·충격성 강함·계측 아티팩트 의심·×2 초과)가 있으면 그것, 없으면 기준 대비
     var _stOf = function (c, within) {
       if (c && c.badgeKo) return { st: c.badgeKo, c: (c.note || /초과/.test(c.badgeKo)) ? _OVER : _MUTE };
-      return within ? { st: '이내', c: _OK } : { st: '초과', c: _OVER };
+      return within ? { st: T('이내'), c: _OK } : { st: T('초과'), c: _OVER };
     };
     var _row = function (k, v, thr, s, note, t) {
       return { k: k, v: v, thr: thr || '–', st: s.st, stColor: s.c, vColor: s.c === _OVER ? _OVER : '', note: note || '', t: t || note || '' };
     };
     var _isoNat = !!(eq.unit && eq.unit !== 'mm/s');
     var _isoFull = _zi >= 0
-      ? this._isoDisp(eq, det) + ' · Class ' + eq.cls + ' ' + _zk + ' 구간' + (det.isoBlocks > 1 ? ' (' + det.isoBlocks + '블록 평균)' : '')
-        + (_isoNat ? ' — 10~1000 Hz 원본 단위 RMS, 존 판정은 속도 환산' : '')
-      : '계산 전 — 원시 파형 조회 후 확정';
-    var _isoRow = _row('ISO 판정값', _zi >= 0 ? this._isoDisp(eq, det) : '계산 전',
+      ? T('{0} · Class {1} {2} 구간{3}{4}', this._isoDisp(eq, det), eq.cls, _zk, det.isoBlocks > 1 ? T(' ({0}블록 평균)', det.isoBlocks) : '', _isoNat ? T(' — 10~1000 Hz 원본 단위 RMS, 존 판정은 속도 환산') : '')
+      : T('계산 전 — 원시 파형 조회 후 확정');
+    var _isoRow = _row(T('ISO 판정값'), _zi >= 0 ? this._isoDisp(eq, det) : T('계산 전'),
       _zi >= 0 ? _zr[_zi] + (_isoNat ? ' mm/s' : '') : '',
       { st: _zk || '—', c: (_zi >= 0 && !_held) ? _GS[_zi].color : _MUTE },
-      _zi >= 0 ? '등급 근거 · 10–1000 Hz ' + (_isoNat ? 'RMS · 존은 속도 환산' : '속도 RMS')
-        + (det.isoBlocks > 1 ? ' · ' + det.isoBlocks + '블록 평균' : '') + (det.anaSec ? ' · ' + det.anaSec.toFixed(1) + ' s' : '')
-        : '원시 파형 조회 후 확정', _isoFull);
+      _zi >= 0 ? T('등급 근거 · 10–1000 Hz {0}{1}{2}', _isoNat ? T('RMS · 존은 속도 환산') : T('속도 RMS'), det.isoBlocks > 1 ? T(' · {0}블록 평균', det.isoBlocks) : '', det.anaSec ? ' · ' + det.anaSec.toFixed(1) + ' s' : '')
+        : T('원시 파형 조회 후 확정'), _isoFull);
     _isoRow.strong = true;
     _isoRow.vColor = '';
     var _cm = _m.crest;
     var _crestRow = _row('Crest Factor P95', _cm.value.toFixed(2), '< ' + _n.cThr.toFixed(2),
-      (!_cards[2].badgeKo && !_cm.impOk) ? { st: '판단 안 함', c: _MUTE } : _stOf(_cards[2], _cm.value <= _n.cThr),
+      (!_cards[2].badgeKo && !_cm.impOk) ? { st: T('판단 안 함'), c: _MUTE } : _stOf(_cards[2], _cm.value <= _n.cThr),
       _br.crest, _cards[2].foot2);
-    var _p95Row = _row('광대역 RMS P95', E.fmt(_m.p95.value) + ' ' + _u, '< ' + E.fmt(_zBC),
+    var _p95Row = _row(T('광대역 RMS P95'), E.fmt(_m.p95.value) + ' ' + _u, '< ' + E.fmt(_zBC),
       _stOf(_cards[1], _m.p95.value <= _zBC),
       _br.p95, _cards[0].foot2 + ' / ' + _cards[1].foot2);
     var _ax = dx.bandAx, _axR = _ax ? Math.max(_ax.freqR || 0, _ax.envR || 0) : 0;
-    var _bandRow = _axR > 0 ? _row('평소 대비 대역', '×' + _axR.toFixed(2), '< ×1.00', _stOf(null, _axR <= 1),
-      this._bandAxText(dx).join(' · '), '학습한 정상 대역 에너지 한계 대비 배수') : null;
+    var _bandRow = _axR > 0 ? _row(T('평소 대비 대역'), '×' + _axR.toFixed(2), '< ×1.00', _stOf(null, _axR <= 1),
+      this._bandAxText(dx).join(' · '), T('학습한 정상 대역 에너지 한계 대비 배수')) : null;
     var _tm = _m.trend;
-    var _trendRow = _row('변화율', '×' + _n.wTrend.toFixed(2), _tm.cmp ? '< ×2.00' : '',
-      !_tm.winOk ? { st: '비교 안 함', c: _MUTE } : !_tm.cmp ? { st: '비교 불가', c: _MUTE } : _stOf(_cards[3], !_tm.over),
-      _br.trend, '최근 1/4 구간 평균 ÷ 직전 1/4 구간 평균 · ' + _cards[3].thrText);
+    var _trendRow = _row(T('변화율'), '×' + _n.wTrend.toFixed(2), _tm.cmp ? '< ×2.00' : '',
+      !_tm.winOk ? { st: T('비교 안 함'), c: _MUTE } : !_tm.cmp ? { st: T('비교 불가'), c: _MUTE } : _stOf(_cards[3], !_tm.over),
+      _br.trend, T('최근 1/4 구간 평균 ÷ 직전 1/4 구간 평균 · {0}', _cards[3].thrText));
     var _dwo = this._dwellOf(det, _roll), _dw = _dwo.dw;
     var _dwRow = _dw
-      ? _row('지속 최악 RMS', E.fmt(_dw.v) + ' ' + _u, '< ' + E.fmt(_zBC),
-        _held ? { st: '잠정', c: _MUTE } : _stOf(null, _dw.v <= _zBC),
-        this._durText(_dw.durMs / 60000) + ' 지속 · 끝 ' + E.fmtDT(_dw.ms).slice(5) + (_dwo.worse ? ' · 판정 기준 시각보다 나쁨 — 기간을 좁혀 확인' : ''),
-        '연속 ' + VC.DWELL_MIN_N + '개 이상 · ' + Math.round(SENSOR_HOLD_MS / 60000) + '분 이상 유지된 수준 중 최대(광대역)')
-      : _row('지속 최악 RMS', '–', '', { st: '—', c: _MUTE }, '표본 부족(연속 ' + VC.DWELL_MIN_N + '개 이상 필요)');
-    var _winRow = _row('관측 창', this._durText(_n.durMin), '', { st: '—', c: _MUTE },
-      this._num(_n.buckets) + ' 버킷 · ' + _stepTxt + ' 롤업 · 이 창을 넘는 추세는 판단 불가');
+      ? _row(T('지속 최악 RMS'), E.fmt(_dw.v) + ' ' + _u, '< ' + E.fmt(_zBC),
+        _held ? { st: T('잠정'), c: _MUTE } : _stOf(null, _dw.v <= _zBC),
+        T('{0} 지속 · 끝 {1}{2}', this._durText(_dw.durMs / 60000), E.fmtDT(_dw.ms).slice(5), _dwo.worse ? T(' · 판정 기준 시각보다 나쁨 — 기간을 좁혀 확인') : ''),
+        T('연속 {0}개 이상 · {1}분 이상 유지된 수준 중 최대(광대역)', VC.DWELL_MIN_N, Math.round(SENSOR_HOLD_MS / 60000)))
+      : _row(T('지속 최악 RMS'), '–', '', { st: '—', c: _MUTE }, T('표본 부족(연속 {0}개 이상 필요)', VC.DWELL_MIN_N));
+    var _winRow = _row(T('관측 창'), this._durText(_n.durMin), '', { st: '—', c: _MUTE },
+      T('{0} 버킷 · {1} 롤업 · 이 창을 넘는 추세는 판단 불가', this._num(_n.buckets), _stepTxt));
     base.statRows = [_isoRow, _crestRow, _p95Row, _bandRow, _trendRow, _dwRow, _winRow].filter(Boolean);
-    base.fftMarkers = det.fft.markers.filter(function (m) { return m.kind !== 'h'; }).map(function (m) { return { label: m.label, freq: m.freq.toFixed(1) + ' Hz', color: m.kind === 'f' ? '#e5646a' : (m.kind === 'x' ? 'var(--text-tertiary)' : 'var(--text-muted)') }; });
+    base.fftMarkers = det.fft.markers.filter(function (m) { return m.kind !== 'h'; }).map(function (m) { return { label: tx(m.label), freq: m.freq.toFixed(1) + ' Hz', color: m.kind === 'f' ? '#e5646a' : (m.kind === 'x' ? 'var(--text-tertiary)' : 'var(--text-muted)') }; });
     // FFT·스펙트로그램 주파수 범위 토글 (연동) — 전대역으로 펼칠 여지가 있을 때만 노출
     base.fftRangeShow = det.fft.nyqHz > det.fft.dispHz * 1.05;
     var _rlabel = function (hz) { return hz >= 1000 ? (Math.round(hz / 100) / 10) + 'kHz' : Math.round(hz) + 'Hz'; };
     base.fftRangeChips = [
-      { v: false, l: '기본 0–' + _rlabel(det.fft.dispHz || 1000) },
-      { v: true, l: '전대역 0–' + _rlabel(det.fft.nyqHz || 0) },
+      { v: false, l: T('기본 0–{0}', _rlabel(det.fft.dispHz || 1000)) },
+      { v: true, l: T('전대역 0–{0}', _rlabel(det.fft.nyqHz || 0)) },
     ].map(function (o, i) {
       var a = !!S.fftFull === o.v;
       return {
@@ -5656,39 +5640,40 @@ export class App extends Component {
       var _khz = function (h) { return h >= 1000 ? (h / 1000).toFixed(1) + 'kHz' : Math.round(h) + 'Hz'; };
       var _kb = det.kurtogram.best;
       // 표시 전용(복조 대역 미사용) — 첨도 최대화가 베어링 무관 대역(안티에일리어싱 잡음·인버터 스위칭)에 붙잡힘
-      base.kurtogramHint = '가장 충격성이 강한 대역 ' + _khz(_kb.loHz) + '–' + _khz(_kb.hiHz) + ' · SK ' + _kb.sk.toFixed(1)
-        + ' · 이 대역은 복조에 쓰지 않습니다 — 첨도 최대화가 고주파 잡음 대역으로 끌려 검출이 57%→6%로 떨어집니다';
+      base.kurtogramHint = T('가장 충격성이 강한 대역 {0}–{1} · SK {2} · 이 대역은 복조에 쓰지 않습니다 — 첨도 최대화가 고주파 잡음 대역으로 끌려 검출이 57%→6%로 떨어집니다', _khz(_kb.loHz), _khz(_kb.hiHz), _kb.sk.toFixed(1));
     } else base.kurtogramHint = '';
     // 표시 물리량 토글 — 가속도(g)/속도(mm/s)/변위(μm). 센서 원단위가 기본, 나머지는 적분/미분 변환.
     var _natU = det.natUnit || (this._activeEq(S.selTag) || {}).unit || 'mm/s';
-    base.unitChips = [{ u: 'g', l: '가속도' }, { u: 'mm/s', l: '속도' }, { u: 'μm', l: '변위' }].map(function (o) {
+    base.unitChips = [{ u: 'g', l: T('가속도') }, { u: 'mm/s', l: T('속도') }, { u: 'μm', l: T('변위') }].map(function (o) {
       var active = (S.viewUnit || _natU) === o.u;
       return {
-        label: o.l + (o.u === _natU ? '(원본)' : '') + ' ' + o.u,
-        title: o.u === _natU ? '센서가 직접 측정한 원본' : (o.u + '로 변환 — ' + (o.u === 'g' ? '고주파(베어링) 강조' : o.u === 'μm' ? '저주파(불균형) 강조' : '중간 대역')),
+        label: o.l + (o.u === _natU ? T('(원본)') : '') + ' ' + o.u,
+        title: o.u === _natU ? T('센서가 직접 측정한 원본') : (T('{0}로 변환 — {1}', o.u, o.u === 'g' ? T('고주파(베어링) 강조') : o.u === 'μm' ? T('저주파(불균형) 강조') : T('중간 대역'))),
         onClick: function () { self.setState({ viewUnit: o.u === _natU ? null : o.u }); },
         style: 'height: 34px; padding: 0 11px; border: none; font-size: 12px; font-weight: 600; cursor: pointer; white-space: nowrap; background: ' + (active ? 'var(--primary-base)' : 'transparent') + '; color: ' + (active ? '#fff' : 'var(--text-tertiary)') + ';',
       };
     });
     // 차트 헤더에 붙일 현재 물리량 태그 — 변환 중이면 눈에 띄게 표시
     var _du = det.dispUnit || _natU;
-    base.dispUnitTag = _du === _natU ? _du : (_du + ' · 변환');
+    base.dispUnitTag = _du === _natU ? _du : (T('{0} · 변환', _du));
     base.dispUnitConverted = _du !== _natU;
     // 신호 품질 배너 — 센서 이상(플랫라인·클리핑·드리프트) 감지 시 최상단 경고. 정상이면 숨김.
     var _q = det.quality || { ok: true, issues: [] };
     var _qReal = _q.issues.filter(function (x) { return !x.info; }), _qInfo = _q.issues.filter(function (x) { return x.info; });
     base.qualityShow = !_q.ok && _qReal.length > 0;
     base.qualitySevere = !!_q.severe;
-    base.qualityText = _qReal.map(function (x) { return x.label + ': ' + x.detail; }).join(' · ');
+    base.qualityText = _qReal.map(function (x) { return tx(x.label) + ': ' + tx(x.detail); }).join(' · ');
     // 참고 사유(일정한 DC 등) — 경고 아님, 한 줄 안내
-    base.qualityNote = _qInfo.map(function (x) { return x.label + ': ' + x.detail; }).join(' · ');
-    base.envHint = det.envelope.hint; base.envFault = det.envelope.fault;
-    base.envMarkers = det.envelope.markers.map(function (m) { return { label: m.label, freq: m.freq.toFixed(1) + ' Hz', color: m.kind === 'f' ? '#e5646a' : 'var(--text-muted)' }; });
-    base.cepNote = det.cepstrum.note;
-    base.dxVerdict = Report.sevTitle(_gi, _sj, _held, dx.verdict); base.dxSub = dx.sub; base.dxGradeKo = dx.gradeKo; base.dxColor = dx.color; base.dxSoft = dx.soft;
+    base.qualityNote = _qInfo.map(function (x) { return tx(x.label) + ': ' + tx(x.detail); }).join(' · ');
+    // 포락선 설명 = 진단 문구 + ' · 복조 대역 …'(live.js에서 이어 붙임) — 통째론 사전에 없어 이음매에서 나눠 번역
+    var _eh = det.envelope.hint || '', _ei = _eh.indexOf(' · 복조 대역');
+    base.envHint = _ei > 0 ? tx(_eh.slice(0, _ei)) + tx(_eh.slice(_ei)) : tx(_eh); base.envFault = det.envelope.fault;
+    base.envMarkers = det.envelope.markers.map(function (m) { return { label: tx(m.label), freq: m.freq.toFixed(1) + ' Hz', color: m.kind === 'f' ? '#e5646a' : 'var(--text-muted)' }; });
+    base.cepNote = tx(det.cepstrum.note);
+    base.dxVerdict = tx(Report.sevTitle(_gi, _sj, _held, dx.verdict)); base.dxSub = tx(dx.sub); base.dxGradeKo = tx(dx.gradeKo); base.dxColor = dx.color; base.dxSoft = dx.soft;
     // 계산 전 판정은 빈 스펙트럼 기반 → 결론 대신 진행 중 표시
-    if (base.detBusy) { base.dxVerdict = '분석 중…'; base.dxSub = '스펙트럼·계측 검증 계산이 끝나면 판정 확정'; }
-    base.dxEvidence = dx.evidence; base.dxActions = dx.actions;
+    if (base.detBusy) { base.dxVerdict = T('분석 중…'); base.dxSub = T('스펙트럼·계측 검증 계산이 끝나면 판정 확정'); }
+    base.dxEvidence = txAll(dx.evidence); base.dxActions = txAll(dx.actions);
     base.dxAiIdle = !S.dxAiText || S.dxAiText === '__fallback__'; base.dxAiLoading = S.dxAiText === '__loading__'; base.dxAiFallback = S.dxAiText === '__fallback__';
     var llmOk = !!LLM.createLLM(this._llmCfg());
     base.dxLlmModel = llmOk ? this._llmLabel() : '';
@@ -5700,8 +5685,8 @@ export class App extends Component {
     base.dxAiText = (S.dxAiText && S.dxAiText !== '__loading__' && S.dxAiText !== '__fallback__') ? S.dxAiText : '';
     base.dxAiSections = this._parseOpinion(base.dxAiText); // 소제목 있는 상세 리포트형 렌더용
     base.onDxExplain = function () { self._dxExplain(eq); };
-    base.specIndics = det.indics.map(function (d) { return { k: d.k, v: d.v, hint: d.hint || '', desc: d.desc || '' }; });
-    base.detBearing = eq.bearing.n ? ('베어링 ' + this._bearingLabel(eq) + ' · N=' + eq.bearing.n) : '슬리브 베어링';
+    base.specIndics = det.indics.map(function (d) { return { k: tx(d.k), v: d.v, hint: tx(d.hint || ''), desc: tx(d.desc || '') }; });
+    base.detBearing = eq.bearing.n ? (T('베어링 {0} · N={1}', this._bearingLabel(eq), eq.bearing.n)) : T('슬리브 베어링');
     base.ref_wave = this.ref_wave; base.reftip_wave = this.reftip_wave; base.refcross_wave = this._refWaveCross;
     base.ref_rms = this.ref_rms; base.reftip_rms = this.reftip_rms;
     base.ref_p2p = this.ref_p2p; base.reftip_p2p = this.reftip_p2p;
@@ -5721,7 +5706,7 @@ export class App extends Component {
     base.evtTypeFilter = S.evtType;
     base.onEvtType = function (ev) { self.setState({ evtType: ev.target.value }); setTimeout(function () { self._loadEventsLive(); }, 0); };
     // 이벤트 기간 스코프 칩 — 오늘 / 7일 / 전체 (전체 이력은 내보내기로)
-    base.evtScopeChips = [{ v: 'today', l: '오늘' }, { v: '7d', l: '7일' }, { v: 'all', l: '전체' }].map(function (o) {
+    base.evtScopeChips = [{ v: 'today', l: T('오늘') }, { v: '7d', l: T('7일') }, { v: 'all', l: T('전체') }].map(function (o) {
       var a = S.evtScope === o.v;
       return {
         label: o.l,
@@ -5730,33 +5715,33 @@ export class App extends Component {
       };
     });
     base.evtCapped = !!this._evtCapped; // 최근 200건 초과 — 목록은 잘림, 전체는 내보내기
-    base.evtEmptyText = S.evtScope === 'today' ? '오늘은 조용합니다 — 발생한 알람이 없습니다'
-      : S.evtScope === '7d' ? '최근 7일간 발생한 알람이 없습니다' : '기록된 알람이 없습니다';
+    base.evtEmptyText = S.evtScope === 'today' ? T('오늘은 조용합니다 — 발생한 알람이 없습니다')
+      : S.evtScope === '7d' ? T('최근 7일간 발생한 알람이 없습니다') : T('기록된 알람이 없습니다');
     // 이벤트 내보내기(저장) 모달
     base.onOpenDownload = function () { self._openDownload(); };
     base.dlOpen = S.dlOpen; base.dlFmt = S.dlFmt;
     // 이벤트는 날짜 단위 내보내기 — 종료일은 그날 23:59:59.999까지 포함(_exportEvents)
     base.csvRange = {
       from: S.csvFrom, to: S.csvTo, mode: 'date', full: true,
-      title: '내보낼 기간을 고릅니다',
+      title: T('내보낼 기간을 고릅니다'),
       onApply: function (f, t) { self.setState({ csvFrom: f, csvTo: t }); },
     };
     base.onDlFmt = function (ev) { self.setState({ dlFmt: ev.target.value }); };
     base.onCloseDownload = function () { self.setState({ dlOpen: false }); };
     base.onDoDownload = function () { self._exportEvents(); };
     base.stopClick = function (ev) { if (ev && ev.stopPropagation) ev.stopPropagation(); };
-    base.evtTagOptions = [{ id: 'all', label: '전체 태그' }].concat(eqs.map(function (e) { return { id: e.id, label: self._tagLabel(e) }; }));
+    base.evtTagOptions = [{ id: 'all', label: T('전체 태그') }].concat(eqs.map(function (e) { return { id: e.id, label: self._tagLabel(e) }; }));
     // 실제 발생 유형만 필터 목록에(옛 유형 라벨은 TYPEKO에 유지 — 기존 이력 렌더용)
-    base.evtTypeOptions = [{ id: 'all', label: '전체 유형' }].concat(
-      EVT_LIVE_TYPES.map(function (k) { return { id: k, label: TYPEKO[k] }; }));
+    base.evtTypeOptions = [{ id: 'all', label: T('전체 유형') }].concat(
+      EVT_LIVE_TYPES.map(function (k) { return { id: k, label: tx(TYPEKO[k]) }; }));
     base.evtEmpty = fEvs.length === 0;
     base.evtCount = this._evtTotal != null ? this._evtTotal : fEvs.length; // 스코프·필터 내 실제 총 건수(목록은 200캡)
     function _scroller(el) { var p = el ? el.parentElement : null; while (p) { if (p.scrollHeight > p.clientHeight + 4) { var ov = getComputedStyle(p).overflowY; if (ov === 'auto' || ov === 'scroll' || p.tagName === 'MAIN') return p; } p = p.parentElement; } return document.scrollingElement || document.documentElement; }
     function _jump(id) { return function () { var el = document.getElementById(id); if (!el) return; var c = _scroller(el); c.scrollTo({ top: c.scrollTop + el.getBoundingClientRect().top - c.getBoundingClientRect().top - 66, behavior: 'smooth' }); }; }
     base.dxOpen = !!S.dxOpen;
     var _snap = this._detailCache[S.selTag];
-    base.dxStamp = this.live ? (E.fmtDT((_snap && _snap.anchor) || (_snap && _snap.snapNow) || this.data.now) + ' 시점 스냅샷 · 새로고침 시 갱신') : (E.fmtDT(this.data.now).slice(0, 10) + ' 측정 스냅샷 (0.4 s 캡처) 기준 자동 판정');
-    base.dxToggleLabel = S.dxOpen ? '종합 분석 접기' : '종합 분석 펼치기';
+    base.dxStamp = this.live ? (T('{0} 시점 스냅샷 · 새로고침 시 갱신', E.fmtDT((_snap && _snap.anchor) || (_snap && _snap.snapNow) || this.data.now))) : (T('{0} 측정 스냅샷 (0.4 s 캡처) 기준 자동 판정', E.fmtDT(this.data.now).slice(0, 10)));
+    base.dxToggleLabel = S.dxOpen ? T('종합 분석 접기') : T('종합 분석 펼치기');
     base.onToggleDx = function () { self.setState({ dxOpen: !self.state.dxOpen }); };
     base.evtRows = fEvs.map(function (e) {
       var g = E.STATUS[e.grade];
@@ -5773,30 +5758,28 @@ export class App extends Component {
       if (isBand) {
         valText = '×' + (e.value || 0).toFixed(2);
         noteText = (e.bands && e.bands.length)
-          ? e.bands.length + '개 대역(' + e.bands.map(function (b) { return b.ko; }).join('·') + ')' + (_bSoft ? ' · 잠정' : '')
-          : '전 대역 정상';
+          ? T('{0}개 대역({1}){2}', e.bands.length, e.bands.map(function (b) { return tx(b.ko); }).join('·'), _bSoft ? T(' · 잠정') : '')
+          : T('전 대역 정상');
       } else if (e.type === 'signal_lost') {
-        valText = e.detail || '무수신';   // DETAIL 빈 옛 이벤트는 '무수신'만
+        valText = tx(e.detail) || T('무수신');   // DETAIL 빈 옛 이벤트는 '무수신'만
         noteText = '';
       } else if (isSens) {
         // DETAIL = '사유 — 설명' → 칸엔 사유만, 설명은 호버
-        valText = (e.detail || e.typeKo).split(' — ')[0];
+        valText = tx((e.detail || e.typeKo).split(' — ')[0]);
         noteText = '';
       } else if (natRow(e.type, e.unit)) {
         // 원본 단위 행 — 속도 ISO로 등급을 매겨 원본 단위 기준 숫자 없음, 근거 문구 표기
         valText = E.fmt(e.value) + ' ' + e.unit;
-        noteText = Notify.basisText(e.detail) || '속도 ISO 기준 판정';
+        noteText = tx(Notify.basisText(e.detail)) || T('속도 ISO 기준 판정');
       } else {
         valText = E.fmt(e.value) + ' ' + e.unit;
-        noteText = '기준 ' + E.fmt(e.base);
+        noteText = T('기준 {0}', E.fmt(e.base));
       }
-      return { id: e.id, timeText: E.fmtDT(e.ms), agoText: E.ago(e.ms, _wallNow), tagAlias: e.tagAlias, tagName: e.tagName, typeKo: e.typeKo, valText: valText, noteText: noteText, gradeKo: g.ko, gradeColor: g.color, gradeSoft: g.soft,
-        valTip: isSens ? (e.detail && e.detail.indexOf(' — ') >= 0 ? e.detail : '')
+      return { id: e.id, timeText: E.fmtDT(e.ms), agoText: tx(E.ago(e.ms, _wallNow)), tagAlias: e.tagAlias, tagName: e.tagName, typeKo: tx(e.typeKo), valText: valText, noteText: noteText, gradeKo: tx(g.ko), gradeColor: g.color, gradeSoft: g.soft,
+        valTip: isSens ? (e.detail && e.detail.indexOf(' — ') >= 0 ? tx(e.detail) : '')
           : (isBand && e.bands && e.bands.length)
-          ? e.bands.map(function (b) { return b.ko + (b.soft ? '(잠정)' : '') + '  ' + b.v.toFixed(3) + ' → 한계 ' + b.lim.toFixed(3) + '  (×' + b.r.toFixed(2) + ')'; }).join('\n')
-            + '\n\n대역 이탈은 학습된 한계(μ+kσ) 대비 비율로 판정합니다 — ×1이 한계이지 평소가 아닙니다(ISO 존과 무관). 함께 오른 대역 조합이 결함 종류를 가리킵니다.'
-            + (e.bands.some(function (b) { return b.soft; })
-              ? '\n\n(잠정) 표시는 가속도계 마운팅의 유효 주파수 상한을 넘는 대역입니다. 값이 오른 것은 사실이지만 설비 진동인지 센서 부착부 공진인지 구분할 수 없어, 그 대역만 이탈했으면 등급을 주의로 묶습니다. 정비 전 센서 부착 상태를 먼저 확인하세요.'
+          ? T('{0}\n\n대역 이탈은 학습된 한계(μ+kσ) 대비 비율로 판정합니다 — ×1이 한계이지 평소가 아닙니다(ISO 존과 무관). 함께 오른 대역 조합이 결함 종류를 가리킵니다.{1}', e.bands.map(function (b) { return T('{0}  {1} → 한계 {2}  (×{3})', tx(b.ko) + (b.soft ? T('(잠정)') : ''), b.v.toFixed(3), b.lim.toFixed(3), b.r.toFixed(2)); }).join('\n'), e.bands.some(function (b) { return b.soft; })
+              ? T('\n\n(잠정) 표시는 가속도계 마운팅의 유효 주파수 상한을 넘는 대역입니다. 값이 오른 것은 사실이지만 설비 진동인지 센서 부착부 공진인지 구분할 수 없어, 그 대역만 이탈했으면 등급을 주의로 묶습니다. 정비 전 센서 부착 상태를 먼저 확인하세요.')
               : '')
           : '',
         onGo: function () { self._gotoDetail(e.tagId, e.ms); } };
@@ -5805,7 +5788,7 @@ export class App extends Component {
 
     base.reportTags = eqs.map(function (e) { var ck = S.genTags.indexOf(e.id) >= 0; return { id: e.id, alias: e.alias || e.name, nameSub: (e.alias && e.alias !== e.name) ? '(' + e.name + ')' : '', checked: ck, onToggle: function () { self._toggleGenTag(e.id); }, rowStyle: 'display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 6px; cursor: pointer; background: ' + (ck ? 'rgba(0,108,210,.08)' : 'transparent') + ';', boxStyle: 'width: 16px; height: 16px; border-radius: 4px; flex-shrink: 0; display: flex; align-items: center; justify-content: center; border: 1px solid ' + (ck ? 'var(--primary-base)' : 'var(--border-medium)') + '; background: ' + (ck ? 'var(--primary-base)' : 'transparent') + '; color: #fff;' }; });
     base.genTagsCount = S.genTags.length;
-    base.genSelAllLabel = S.genTags.length === eqs.length ? '전체 해제' : '전체 선택';
+    base.genSelAllLabel = S.genTags.length === eqs.length ? T('전체 해제') : T('전체 선택');
     base.onGenSelectAll = function () { self._setGenTags(S.genTags.length === eqs.length ? [] : eqs.map(function (e) { return e.id; })); };
     // 리포트 기간 — 앵커는 대상 태그, 없으면 기간 UI 숨김
     var _genEqs = S.genTags.map(function (id) { return self._eq(id); }).filter(Boolean);
@@ -5813,11 +5796,11 @@ export class App extends Component {
     base.genPeriodNone = !_genEqs.length;
     base.genPeriodShow = !!_genEqs.length;
     base.genPeriodCustomShow = !!_genEqs.length && _genCustom;
-    base.genPeriodPresets = this._presetChips(_genEqs, '대상 태그', 'report');
+    base.genPeriodPresets = this._presetChips(_genEqs, T('대상 태그'), 'report');
     // 프리셋은 태그별 최신 데이터 기준 창(_rollForAsync)이라 상대 표현 사용
-    base.genPeriodSummary = S.genPeriod === 'all' ? '각 태그의 데이터 전체 구간'
-      : PERIOD_H[S.genPeriod] ? '각 태그의 최신 데이터 기준 · 최근 ' + ({ '1h': '1시간', '6h': '6시간', '24h': '24시간' }[S.genPeriod] || S.genPeriod)
-        : '기간을 선택하세요';
+    base.genPeriodSummary = S.genPeriod === 'all' ? T('각 태그의 데이터 전체 구간')
+      : PERIOD_H[S.genPeriod] ? T('각 태그의 최신 데이터 기준 · 최근 {0}', { '1h': T('1시간'), '6h': T('6시간'), '24h': T('24시간') }[S.genPeriod] || S.genPeriod)
+        : T('기간을 선택하세요');
     var gFrom = S.genFrom, gTo = S.genTo;
     var _gfD = CH.parseDT(gFrom), _gtD = CH.parseDT(gTo);
     // 데이터 없는 구간 리포트 차단(빈 문서도 기록물로 남음) — 직접 입력만 검사(프리셋은 태그별 최신 데이터 앵커라 비지 않음)
@@ -5831,25 +5814,22 @@ export class App extends Component {
     base.genNoDataShow = _genGaps.length > 0;
     if (base.genNoDataShow) {
       var _g0 = _genGaps[0], _gs = _g0.stat;
-      base.genNoDataText = (base.genNoDataAll ? '선택한 기간에 데이터가 없습니다' : _genGaps.length + '개 태그는 이 기간에 데이터가 없어 제외됩니다')
-        + ' — ' + _genGaps.map(function (e) { return e.alias || e.name; }).join(', ')
-        + '. ' + (_g0.alias || _g0.name) + ' 데이터는 ' + E.fmtDT(_gs.minMs) + ' ~ ' + E.fmtDT(_gs.maxMs) + ' 구간에 있습니다.'
-        + (base.genNoDataAll ? " '전체' 프리셋을 고르면 각 태그의 데이터 구간에 맞춰집니다." : '');
+      base.genNoDataText = T('{0} — {1}. {2} 데이터는 {3} ~ {4} 구간에 있습니다.{5}', base.genNoDataAll ? T('선택한 기간에 데이터가 없습니다') : T('{0}개 태그는 이 기간에 데이터가 없어 제외됩니다', _genGaps.length), _genGaps.map(function (e) { return e.alias || e.name; }).join(', '), _g0.alias || _g0.name, E.fmtDT(_gs.minMs), E.fmtDT(_gs.maxMs), base.genNoDataAll ? T(" '전체' 프리셋을 고르면 각 태그의 데이터 구간에 맞춰집니다.") : '');
     }
     this._genGapIds = _genGaps.map(function (e) { return e.id; });
     // 프리셋일 땐 버튼에 절대 시각 미표기 — 태그별 앵커라 한 구간으로 적으면 부정확
     var _gSpan = this._presetSpan(_genEqs);
     base.genRange = {
       from: gFrom, to: gTo, active: _genCustom, full: true, showTime: false,
-      label: _genCustom ? '' : '달력으로 직접 고르기',
+      label: _genCustom ? '' : T('달력으로 직접 고르기'),
       minMs: _gSpan.minMs || 0, maxMs: _gSpan.toMs || 0,
-      title: '달력에서 리포트 기간을 직접 고릅니다',
+      title: T('달력에서 리포트 기간을 직접 고릅니다'),
       onApply: function (f, t) {
         self.setState({ genPeriod: 'custom', genFrom: f, genTo: t });
-        self._toast('리포트 기간 적용됨 · ' + _dtTxt(f) + ' ~ ' + _dtTxt(t));
+        self._toast(T('리포트 기간 적용됨 · {0} ~ {1}', _dtTxt(f), _dtTxt(t)));
       },
     };
-    base.genPeriodNote = _genCustom ? '선택한 태그 전부에 이 구간이 그대로 적용됩니다' : base.genPeriodSummary;
+    base.genPeriodNote = _genCustom ? T('선택한 태그 전부에 이 구간이 그대로 적용됩니다') : base.genPeriodSummary;
     // LLM 기능 게이트 = 설정 존재(ollama 또는 API 키) — 연결 테스트 결과는 세션 한정이라 게이트 아님
     var llmReady = !!LLM.createLLM(this._llmCfg());
     base.genLLM = S.genLLM; base.genLLMConfigured = llmReady;
@@ -5857,18 +5837,18 @@ export class App extends Component {
     base.genKnobStyle = SWITCH_KNOB(S.genLLM && llmReady);
     // 리포트 탭 토글은 즉시 저장 — _persistView 사용(_persistCfg는 타이머 전부 재굽기·토스트 동반)
     base.onToggleGenLLM = function () {
-      if (!llmReady) { self._toast('LLM 미설정 · ⚙ 설정에서 구성하세요', 'warn'); return; }
+      if (!llmReady) { self._toast(T('LLM 미설정 · ⚙ 설정에서 구성하세요'), 'warn'); return; }
       var on = !S.genLLM;
       self.setState({ genLLM: on });
       self._persistView(['genLLM'], { genLLM: on }); // setState 직후라 값 직접 전달
     };
-    base.genLLMNotice = llmReady ? '' : 'LLM 미설정 — ⚙ 설정 → LLM 연동 구성 시 활성화';
+    base.genLLMNotice = llmReady ? '' : T('LLM 미설정 — ⚙ 설정 → LLM 연동 구성 시 활성화');
     base.genRunning = S.genRunning;
-    base.genSteps = ['데이터 조회', '지표 계산', '소견 생성', '저장'].map(function (l, i) { var st = i < S.genStep ? 'done' : (i === S.genStep ? 'active' : 'pending'); return { label: l, num: st === 'done' ? '✓' : (i + 1), dotStyle: 'width: 22px; height: 22px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 700; flex-shrink: 0; ' + (st === 'done' ? 'background: #2e7d5b; color: #fff;' : st === 'active' ? 'background: var(--primary-base); color: #fff;' : 'background: var(--bg-elevated); color: var(--text-muted); border: 1px solid var(--border-default);'), labelStyle: 'font-size: 13px; color: ' + (st === 'pending' ? 'var(--text-muted)' : 'var(--text-primary)') + '; font-weight: ' + (st === 'active' ? '600' : '500') + ';' }; });
+    base.genSteps = [T('데이터 조회'), T('지표 계산'), T('소견 생성'), T('저장')].map(function (l, i) { var st = i < S.genStep ? 'done' : (i === S.genStep ? 'active' : 'pending'); return { label: l, num: st === 'done' ? '✓' : (i + 1), dotStyle: 'width: 22px; height: 22px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 700; flex-shrink: 0; ' + (st === 'done' ? 'background: #2e7d5b; color: #fff;' : st === 'active' ? 'background: var(--primary-base); color: #fff;' : 'background: var(--bg-elevated); color: var(--text-muted); border: 1px solid var(--border-default);'), labelStyle: 'font-size: 13px; color: ' + (st === 'pending' ? 'var(--text-muted)' : 'var(--text-primary)') + '; font-weight: ' + (st === 'active' ? '600' : '500') + ';' }; });
     base.onGenReport = function () { self._genReport(); };
-    base.genBtnLabel = S.genRunning ? '생성 중…' : '리포트 생성';
+    base.genBtnLabel = S.genRunning ? T('생성 중…') : T('리포트 생성');
     // 생성 중단 — 단계 목록 아래, 즉시 종료라 대기 라벨 없음
-    base.genCancelLabel = '생성 중단';
+    base.genCancelLabel = T('생성 중단');
     base.genCancelStyle = 'width: 100%; height: 34px; margin-top: 14px; border-radius: 6px; border: 1px solid var(--border-medium); background: transparent; color: var(--text-secondary); font-size: 12px; font-weight: 600; cursor: pointer;';
     base.onCancelGen = function () { self._cancelGen(); };
     var _genOff = S.genTags.length === 0 || S.genRunning || base.genNoDataAll;
@@ -5879,7 +5859,7 @@ export class App extends Component {
     base.onRpPrev = function () { self.setState({ rpPage: Math.max(0, rpPg - 1) }); };
     base.onRpNext = function () { self.setState({ rpPage: Math.min(rpTotal - 1, rpPg + 1) }); };
     base.rpBtnStyle = 'width: 28px; height: 28px; border-radius: 5px; border: 1px solid var(--border-default); background: var(--bg-elevated); color: var(--text-secondary); cursor: pointer;';
-    base.reportRows = S.reports.slice(rpPg * RPP, rpPg * RPP + RPP).map(function (r) { var pd = { '최근 24시간': 1, '최근 7일': 7, '최근 30일': 30 }[r.period]; var pLabel = pd ? (E.fmtDT(r.ms - pd * 86400000).slice(0, 10) + ' ~ ' + E.fmtDT(r.ms).slice(0, 10) + ' (' + (pd === 1 ? '24시간' : pd + '일') + ')') : r.period; return { id: r.id, dateText: E.fmtDT(r.ms), nameText: String(r.fname || r.id).replace(/\.html$/i, ''), tagsText: r.tags.join(', '), period: pLabel, llmText: r.llm ? 'LLM 소견' : '지표만', llmBg: r.llm ? 'rgba(0,108,210,.14)' : 'rgba(255,255,255,.07)', llmColor: r.llm ? 'var(--primary-light)' : 'var(--text-muted)', onOpen: function () { self._openReport(r); }, onDelete: function () { self.setState({ delRep: r }); } }; });
+    base.reportRows = S.reports.slice(rpPg * RPP, rpPg * RPP + RPP).map(function (r) { var pd = { '최근 24시간': 1, '최근 7일': 7, '최근 30일': 30 }[r.period]; var pLabel = pd ? (E.fmtDT(r.ms - pd * 86400000).slice(0, 10) + ' ~ ' + E.fmtDT(r.ms).slice(0, 10) + ' (' + (pd === 1 ? T('24시간') : T('{0}일', pd)) + ')') : r.period; return { id: r.id, dateText: E.fmtDT(r.ms), nameText: String(r.fname || r.id).replace(/\.html$/i, ''), tagsText: r.tags.join(', '), period: pLabel, llmText: r.llm ? T('LLM 소견') : T('지표만'), llmBg: r.llm ? 'rgba(0,108,210,.14)' : 'rgba(255,255,255,.07)', llmColor: r.llm ? 'var(--primary-light)' : 'var(--text-muted)', onOpen: function () { self._openReport(r); }, onDelete: function () { self.setState({ delRep: r }); } }; });
     base.reportEmpty = S.reports.length === 0;
     // 모달 내부 클릭의 오버레이 닫기 전파 차단 — 모든 모달 공용
     base.stopClick = function (ev) { if (ev && ev.stopPropagation) ev.stopPropagation(); };
@@ -5923,21 +5903,21 @@ export class App extends Component {
     var _ready = this._appReady();
     base.appReady = _ready;
     // 준비 전엔 유저 정보(토큰 입력·저장소 안내) 하나만
-    base.setNav = (_ready ? [{ id: 'source', label: '데이터 소스', icon: 'database' }, { id: 'equip', label: '설비 정보', icon: 'settings-gear' }, { id: 'criteria', label: '판정 기준', icon: 'dashboard' }, { id: 'monitor', label: '알람 설정', icon: 'pulse' }, { id: 'llm', label: 'LLM 연동', icon: 'sparkle' }, { id: 'data', label: '데이터 관리', icon: 'trash' }]
-      : [{ id: 'source', label: '유저 정보', icon: 'account' }]).map(function (n) { var a = S.setSection === n.id; var bd = (n.id === 'equip' && _blkCnt > 0) ? '판정 불가 ' + _blkCnt : (n.id === 'equip' && _unsetCnt > 0) ? '미설정 ' + _unsetCnt
-        : (n.id === 'criteria' && _blUnCnt > 0) ? '미학습 ' + _blUnCnt
-          : (n.id === 'criteria' && _blOldCnt > 0) ? '재학습 ' + _blOldCnt : ''; return { label: n.label, icon: n.icon, badge: bd, onClick: function () { self.setState({ setSection: n.id }); if (n.id === 'criteria') self._refreshBandCov(); if (n.id === 'data') self._refreshUsage(); }, style: 'display: flex; align-items: center; gap: 9px; padding: 9px 12px; border-radius: 6px; cursor: pointer; font-size: 13px; border-left: 2px solid ' + (a ? 'var(--primary-light)' : 'transparent') + '; background: ' + (a ? 'var(--overlay-hover)' : 'transparent') + '; color: ' + (a ? 'var(--text-primary)' : 'var(--text-tertiary)') + '; font-weight: ' + (a ? '600' : '500') + ';' }; });
+    base.setNav = (_ready ? [{ id: 'source', label: T('데이터 소스'), icon: 'database' }, { id: 'equip', label: T('설비 정보'), icon: 'settings-gear' }, { id: 'criteria', label: T('판정 기준'), icon: 'dashboard' }, { id: 'monitor', label: T('알람 설정'), icon: 'pulse' }, { id: 'llm', label: T('LLM 연동'), icon: 'sparkle' }, { id: 'data', label: T('데이터 관리'), icon: 'trash' }]
+      : [{ id: 'source', label: T('유저 정보'), icon: 'account' }]).map(function (n) { var a = S.setSection === n.id; var bd = (n.id === 'equip' && _blkCnt > 0) ? T('판정 불가 {0}', _blkCnt) : (n.id === 'equip' && _unsetCnt > 0) ? T('미설정 {0}', _unsetCnt)
+        : (n.id === 'criteria' && _blUnCnt > 0) ? T('미학습 {0}', _blUnCnt)
+          : (n.id === 'criteria' && _blOldCnt > 0) ? T('재학습 {0}', _blOldCnt) : ''; return { label: n.label, icon: n.icon, badge: bd, onClick: function () { self.setState({ setSection: n.id }); if (n.id === 'criteria') self._refreshBandCov(); if (n.id === 'data') self._refreshUsage(); }, style: 'display: flex; align-items: center; gap: 9px; padding: 9px 12px; border-radius: 6px; cursor: pointer; font-size: 13px; border-left: 2px solid ' + (a ? 'var(--primary-light)' : 'transparent') + '; background: ' + (a ? 'var(--overlay-hover)' : 'transparent') + '; color: ' + (a ? 'var(--text-primary)' : 'var(--text-tertiary)') + '; font-weight: ' + (a ? '600' : '500') + ';' }; });
     base.secSource = S.setSection === 'source'; base.secEquip = _ready && S.setSection === 'equip'; base.secCriteria = _ready && S.setSection === 'criteria'; base.secMonitor = _ready && S.setSection === 'monitor'; base.secLlm = _ready && S.setSection === 'llm';
     base.secData = _ready && S.setSection === 'data';
     if (base.secSource) this._userVals(base);
     if (base.secData) this._dataVals(base);
     base.mcOptions = ['I', 'II', 'III', 'IV'].map(function (c) { var a = S.machineClass === c; return { label: 'Class ' + c, onClick: function () { self.setState({ machineClass: c, dirty: true }); }, style: 'flex: 1; text-align: center; padding: 10px 6px; border-radius: 6px; cursor: pointer; font-size: 13px; font-weight: ' + (a ? '600' : '500') + '; border: 1px solid ' + (a ? 'var(--primary-base)' : 'var(--border-default)') + '; background: ' + (a ? 'rgba(0,108,210,.1)' : 'var(--bg-elevated)') + '; color: ' + (a ? 'var(--primary-light)' : 'var(--text-secondary)') + ';' }; });
     var mz = self._effZones({ unit: 'mm/s', cls: S.machineClass }, S);
-    var MC_DESC = { I: ['Class I · 소형 기계', '15 kW 이하의 소형 전동기·펌프 등. 기계가 기초와 일체로 거동하는 설비.'], II: ['Class II · 중형 기계', '15–75 kW급 전동기, 또는 특수 기초에 강체 설치된 300 kW 이하 중형 기계.'], III: ['Class III · 대형 · 강성 기초', '강성(rigid) 기초 위에 설치된 대형 회전기계. 기초가 진동을 거의 흡수하지 않음.'], IV: ['Class IV · 대형 · 연성 기초', '연성(flexible) 기초 위의 대형·고속 터보기계(터빈·발전기 등). 허용 진동 범위가 가장 넓음.'] };
+    var MC_DESC = { I: [T('Class I · 소형 기계'), T('15 kW 이하의 소형 전동기·펌프 등. 기계가 기초와 일체로 거동하는 설비.')], II: [T('Class II · 중형 기계'), T('15–75 kW급 전동기, 또는 특수 기초에 강체 설치된 300 kW 이하 중형 기계.')], III: [T('Class III · 대형 · 강성 기초'), T('강성(rigid) 기초 위에 설치된 대형 회전기계. 기초가 진동을 거의 흡수하지 않음.')], IV: [T('Class IV · 대형 · 연성 기초'), T('연성(flexible) 기초 위의 대형·고속 터보기계(터빈·발전기 등). 허용 진동 범위가 가장 넓음.')] };
     var md = MC_DESC[S.machineClass];
-    base.mcDescTitle = md ? md[0] : '머신 클래스 미선택';
-    base.mcDescBody = md ? md[1] : '클래스를 선택하세요 — 미선택 시 Class II 기준으로 판정합니다.';
-    base.mcZones = [{ ko: '양호 A/B', color: self.E.STATUS[0].color, range: '< ' + mz[0] }, { ko: '주의 B/C', color: self.E.STATUS[1].color, range: mz[0] + '–' + mz[1] }, { ko: '위험 C/D', color: self.E.STATUS[2].color, range: mz[1] + '–' + mz[2] }, { ko: '심각 D', color: self.E.STATUS[3].color, range: '> ' + mz[2] }].map(function (z) { return { ko: z.ko, range: z.range + ' mm/s', barStyle: 'height: 6px; border-radius: 3px; background: ' + z.color + ';', dot: z.color }; });
+    base.mcDescTitle = md ? md[0] : T('머신 클래스 미선택');
+    base.mcDescBody = md ? md[1] : T('클래스를 선택하세요 — 미선택 시 Class II 기준으로 판정합니다.');
+    base.mcZones = [{ ko: T('양호 A/B'), color: self.E.STATUS[0].color, range: '< ' + mz[0] }, { ko: T('주의 B/C'), color: self.E.STATUS[1].color, range: mz[0] + '–' + mz[1] }, { ko: T('위험 C/D'), color: self.E.STATUS[2].color, range: mz[1] + '–' + mz[2] }, { ko: T('심각 D'), color: self.E.STATUS[3].color, range: '> ' + mz[2] }].map(function (z) { return { ko: z.ko, range: z.range + ' mm/s', barStyle: 'height: 6px; border-radius: 3px; background: ' + z.color + ';', dot: z.color }; });
     base.srcTables = (self.liveTables || []).map(function (name) {
       var on = S.srcSel.indexOf(name) >= 0, blk = self._srcBlock(name);
       return { name: name, kind: 'TAG', checked: on, kindColor: '#005fb8', blocked: !!blk, blockReason: blk,
@@ -5946,11 +5926,11 @@ export class App extends Component {
     });
     // 선택 테이블 중 롤업 없는 것 — 데이터 소스 안내·서버 감시 제외 경고 공용
     var _noRoll = base.srcTables.filter(function (t) { return t.checked && t.noRollup; }).map(function (t) { return t.name; });
-    base.srcNoRollNote = _noRoll.length ? 'ROLLUP 없음 (' + _noRoll.join(', ') + ') — 원본 데이터를 직접 집계해 동작은 하지만, 추이 그래프는 최근 2시간까지만 보이고 서버 감시에서는 빠집니다. 테이블에 ROLLUP을 만들면 해제됩니다' : '';
-    base.srvNoRollWarn = _noRoll.length ? '서버 감시에서 빠지는 테이블: ' + _noRoll.join(', ') + ' — ROLLUP이 없어 서버 타이머가 판정하지 않습니다. 이 테이블까지 감시하려면 감시 방식을 앱으로 두거나 테이블에 ROLLUP을 만드세요' : '';
+    base.srcNoRollNote = _noRoll.length ? T('ROLLUP 없음 ({0}) — 원본 데이터를 직접 집계해 동작은 하지만, 추이 그래프는 최근 2시간까지만 보이고 서버 감시에서는 빠집니다. 테이블에 ROLLUP을 만들면 해제됩니다', _noRoll.join(', ')) : '';
+    base.srvNoRollWarn = _noRoll.length ? T('서버 감시에서 빠지는 테이블: {0} — ROLLUP이 없어 서버 타이머가 판정하지 않습니다. 이 테이블까지 감시하려면 감시 방식을 앱으로 두거나 테이블에 ROLLUP을 만드세요', _noRoll.join(', ')) : '';
     // 전체 선택은 선택 가능한 테이블만(미지원 테이블은 조회 실패)
     var _srcOk = base.srcTables.filter(function (t) { return !t.blocked; }).map(function (t) { return t.name; });
-    base.srcSelAllLabel = _srcOk.length && S.srcSel.length === _srcOk.length ? '전체 해제' : '전체 선택';
+    base.srcSelAllLabel = _srcOk.length && S.srcSel.length === _srcOk.length ? T('전체 해제') : T('전체 선택');
     base.onSrcSelectAll = function () {
       self.setState({ srcSel: S.srcSel.length === _srcOk.length ? [] : _srcOk.slice(), dirty: true });
     };
@@ -5960,13 +5940,12 @@ export class App extends Component {
     var _cap = S.srcCap;
     base.capShow = !!(_cap && _cap.dropped > 0);
     if (base.capShow) {
-      base.capText = '선택한 테이블의 태그 ' + _cap.eligible + '개 중 ' + _cap.shown + '개만 감시하고 있습니다 — '
-        + _cap.dropped + '개는 표시 상한(테이블당 ' + CAPS.perTable + '개 · 전체 ' + CAPS.total + '개)을 넘어 빠졌습니다.';
+      base.capText = T('선택한 테이블의 태그 {0}개 중 {1}개만 감시하고 있습니다 — {2}개는 표시 상한(테이블당 {3}개 · 전체 {4}개)을 넘어 빠졌습니다.', _cap.eligible, _cap.shown, _cap.dropped, CAPS.perTable, CAPS.total);
       base.capHint = _cap.byTotal
-        ? '전체 상한에 걸렸습니다. 지금 보지 않는 테이블의 선택을 풀면 그만큼 자리가 납니다.'
-        : '테이블당 상한에 걸렸습니다. 한 테이블에 ' + CAPS.perTable + '개가 넘는 태그가 있으면 뒤쪽 태그는 감시되지 않습니다.';
+        ? T('전체 상한에 걸렸습니다. 지금 보지 않는 테이블의 선택을 풀면 그만큼 자리가 납니다.')
+        : T('테이블당 상한에 걸렸습니다. 한 테이블에 {0}개가 넘는 태그가 있으면 뒤쪽 태그는 감시되지 않습니다.', CAPS.perTable);
       base.capRows = (_cap.perTable || []).map(function (p) {
-        return { table: p.table, count: p.shown + ' / ' + p.total + '개', dropped: (p.total - p.shown) + '개 제외' };
+        return { table: p.table, count: T('{0} / {1}개', p.shown, p.total), dropped: T('{0}개 제외', p.total - p.shown) };
       });
     }
     // 별칭 편집: 선택된 테이블의 태그(프리페치 캐시) 기준 — 저장 전에도 표시
@@ -5997,7 +5976,7 @@ export class App extends Component {
     var _shown = Math.max(ALIAS_ROWS_MAX, S.aliasShown || 0);
     base.aliasRows = _hit.slice(0, _shown);
     var _rest = _hit.length - base.aliasRows.length;
-    base.aliasMoreText = _rest > 0 ? '아래로 더 내리면 ' + _rest + '개가 이어집니다' : '';
+    base.aliasMoreText = _rest > 0 ? T('아래로 더 내리면 {0}개가 이어집니다', _rest) : '';
     base.onAliasScroll = function (ev) {
       var el = ev.target;
       if (_hit.length <= _shown) return;                                  // 전부 렌더됨
@@ -6007,7 +5986,7 @@ export class App extends Component {
     base.tagQuery = S.tagQuery || '';
     // 검색어 변경 시 줄 수 초기화
     base.onTagQuery = function (ev) { self.setState({ tagQuery: ev.target.value, aliasShown: ALIAS_ROWS_MAX }); };
-    base.aliasCountText = _tq ? _hit.length + ' / ' + aliasRows.length + '개' : aliasRows.length + '개';
+    base.aliasCountText = _tq ? T('{0} / {1}개', _hit.length, aliasRows.length) : T('{0}개', aliasRows.length);
     base.aliasEmpty = _tq && !_hit.length;
     base.bModelOptions = Object.keys(VC.BEARINGS).concat(['직접 입력']);
     var _eqRows = eqs.map(function (e) {
@@ -6029,9 +6008,8 @@ export class App extends Component {
       var mFmax = VC.mountFmax(meta.mount);
       var kgBest = (self._detailCache[e.id] && self._detailCache[e.id].det && self._detailCache[e.id].det.kurtogram || {}).best;
       var mountNote = !meta.mount
-        ? '마운팅 미상 — 고주파 대역의 유효성을 판단할 수 없어 상한 없이 전 대역을 그대로 씁니다(커토그램 탐색·대역 근거).'
-        : '유효 상한 ' + (mFmax / 1000).toFixed(1) + ' kHz — 그 위 대역은 마운팅 공진일 수 있어 결함 대역 탐색에서 제외됩니다.'
-          + (kgBest && kgBest.loHz > mFmax ? ' 현재 선택 대역 ' + (kgBest.loHz / 1000).toFixed(1) + ' kHz는 상한을 넘어 재선택됩니다.' : '');
+        ? T('마운팅 미상 — 고주파 대역의 유효성을 판단할 수 없어 상한 없이 전 대역을 그대로 씁니다(커토그램 탐색·대역 근거).')
+        : T('유효 상한 {0} kHz — 그 위 대역은 마운팅 공진일 수 있어 결함 대역 탐색에서 제외됩니다.{1}', (mFmax / 1000).toFixed(1), kgBest && kgBest.loHz > mFmax ? T(' 현재 선택 대역 {0} kHz는 상한을 넘어 재선택됩니다.', (kgBest.loHz / 1000).toFixed(1)) : '');
       // 완성도 = 항상 해당되는 항목만(품번·마운팅·구동) + 벨트를 골랐으면 풀리경까지
       var setItems = [!!model, !!meta.mount, !!meta.drive];
       if (meta.drive === 'belt') setItems.push(!!(Number(belt.d1) > 0 && Number(belt.d2) > 0) || sh.src === 'measured');
@@ -6039,15 +6017,15 @@ export class App extends Component {
       var sum = VC.faultFreqSummary(rpm, geo);
       // 자동 계산 칩 설명(약어 의미)
       var freqTip = {
-        '1×': '회전주파수 — 축이 1초에 도는 횟수(RPM÷60)입니다. 불평형 등 대부분의 기계 결함이 이 값의 정수배에서 나타나 모든 해석의 기준이 됩니다.',
-        '1× 회전': '회전주파수 — 축이 1초에 도는 횟수(RPM÷60)입니다. 불평형 등 대부분의 기계 결함이 이 값의 정수배에서 나타나 모든 해석의 기준이 됩니다.',
-        '2×': '회전주파수의 2배 성분입니다. 이 성분이 크면 정렬불량을 의심합니다.',
-        'BPFO': '외륜 결함 주파수(Ball Pass Frequency, Outer)입니다. 전동체가 외륜의 흠집을 지날 때마다 충격이 나는 빈도로, 포락선 스펙트럼에서 이 주파수와 그 배수가 보이면 외륜 손상 신호입니다.',
-        'BPFI': '내륜 결함 주파수(Ball Pass Frequency, Inner)입니다. 내륜은 축과 함께 돌기 때문에, 이 주파수 양옆에 회전주파수 간격의 측대역을 동반하는 것이 특징입니다.',
-        'BSF': '전동체(볼) 결함 주파수(Ball Spin Frequency)입니다. 볼 표면의 흠집이 궤도면에 닿는 빈도로, 볼 자체 손상 시 나타납니다.',
-        'FTF': '케이지(리테이너) 회전 주파수(Fundamental Train Frequency)입니다. 보통 회전주파수의 0.35~0.45배이며, 케이지 손상·윤활 불량 시 이 성분이 나타납니다.',
+        '1×': T('회전주파수 — 축이 1초에 도는 횟수(RPM÷60)입니다. 불평형 등 대부분의 기계 결함이 이 값의 정수배에서 나타나 모든 해석의 기준이 됩니다.'),
+        '1× 회전': T('회전주파수 — 축이 1초에 도는 횟수(RPM÷60)입니다. 불평형 등 대부분의 기계 결함이 이 값의 정수배에서 나타나 모든 해석의 기준이 됩니다.'),
+        '2×': T('회전주파수의 2배 성분입니다. 이 성분이 크면 정렬불량을 의심합니다.'),
+        'BPFO': T('외륜 결함 주파수(Ball Pass Frequency, Outer)입니다. 전동체가 외륜의 흠집을 지날 때마다 충격이 나는 빈도로, 포락선 스펙트럼에서 이 주파수와 그 배수가 보이면 외륜 손상 신호입니다.'),
+        'BPFI': T('내륜 결함 주파수(Ball Pass Frequency, Inner)입니다. 내륜은 축과 함께 돌기 때문에, 이 주파수 양옆에 회전주파수 간격의 측대역을 동반하는 것이 특징입니다.'),
+        'BSF': T('전동체(볼) 결함 주파수(Ball Spin Frequency)입니다. 볼 표면의 흠집이 궤도면에 닿는 빈도로, 볼 자체 손상 시 나타납니다.'),
+        'FTF': T('케이지(리테이너) 회전 주파수(Fundamental Train Frequency)입니다. 보통 회전주파수의 0.35~0.45배이며, 케이지 손상·윤활 불량 시 이 성분이 나타납니다.'),
       };
-      var mkChip = function (label, val) { return { label: label, val: val, tip: freqTip[label] || '' }; };
+      var mkChip = function (label, val) { return { label: tx(label), val: val, tip: freqTip[label] || '' }; };
       var freqChips = (noBearing || sum.sleeve)
         ? [mkChip('1×', sum.fr.toFixed(1)), mkChip('2×', (2 * sum.fr).toFixed(1))]
         : [mkChip('1× 회전', sum.fr.toFixed(1))].concat(sum.list.map(function (p) { return mkChip(p[0], p[1].toFixed(1)); }));
@@ -6055,18 +6033,18 @@ export class App extends Component {
       return {
         id: e.id, name: e.name, alias: e.alias || e.name, unit: selUnit, cls: selCls, unset: self._equipUnset(e.id),
         blocked: self._patBlockedId(e.id),
-        clsOptions: [{ v: '', l: '— 선택 —' }, { v: 'I', l: 'I · 소형' }, { v: 'II', l: 'II · 중형' }, { v: 'III', l: 'III · 대형·강성' }, { v: 'IV', l: 'IV · 대형·연성' }],
+        clsOptions: [{ v: '', l: T('— 선택 —') }, { v: 'I', l: T('I · 소형') }, { v: 'II', l: T('II · 중형') }, { v: 'III', l: T('III · 대형·강성') }, { v: 'IV', l: T('IV · 대형·연성') }],
         rpm: selRpm, bModel: model,
         isCustom: isCustom, isSleeve: isSleeveB, isCatalog: isCatalogB, freqChips: freqChips, geoCells: geoCells, adv: !!S.equipAdv[e.id],
         // 라벨은 상태 무관 단일(행마다 다르면 다른 기능으로 오독)
-        advLabel: S.equipAdv[e.id] ? '닫기' : '설정',
+        advLabel: S.equipAdv[e.id] ? T('닫기') : T('설정'),
         bN: geo.n, bBd: geo.Bd, bPd: geo.Pd, bPhi: geo.phi,
         // 목록에 없는 품번(뺀 프리셋·옛 설정)은 이 행 목록에 넣어 선택 상태 유지 — 없으면 '— 선택 —'으로 보임
         bModelOptions: (isCustom && model !== '직접 입력') ? Object.keys(VC.BEARINGS).concat([model, '직접 입력']) : base.bModelOptions,
         // 직접 입력 항목 글자 — 품번 적었으면 품번, 긴 품번은 잘리므로 전체는 툴팁
-        bCustomLabel: isCustom && geo.name ? geo.name + ' (직접)' : '직접 입력',
-        bModelTitle: isCustom && geo.name ? geo.name + ' (직접 입력)' : '',
-        retiredNote: retired ? retired + '은(는) 제조사·설계(E·CC·CA 등)마다 롤러 수가 달라 목록에서 뺐습니다 — 옛 목록 값을 넣어 두었으니 제조사 카탈로그 값으로 확인하세요' : '',
+        bCustomLabel: isCustom && geo.name ? T('{0} (직접)', geo.name) : T('직접 입력'),
+        bModelTitle: isCustom && geo.name ? T('{0} (직접 입력)', geo.name) : '',
+        retiredNote: retired ? T('{0}은(는) 제조사·설계(E·CC·CA 등)마다 롤러 수가 달라 목록에서 뺐습니다 — 옛 목록 값을 넣어 두었으니 제조사 카탈로그 값으로 확인하세요', retired) : '',
         onModel: function (ev) { self._setEquipBearing(e.id, ev.target.value); },
         onRpm: function (ev) { self._setEquipRpm(e.id, ev.target.value); },
         onCls: function (ev) { self._setEquipCls(e.id, ev.target.value); },
@@ -6090,23 +6068,23 @@ export class App extends Component {
         mountNote: mountNote, mountUnset: !meta.mount,
         // 완성도 배지 — 항상 해당되는 항목만 계수(날개수 등 일부 설비 항목 제외)
         setCount: setDone, setTotal: setTotal, setIncomplete: setDone < setTotal,
-        mountOptions: [{ v: '', l: '— 미상 —' }, { v: 'stud', l: '스터드(나사)' }, { v: 'adhesive', l: '접착' }, { v: 'magnet', l: '자석' }, { v: 'probe', l: '핸드프로브' }],
-        driveOptions: [{ v: '', l: '— 미상 —' }, { v: 'direct', l: '직결' }, { v: 'belt', l: '벨트·풀리' }, { v: 'gear', l: '기어' }],
+        mountOptions: [{ v: '', l: T('— 미상 —') }, { v: 'stud', l: T('스터드(나사)') }, { v: 'adhesive', l: T('접착') }, { v: 'magnet', l: T('자석') }, { v: 'probe', l: T('핸드프로브') }],
+        driveOptions: [{ v: '', l: T('— 미상 —') }, { v: 'direct', l: T('직결') }, { v: 'belt', l: T('벨트·풀리') }, { v: 'gear', l: T('기어') }],
         beltRatio: meta.sensorPos === 'driven'
-          ? (sh.src === 'missing' ? '풀리경 또는 종동축 회전수가 있어야 결함 패턴을 잴 수 있습니다' : '결함 대조 회전수 ' + sh.rpm + ' rpm (종동축 · ' + (sh.src === 'pulley' ? '풀리 환산' : '입력값') + ')')
-          : (belt.d1 > 0 && belt.d2 > 0) ? '종동축 1× ' + (sum.fr * belt.d1 / belt.d2).toFixed(1) + ' Hz (비 ' + (belt.d1 / belt.d2).toFixed(2) + ')' : '',
+          ? (sh.src === 'missing' ? T('풀리경 또는 종동축 회전수가 있어야 결함 패턴을 잴 수 있습니다') : T('결함 대조 회전수 {0} rpm (종동축 · {1})', sh.rpm, sh.src === 'pulley' ? T('풀리 환산') : T('입력값')))
+          : (belt.d1 > 0 && belt.d2 > 0) ? T('종동축 1× {0} Hz (비 {1})', (sum.fr * belt.d1 / belt.d2).toFixed(1), (belt.d1 / belt.d2).toFixed(2)) : '',
         // 센서 위치 — 종동측이면 표의 RPM 칸에 꼬리표(그 행은 입력 RPM이 그대로 쓰이지 않음)
         sensorPos: meta.sensorPos === 'driven' ? 'driven' : 'motor', isDriven: meta.drive === 'belt' && meta.sensorPos === 'driven',
-        rpmTag: (meta.drive === 'belt' && meta.sensorPos === 'driven') ? '종동' : '',
+        rpmTag: (meta.drive === 'belt' && meta.sensorPos === 'driven') ? T('종동') : '',
         rpmTagTip: (meta.drive === 'belt' && meta.sensorPos === 'driven')
-          ? (sh.src === 'missing' ? '종동측 센서 — 풀리경이나 종동축 회전수가 없어 결함 패턴을 잴 수 없습니다' : '종동축 ' + sh.rpm + ' rpm으로 대조 (' + (sh.src === 'pulley' ? '풀리비 ' + (belt.d1 / belt.d2).toFixed(3) + ' 환산' : '입력값') + ')')
+          ? (sh.src === 'missing' ? T('종동측 센서 — 풀리경이나 종동축 회전수가 없어 결함 패턴을 잴 수 없습니다') : T('종동축 {0} rpm으로 대조 ({1})', sh.rpm, sh.src === 'pulley' ? T('풀리비 {0} 환산', (belt.d1 / belt.d2).toFixed(3)) : T('입력값')))
           : '',
         mBeltRpm: belt.drivenRpm ? String(belt.drivenRpm) : '',
         beltRpmPh: (Number(selRpm) || e.rpmMotor || e.rpm) > 0 && belt.d1 > 0 && belt.d2 > 0
-          ? String(Math.round((Number(selRpm) || e.rpmMotor || e.rpm) * belt.d1 / belt.d2 * 10) / 10) + ' (풀리 환산)' : '모르면 비워 두세요',
+          ? T('{0} (풀리 환산)', String(Math.round((Number(selRpm) || e.rpmMotor || e.rpm) * belt.d1 / belt.d2 * 10) / 10)) : T('모르면 비워 두세요'),
         onSensorPos: function (ev) { self._setEquipMeta(e.id, 'sensorPos', ev.target.value); },
         onBeltRpm: function (ev) { self._setEquipBelt(e.id, 'drivenRpm', ev.target.value); },
-        vaneNote: meta.vanes > 0 ? '베인 통과 ' + (sum.fr * meta.vanes).toFixed(1) + ' Hz' : '',
+        vaneNote: meta.vanes > 0 ? T('베인 통과 {0} Hz', (sum.fr * meta.vanes).toFixed(1)) : '',
         onMount: function (ev) { self._setEquipMeta(e.id, 'mount', ev.target.value); },
         onDrive: function (ev) { self._setEquipMeta(e.id, 'drive', ev.target.value); },
         onVanes: function (ev) { self._setEquipMeta(e.id, 'vanes', ev.target.value); },
@@ -6126,8 +6104,8 @@ export class App extends Component {
     };
     // 필터는 '판정 불가' 하나만(미설정은 그 부분집합이라 중복) — 덜 채운 줄은 행의 n/N 배지·점이 표시
     base.equipFilters = [
-      { k: 'all', label: '전체', n: _eqRows.length, tip: '' },
-      { k: 'blocked', label: '판정 불가', n: _blkCnt, tip: '회전수와 베어링 기하가 둘 다 있어야 결함주파수 격자를 세울 수 있습니다. 하나라도 없으면 등급을 켜는 축이 비어 카드가 "판정 보류"로 남습니다(미끄럼 베어링도 구름체가 없어 여기 포함됩니다). 좌측 "판정 불가" 배지와 같은 기준·같은 수입니다.' },
+      { k: 'all', label: T('전체'), n: _eqRows.length, tip: '' },
+      { k: 'blocked', label: T('판정 불가'), n: _blkCnt, tip: T('회전수와 베어링 기하가 둘 다 있어야 결함주파수 격자를 세울 수 있습니다. 하나라도 없으면 등급을 켜는 축이 비어 카드가 "판정 보류"로 남습니다(미끄럼 베어링도 구름체가 없어 여기 포함됩니다). 좌측 "판정 불가" 배지와 같은 기준·같은 수입니다.') },
     ].map(function (f) {
       var a = _eqFilter === f.k, dead = f.n === 0 && f.k !== 'all';
       return {
@@ -6152,18 +6130,18 @@ export class App extends Component {
       var _idsTbl = _idsOf(eqs.filter(function (x) { return x.table === _bSrc.table; }));
       var _idsShown = _eqShown.map(function (r) { return r.id; });
       var _scopes = [];
-      if (_idsPfx.length > 1) _scopes.push({ v: 'prefix', label: '같은 설비 ' + _pfx + '*', ids: _idsPfx });
-      if (_idsTbl.length > 1) _scopes.push({ v: 'table', label: '같은 테이블 ' + _bSrc.table, ids: _idsTbl });
+      if (_idsPfx.length > 1) _scopes.push({ v: 'prefix', label: T('같은 설비 {0}*', _pfx), ids: _idsPfx });
+      if (_idsTbl.length > 1) _scopes.push({ v: 'table', label: T('같은 테이블 {0}', _bSrc.table), ids: _idsTbl });
       // 목록 전체 범위는 테이블 범위와 다를 때만(중복 선택지 방지)
       var _sameAsTbl = _idsShown.length === _idsTbl.length && _idsShown.every(function (id) { return _idsTbl.indexOf(id) >= 0; });
-      if (_idsShown.length > 1 && !_sameAsTbl) _scopes.push({ v: 'shown', label: _eqFilter === 'all' ? '목록 전체' : '지금 걸러진 목록', ids: _idsShown });
+      if (_idsShown.length > 1 && !_sameAsTbl) _scopes.push({ v: 'shown', label: _eqFilter === 'all' ? T('목록 전체') : T('지금 걸러진 목록'), ids: _idsShown });
       // ⚠ 전용 접두어 변수명(_bk*) — 함수 전체가 var 공유라 흔한 이름은 뒤쪽 선언과 같은 바인딩(핸들러가 덮인 값 참조)
       var _bkScope = null;
       _scopes.forEach(function (s) { if (s.v === _bulk.scope) _bkScope = s; });
       if (!_bkScope) _bkScope = _scopes[0] || null;
       var _sm = (S.equipMeta || {})[_bulk.id] || {}, _sbelt = _sm.belt || {};
-      var MOUNT_KO = { stud: '스터드', adhesive: '접착', magnet: '자석', probe: '핸드프로브' };
-      var DRIVE_KO = { direct: '직결', belt: '벨트·풀리', gear: '기어' };
+      var MOUNT_KO = { stud: T('스터드'), adhesive: T('접착'), magnet: T('자석'), probe: T('핸드프로브') };
+      var DRIVE_KO = { direct: T('직결'), belt: T('벨트·풀리'), gear: T('기어') };
       var _fSel = _bulk.fields || {};
       // 칩 하나 = 설정 입력칸 하나(묶으면 값 미표시·부분 선택 불가). 벨트 제원은 벨트 구동일 때만, 형상 네 칸은 직접 입력일 때만
       var _sgeo = (S.equipGeo || {})[_bulk.id] || {};
@@ -6171,24 +6149,24 @@ export class App extends Component {
       var _isBelt = _sm.drive === 'belt', _isGear = _sm.drive === 'gear';
       var _mm = function (v) { return v > 0 ? v + ' mm' : ''; };
       var _fields = [
-        { k: 'unit', label: '단위', val: (S.equipUnit || {})[_bulk.id] || '' },
+        { k: 'unit', label: T('단위'), val: (S.equipUnit || {})[_bulk.id] || '' },
         { k: 'cls', label: 'Class', val: (S.equipCls || {})[_bulk.id] || '' },
         { k: 'rpm', label: 'RPM', val: (S.equipRpm || {})[_bulk.id] ? (S.equipRpm[_bulk.id] + ' rpm') : '' },
-        { k: 'bearing', label: '베어링', val: (S.equipBearing || {})[_bulk.id] || '' },
-        { k: 'geoName', label: '품번', val: _custom ? (_sgeo.name || '') : '' },
-        { k: 'geoN', label: '볼 수 n', val: (_custom && _sgeo.n > 0) ? String(_sgeo.n) : '' },
-        { k: 'geoBd', label: '볼경 Bd', val: _custom ? _mm(_sgeo.Bd) : '' },
-        { k: 'geoPd', label: '피치경 Pd', val: _custom ? _mm(_sgeo.Pd) : '' },
+        { k: 'bearing', label: T('베어링'), val: (S.equipBearing || {})[_bulk.id] || '' },
+        { k: 'geoName', label: T('품번'), val: _custom ? (_sgeo.name || '') : '' },
+        { k: 'geoN', label: T('볼 수 n'), val: (_custom && _sgeo.n > 0) ? String(_sgeo.n) : '' },
+        { k: 'geoBd', label: T('볼경 Bd'), val: _custom ? _mm(_sgeo.Bd) : '' },
+        { k: 'geoPd', label: T('피치경 Pd'), val: _custom ? _mm(_sgeo.Pd) : '' },
         // 접촉각 0°(깊은홈 볼베어링)도 정상값 — 형상 있으면 항상 표시
-        { k: 'geoPhi', label: '접촉각 φ', val: (_custom && _sgeo.n > 0) ? (_sgeo.phi || 0) + '°' : '' },
-        { k: 'mount', label: '계측', val: MOUNT_KO[_sm.mount] || '' },
-        { k: 'drive', label: '구동', val: DRIVE_KO[_sm.drive] || '' },
-        { k: 'beltPos', label: '센서 위치', val: _isBelt ? (_sm.sensorPos === 'driven' ? '종동측' : '모터측') : '' },
-        { k: 'beltD1', label: '풀리 D1', val: _isBelt ? _mm(_sbelt.d1) : '' },
-        { k: 'beltD2', label: '풀리 D2', val: _isBelt ? _mm(_sbelt.d2) : '' },
-        { k: 'beltLen', label: '벨트길이', val: _isBelt ? _mm(_sbelt.len) : '' },
-        { k: 'beltRpm', label: '종동축 회전수', val: (_isBelt && _sm.sensorPos === 'driven' && _sbelt.drivenRpm > 0) ? _sbelt.drivenRpm + ' rpm' : '' },
-        { k: 'vanes', label: _isGear ? '잇수' : '날개수', val: _sm.vanes > 0 ? (_sm.vanes + (_isGear ? '개' : '매')) : '' },
+        { k: 'geoPhi', label: T('접촉각 φ'), val: (_custom && _sgeo.n > 0) ? (_sgeo.phi || 0) + '°' : '' },
+        { k: 'mount', label: T('계측'), val: MOUNT_KO[_sm.mount] || '' },
+        { k: 'drive', label: T('구동'), val: DRIVE_KO[_sm.drive] || '' },
+        { k: 'beltPos', label: T('센서 위치'), val: _isBelt ? (_sm.sensorPos === 'driven' ? T('종동측') : T('모터측')) : '' },
+        { k: 'beltD1', label: T('풀리 D1'), val: _isBelt ? _mm(_sbelt.d1) : '' },
+        { k: 'beltD2', label: T('풀리 D2'), val: _isBelt ? _mm(_sbelt.d2) : '' },
+        { k: 'beltLen', label: T('벨트길이'), val: _isBelt ? _mm(_sbelt.len) : '' },
+        { k: 'beltRpm', label: T('종동축 회전수'), val: (_isBelt && _sm.sensorPos === 'driven' && _sbelt.drivenRpm > 0) ? _sbelt.drivenRpm + ' rpm' : '' },
+        { k: 'vanes', label: _isGear ? T('잇수') : T('날개수'), val: _sm.vanes > 0 ? (_sm.vanes + (_isGear ? T('개') : T('매'))) : '' },
       ].filter(function (f) { return !!f.val; }).map(function (f) {
         var on = _fSel[f.k] === undefined ? true : !!_fSel[f.k];
         return {
@@ -6209,12 +6187,12 @@ export class App extends Component {
       _bRow.bulkFields = _fields;
       _bRow.bulkScopes = _scopes.map(function (s) {
         var a = !!_bkScope && s.v === _bkScope.v;
-        return { label: s.label + ' · ' + (s.ids.length - 1) + '개', style: _chip(a, false), onClick: function () { self._setEquipBulk({ scope: s.v }); } };
+        return { label: T('{0} · {1}개', s.label, s.ids.length - 1), style: _chip(a, false), onClick: function () { self._setEquipBulk({ scope: s.v }); } };
       });
-      _bRow.bulkApplyLabel = '태그 ' + _tgtN + '개에 적용';
+      _bRow.bulkApplyLabel = T('태그 {0}개에 적용', _tgtN);
       _bRow.bulkApplyStyle = 'height: 30px; padding: 0 14px; border-radius: 6px; border: none; font-size: 12px; font-weight: 600; color: #fff; background: '
         + (_dis ? 'var(--border-medium)' : 'var(--primary-base)') + '; cursor: ' + (_dis ? 'default' : 'pointer') + ';';
-      _bRow.bulkNote = '대상 태그의 해당 항목을 덮어씁니다. 끈 항목과 이 행에 값이 없는 항목은 건드리지 않습니다.';
+      _bRow.bulkNote = T('대상 태그의 해당 항목을 덮어씁니다. 끈 항목과 이 행에 값이 없는 항목은 건드리지 않습니다.');
       _bRow.onBulkApply = function () { if (_dis || !_bkScope) return; self._applyEquipBulk(_bulk.id, _bkScope.ids, _eff); };
       _bRow.onBulkCancel = function () { self.setState({ equipBulk: null }); };
     }
@@ -6229,43 +6207,41 @@ export class App extends Component {
     };
     var _tzBrowser = (function () { try { return Intl.DateTimeFormat().resolvedOptions().timeZone || ''; } catch (e) { return ''; } })();
     base.tzValue = S.displayTz || '';
-    base.tzOptions = [{ v: '', l: '브라우저 시간' + (_tzBrowser ? ' (' + _tzBrowser + ')' : '') }, { v: 'UTC', l: 'UTC' }]
+    base.tzOptions = [{ v: '', l: T('브라우저 시간{0}', _tzBrowser ? ' (' + _tzBrowser + ')' : '') }, { v: 'UTC', l: 'UTC' }]
       .concat(_tzAll.filter(function (z) { return z !== 'UTC'; }).map(function (z) { return { v: z, l: z }; }));
-    base.tzNow = '지금 ' + _tzPrev(S.displayTz) + ((S.displayTz || '') !== (self._ac().displayTz || '') ? ' · 저장하면 적용됩니다' : '');
+    base.tzNow = T('지금 {0}{1}', _tzPrev(S.displayTz), (S.displayTz || '') !== (self._ac().displayTz || '') ? T(' · 저장하면 적용됩니다') : '');
     base.onTzChange = function (ev) { self.setState({ displayTz: ev.target.value, dirty: true }); };
     // 설정 항목별 호버 도움말 — 항목마다 완결 문장 · data-tip은 textContent 렌더라 줄바꿈은 \n
     base.helpTip = {
-      '단위': '센서가 저장하는 물리량입니다. mm/s는 속도, g는 가속도, μm는 변위이며, 데이터를 넣을 때 이미 정해진 값이라 모르면 계측 담당자에게 확인하세요. 등급의 높이는 속도(mm/s) 기준 ISO 10816 존으로 정하며, 가속도·변위 센서도 값을 속도로 환산해 판정하므로 단위가 틀리면 등급 높이가 틀어집니다.',
-      'Class': 'ISO 10816 기계 등급으로, 기계의 출력과 기초 강성에 따라 정합니다. I은 소형(15 kW 이하), II는 중형(15~75 kW), III·IV는 대형(각각 강성·연성 기초)입니다. 같은 진동값이라도 등급에 따라 양호/위험 판정이 달라집니다. 비워두면 Class II 기준(1.12 / 2.80 / 7.10 mm/s)으로 판정합니다.',
-      'RPM': '이 계측점 베어링이 달린 축의 실제 운전 회전수입니다. 명판의 정격 회전수(예: 1750)를 넣고 동기속도(1800)는 넣지 마십시오. 결함 패턴은 이 값으로 결함 주파수를 계산해 허용오차 1%로 대조하므로, 1% 넘게 틀리면 결함을 놓칩니다. 스펙트럼에서 잰 실측 회전수는 차수 라벨·스펙트럼 해석에 쓰고, 입력값과 2% 넘게 다르면 상세분석에서 알려 드립니다. 자릿수는 반드시 맞아야 합니다 — 3600 rpm 설비에 1800을 넣으면 모든 주파수 해석과 대역 경계가 절반으로 어긋납니다. 비워 두면 회전수 미상으로 처리해 결함 패턴 판정과 대역 추출이 멈추고 등급이 서지 않습니다.\n\n· 감속기(기어) 출력축의 센서면 그 축의 회전수(모터 회전수 ÷ 감속비)를 넣으십시오.\n· 벨트 구동이면 모터의 정격 회전수를 넣고, 센서가 벨트 반대편(팬·펌프 등)이면 설비 설정의 센서 위치를 종동측으로 고르십시오 — 풀리비로 환산합니다.',
-      '베어링 모델': '설치된 구름베어링의 품번입니다. 베어링 외륜의 각인이나 정비 이력에서 확인할 수 있습니다. 품번을 고르면 결함 주파수(BPFO/BPFI/BSF/FTF)가 자동 계산되어 베어링 결함을 판정할 수 있게 됩니다. 저널(유막) 베어링이면 sleeve를, 목록에 없는 품번이면 직접 입력을 고르세요. 비워두면 베어링 결함은 판정하지 않습니다.',
-      '마운팅 방식': '센서를 기계에 붙인 방법입니다. 나사로 고정했으면 스터드, 본드로 붙였으면 접착, 자석이면 자석, 손으로 대고 재면 핸드프로브를 고르세요. 방식에 따라 믿을 수 있는 주파수 상한이 달라서(스터드 10, 접착 5, 자석 2, 프로브 1 kHz) 그보다 높은 대역은 기계가 아니라 마운팅이 울린 것으로 보고 결함 탐색에서 제외합니다. 모르면 비워두세요. 대신 고주파 분석을 제한 없이 신뢰하게 되므로, 자석 마운트라면 꼭 선택하는 것이 좋습니다.',
-      '구동방식': '모터의 힘이 기계로 전달되는 방식입니다. 축이 커플링으로 바로 이어져 있으면 직결, 벨트가 보이면 벨트, 기어박스를 거치면 기어입니다. 벨트를 고르고 풀리 지름을 넣으면 종동축 회전수가 계산되어, 정체를 알 수 없던 진동 성분이 종동축 것인지 밝힐 수 있습니다.',
-      '날개수 · 잇수': '펌프나 팬이면 임펠러 날개 개수, 기어 구동이면 잇수입니다. 명판이나 사양서에서 확인하세요. 날개수에 회전수를 곱한 것이 베인 통과 주파수이며, 이 성분이 크면 유동 이상이나 간극 문제를 가리킵니다. 모르면 반드시 비워두세요. 추측으로 넣으면 그 값이 그대로 판정 근거가 됩니다.',
-      '센서 위치': '이 센서가 붙은 축입니다. 모터 쪽 베어링이면 모터측, 벨트 반대편(팬·펌프 등) 베어링이면 종동측을 고릅니다.\n\n종동측이면 결함 패턴·결함 주파수·대역을 종동축 회전수로 계산합니다(모터 RPM × 구동 풀리경 ÷ 종동 풀리경). 회전수가 1~2%만 틀려도 결함 부위 판단이 흔들리므로, 타코미터 등으로 잰 종동축 회전수가 있으면 직접 입력하세요.',
-      '벨트 제원': '풀리 두 개의 피치 지름(벨트가 감기는 위치의 지름 — 풀리 각인·카탈로그 값, 바깥지름보다 조금 작음)과 벨트 총길이입니다. 벨트 길이는 벨트 옆면의 각인(예: A-50, 5V1200)에서 확인합니다. 지름 두 개만 있으면 종동축 회전수가 나오고, 길이까지 있으면 벨트 자체 결함(균열·결손)의 주파수도 계산됩니다.',
-      '대역 추출 주기': '이 주기마다 결함 패턴을 재서 등급을 매기므로, 등급 확정의 회차 길이도 이 주기가 정합니다. 대역 에너지와 결함 패턴은 시간·일 단위로 변하는 값이라 평상시엔 10분이면 충분합니다. 정지·신호 두절·계측 이상은 판정 주기마다 따로 봅니다.'
-        + '\n\n다만 베이스라인 학습에는 표본 30개가 필요해 10분 주기면 5시간이 걸립니다. 처음 도입할 때는 과거 채우기로 지난 구간을 소급 추출하면 기다리지 않고 바로 학습할 수 있습니다.'
-        + '\n\n40대 기준 서버 부하 — 10분 5.5% · 30분 1.8% · 1시간 0.9%',
-      '전원 계통주파수': '모터에 공급되는 상용전원의 주파수로, 한국은 60 Hz입니다. 전기적 결함은 이 값의 2배(120 Hz)에서 나타나며, 기계적 결함과 달리 회전수가 변해도 움직이지 않는 것이 구분 기준입니다. 입력된 RPM이 다른 계통의 동기속도에 맞으면 경고를 표시합니다.',
+      '단위': T('센서가 저장하는 물리량입니다. mm/s는 속도, g는 가속도, μm는 변위이며, 데이터를 넣을 때 이미 정해진 값이라 모르면 계측 담당자에게 확인하세요. 등급의 높이는 속도(mm/s) 기준 ISO 10816 존으로 정하며, 가속도·변위 센서도 값을 속도로 환산해 판정하므로 단위가 틀리면 등급 높이가 틀어집니다.'),
+      'Class': T('ISO 10816 기계 등급으로, 기계의 출력과 기초 강성에 따라 정합니다. I은 소형(15 kW 이하), II는 중형(15~75 kW), III·IV는 대형(각각 강성·연성 기초)입니다. 같은 진동값이라도 등급에 따라 양호/위험 판정이 달라집니다. 비워두면 Class II 기준(1.12 / 2.80 / 7.10 mm/s)으로 판정합니다.'),
+      'RPM': T('이 계측점 베어링이 달린 축의 실제 운전 회전수입니다. 명판의 정격 회전수(예: 1750)를 넣고 동기속도(1800)는 넣지 마십시오. 결함 패턴은 이 값으로 결함 주파수를 계산해 허용오차 1%로 대조하므로, 1% 넘게 틀리면 결함을 놓칩니다. 스펙트럼에서 잰 실측 회전수는 차수 라벨·스펙트럼 해석에 쓰고, 입력값과 2% 넘게 다르면 상세분석에서 알려 드립니다. 자릿수는 반드시 맞아야 합니다 — 3600 rpm 설비에 1800을 넣으면 모든 주파수 해석과 대역 경계가 절반으로 어긋납니다. 비워 두면 회전수 미상으로 처리해 결함 패턴 판정과 대역 추출이 멈추고 등급이 서지 않습니다.\n\n· 감속기(기어) 출력축의 센서면 그 축의 회전수(모터 회전수 ÷ 감속비)를 넣으십시오.\n· 벨트 구동이면 모터의 정격 회전수를 넣고, 센서가 벨트 반대편(팬·펌프 등)이면 설비 설정의 센서 위치를 종동측으로 고르십시오 — 풀리비로 환산합니다.'),
+      '베어링 모델': T('설치된 구름베어링의 품번입니다. 베어링 외륜의 각인이나 정비 이력에서 확인할 수 있습니다. 품번을 고르면 결함 주파수(BPFO/BPFI/BSF/FTF)가 자동 계산되어 베어링 결함을 판정할 수 있게 됩니다. 저널(유막) 베어링이면 sleeve를, 목록에 없는 품번이면 직접 입력을 고르세요. 비워두면 베어링 결함은 판정하지 않습니다.'),
+      '마운팅 방식': T('센서를 기계에 붙인 방법입니다. 나사로 고정했으면 스터드, 본드로 붙였으면 접착, 자석이면 자석, 손으로 대고 재면 핸드프로브를 고르세요. 방식에 따라 믿을 수 있는 주파수 상한이 달라서(스터드 10, 접착 5, 자석 2, 프로브 1 kHz) 그보다 높은 대역은 기계가 아니라 마운팅이 울린 것으로 보고 결함 탐색에서 제외합니다. 모르면 비워두세요. 대신 고주파 분석을 제한 없이 신뢰하게 되므로, 자석 마운트라면 꼭 선택하는 것이 좋습니다.'),
+      '구동방식': T('모터의 힘이 기계로 전달되는 방식입니다. 축이 커플링으로 바로 이어져 있으면 직결, 벨트가 보이면 벨트, 기어박스를 거치면 기어입니다. 벨트를 고르고 풀리 지름을 넣으면 종동축 회전수가 계산되어, 정체를 알 수 없던 진동 성분이 종동축 것인지 밝힐 수 있습니다.'),
+      '날개수 · 잇수': T('펌프나 팬이면 임펠러 날개 개수, 기어 구동이면 잇수입니다. 명판이나 사양서에서 확인하세요. 날개수에 회전수를 곱한 것이 베인 통과 주파수이며, 이 성분이 크면 유동 이상이나 간극 문제를 가리킵니다. 모르면 반드시 비워두세요. 추측으로 넣으면 그 값이 그대로 판정 근거가 됩니다.'),
+      '센서 위치': T('이 센서가 붙은 축입니다. 모터 쪽 베어링이면 모터측, 벨트 반대편(팬·펌프 등) 베어링이면 종동측을 고릅니다.\n\n종동측이면 결함 패턴·결함 주파수·대역을 종동축 회전수로 계산합니다(모터 RPM × 구동 풀리경 ÷ 종동 풀리경). 회전수가 1~2%만 틀려도 결함 부위 판단이 흔들리므로, 타코미터 등으로 잰 종동축 회전수가 있으면 직접 입력하세요.'),
+      '벨트 제원': T('풀리 두 개의 피치 지름(벨트가 감기는 위치의 지름 — 풀리 각인·카탈로그 값, 바깥지름보다 조금 작음)과 벨트 총길이입니다. 벨트 길이는 벨트 옆면의 각인(예: A-50, 5V1200)에서 확인합니다. 지름 두 개만 있으면 종동축 회전수가 나오고, 길이까지 있으면 벨트 자체 결함(균열·결손)의 주파수도 계산됩니다.'),
+      '대역 추출 주기': T('이 주기마다 결함 패턴을 재서 등급을 매기므로, 등급 확정의 회차 길이도 이 주기가 정합니다. 대역 에너지와 결함 패턴은 시간·일 단위로 변하는 값이라 평상시엔 10분이면 충분합니다. 정지·신호 두절·계측 이상은 판정 주기마다 따로 봅니다.\n\n다만 베이스라인 학습에는 표본 30개가 필요해 10분 주기면 5시간이 걸립니다. 처음 도입할 때는 과거 채우기로 지난 구간을 소급 추출하면 기다리지 않고 바로 학습할 수 있습니다.\n\n40대 기준 서버 부하 — 10분 5.5% · 30분 1.8% · 1시간 0.9%'),
+      '전원 계통주파수': T('모터에 공급되는 상용전원의 주파수로, 한국은 60 Hz입니다. 전기적 결함은 이 값의 2배(120 Hz)에서 나타나며, 기계적 결함과 달리 회전수가 변해도 움직이지 않는 것이 구분 기준입니다. 입력된 RPM이 다른 계통의 동기속도에 맞으면 경고를 표시합니다.'),
       // 직접 입력(베어링 형상) — 제조사 카탈로그 기하 제원 항목
-      '품번': '베어링의 제조사·품번입니다(예: SKF 22218 E). 판정에는 쓰지 않고, 상세분석·리포트에 어떤 베어링인지 표시합니다. 형상값은 이 품번의 제조사 카탈로그에서 옮겨 적습니다.',
-      '볼 수 n': '전동체(볼 또는 롤러)의 개수입니다. 베어링 제조사 카탈로그의 형상 제원에서 확인합니다. 네 값이 모두 있어야 결함 주파수가 계산됩니다.',
-      '볼경 Bd': '전동체 하나의 지름(mm)입니다. 카탈로그의 ball diameter 항목입니다.',
-      '피치경 Pd': '전동체들의 중심을 잇는 원의 지름(mm)입니다. 카탈로그의 pitch diameter 항목이며, 대략 (내경+외경)÷2입니다.',
-      '접촉각 φ': '전동체가 궤도면과 닿는 각도입니다. 깊은홈 볼베어링은 0°, 앵귤러 콘택트는 15~40°입니다. 모르면 0으로 두세요.',
+      '품번': T('베어링의 제조사·품번입니다(예: SKF 22218 E). 판정에는 쓰지 않고, 상세분석·리포트에 어떤 베어링인지 표시합니다. 형상값은 이 품번의 제조사 카탈로그에서 옮겨 적습니다.'),
+      '볼 수 n': T('전동체(볼 또는 롤러)의 개수입니다. 베어링 제조사 카탈로그의 형상 제원에서 확인합니다. 네 값이 모두 있어야 결함 주파수가 계산됩니다.'),
+      '볼경 Bd': T('전동체 하나의 지름(mm)입니다. 카탈로그의 ball diameter 항목입니다.'),
+      '피치경 Pd': T('전동체들의 중심을 잇는 원의 지름(mm)입니다. 카탈로그의 pitch diameter 항목이며, 대략 (내경+외경)÷2입니다.'),
+      '접촉각 φ': T('전동체가 궤도면과 닿는 각도입니다. 깊은홈 볼베어링은 0°, 앵귤러 콘택트는 15~40°입니다. 모르면 0으로 두세요.'),
       // 판정 기준 — 존 경계(ISO 10816)·베이스라인 통계, 잘못 바꿔도 에러 없이 판정만 변하므로 의미·영향 명시
-      'A/B': 'ISO 존 A와 B를 가르는 경계입니다. A는 신품 수준의 진동, B는 제한 없이 장기 운전할 수 있는 수준입니다. 측정값이 이 값을 넘으면 ISO 존이 B로 표시됩니다. 등급은 결함 패턴이 잡혀야 켜지고 켜지면 최소 주의라, 이 경계는 등급을 바꾸지 않습니다.',
-      'B/C': 'ISO 존 B와 C를 가르는 경계입니다. C부터는 장기 운전에 부적합한 수준이라 조치 권고가 여기서 갈립니다. 결함 패턴이 잡힌 설비가 이 값을 넘으면 등급이 위험으로 올라갑니다. 세 경계 중 실무에서 가장 중요한 값입니다.',
-      'C/D': 'ISO 존 C와 D를 가르는 경계입니다. D는 기계에 손상을 일으킬 수 있는 수준으로, 긴급 점검 대상입니다. 결함 패턴이 잡힌 설비가 이 값을 넘으면 등급이 심각으로 올라갑니다.',
-      '임계 초기화': '수정한 임계값을 ISO 10816 기본값으로 되돌립니다. 값을 직접 수정하면 그때부터는 규격이 아니라 사용자 정의 기준으로 판정한다는 점을 유의하세요.',
-      '정상 학습 기간': '이 구간의 데이터를 "정상 상태"로 간주해 중심(μ)과 평소 변동(σ)을 학습합니다. 정지·기동 구간과 순간 스파이크는 자동으로 걸러지지만, 결함이 이미 진행 중인 기간으로 학습하면 그 결함이 정상 기준이 됩니다 — 정상 운전이 확실한 기간을 고르세요. 길수록 다양한 운전 상태가 포함돼 기준이 견고해집니다.',
-      'k (σ 배수)': '평소 변동(σ)의 몇 배까지를 정상으로 볼지 정하는 값입니다. k=3이면 정상 데이터의 약 99.7%가 한계 안에 들어옵니다. 낮추면 민감해져 급증을 일찍 잡는 대신 오탐이 늘고, 높이면 그 반대입니다. 확신이 없으면 3을 그대로 두세요.',
+      'A/B': T('ISO 존 A와 B를 가르는 경계입니다. A는 신품 수준의 진동, B는 제한 없이 장기 운전할 수 있는 수준입니다. 측정값이 이 값을 넘으면 ISO 존이 B로 표시됩니다. 등급은 결함 패턴이 잡혀야 켜지고 켜지면 최소 주의라, 이 경계는 등급을 바꾸지 않습니다.'),
+      'B/C': T('ISO 존 B와 C를 가르는 경계입니다. C부터는 장기 운전에 부적합한 수준이라 조치 권고가 여기서 갈립니다. 결함 패턴이 잡힌 설비가 이 값을 넘으면 등급이 위험으로 올라갑니다. 세 경계 중 실무에서 가장 중요한 값입니다.'),
+      'C/D': T('ISO 존 C와 D를 가르는 경계입니다. D는 기계에 손상을 일으킬 수 있는 수준으로, 긴급 점검 대상입니다. 결함 패턴이 잡힌 설비가 이 값을 넘으면 등급이 심각으로 올라갑니다.'),
+      '임계 초기화': T('수정한 임계값을 ISO 10816 기본값으로 되돌립니다. 값을 직접 수정하면 그때부터는 규격이 아니라 사용자 정의 기준으로 판정한다는 점을 유의하세요.'),
+      '정상 학습 기간': T('이 구간의 데이터를 "정상 상태"로 간주해 중심(μ)과 평소 변동(σ)을 학습합니다. 정지·기동 구간과 순간 스파이크는 자동으로 걸러지지만, 결함이 이미 진행 중인 기간으로 학습하면 그 결함이 정상 기준이 됩니다 — 정상 운전이 확실한 기간을 고르세요. 길수록 다양한 운전 상태가 포함돼 기준이 견고해집니다.'),
+      'k (σ 배수)': T('평소 변동(σ)의 몇 배까지를 정상으로 볼지 정하는 값입니다. k=3이면 정상 데이터의 약 99.7%가 한계 안에 들어옵니다. 낮추면 민감해져 급증을 일찍 잡는 대신 오탐이 늘고, 높이면 그 반대입니다. 확신이 없으면 3을 그대로 두세요.'),
       // 알람 — 주기·구간 관계 명시
-      '판정 주기': '얼마나 자주 판정하는지입니다.\n3초면 3초마다 한 번씩, 그때까지의 RMS 구간을 평가합니다.\n\n짧게 하면 변화를 빨리 알지만 조회가 그만큼 늘어납니다. 조회는 테이블당 한 번이라 태그 수와는 무관합니다.',
-      '평가 주기': '얼마나 자주 판정하는지입니다.\n3초면 3초마다 한 번씩, 그때까지의 RMS 구간을 평가합니다.',
-      '대역 학습 기간': '대역별 정상 기준을 배울 구간입니다. 베이스라인과 따로 두는 이유는 표본 밀도가 달라서입니다 — 대역은 추출 주기마다 하나씩만 생깁니다(10분 주기면 24시간에 144개).',
-      'RMS 구간': '이 구간에 들어온 원본 전체로 실효값 하나를 냅니다. 길면 짧은 진동이 하나의 상태로 합쳐지고, 짧으면 변화를 잘게 봅니다.\n\n등급은 이 값이 정하지 않습니다 — 결함 패턴이 추출 주기마다 정하고, 이 값은 운전 여부·신호 두절·계측 이상·평소 대비를 봅니다.',
+      '판정 주기': T('얼마나 자주 판정하는지입니다.\n3초면 3초마다 한 번씩, 그때까지의 RMS 구간을 평가합니다.\n\n짧게 하면 변화를 빨리 알지만 조회가 그만큼 늘어납니다. 조회는 테이블당 한 번이라 태그 수와는 무관합니다.'),
+      '평가 주기': T('얼마나 자주 판정하는지입니다.\n3초면 3초마다 한 번씩, 그때까지의 RMS 구간을 평가합니다.'),
+      '대역 학습 기간': T('대역별 정상 기준을 배울 구간입니다. 베이스라인과 따로 두는 이유는 표본 밀도가 달라서입니다 — 대역은 추출 주기마다 하나씩만 생깁니다(10분 주기면 24시간에 144개).'),
+      'RMS 구간': T('이 구간에 들어온 원본 전체로 실효값 하나를 냅니다. 길면 짧은 진동이 하나의 상태로 합쳐지고, 짧으면 변화를 잘게 봅니다.\n\n등급은 이 값이 정하지 않습니다 — 결함 패턴이 추출 주기마다 정하고, 이 값은 운전 여부·신호 두절·계측 이상·평소 대비를 봅니다.'),
     };
     // 계통주파수 RPM 검산 — 유도전동기 동기속도(120·f/극수)로 50/60 Hz 계열 추정, 자동 변경 없음(사용자 입력 우선)
     base.lineHzHint = (function () {
@@ -6280,8 +6256,8 @@ export class App extends Component {
         });
       });
       var sel = Number(S.lineHz || 60), other = sel === 60 ? 50 : 60;
-      if (votes[other] > votes[sel]) return { warn: true, text: '입력된 RPM ' + votes[other] + '건이 ' + other + ' Hz 계통 동기속도에 맞습니다 — 설정 확인 필요' };
-      if (votes[sel] > 0) return { warn: false, text: 'RPM ' + votes[sel] + '건과 정합' };
+      if (votes[other] > votes[sel]) return { warn: true, text: T('입력된 RPM {0}건이 {1} Hz 계통 동기속도에 맞습니다 — 설정 확인 필요', votes[other], other) };
+      if (votes[sel] > 0) return { warn: false, text: T('RPM {0}건과 정합', votes[sel]) };
       return null;
     })();
     // 컨트롤은 평소 숨김(국내 60 Hz 단일) — 이미 50 설정이거나 RPM이 다른 계통에 맞을 때만 노출
@@ -6300,7 +6276,7 @@ export class App extends Component {
     });
     ['g', 'μm'].forEach(function (u) {
       var du = VC.zonesFor(u, 'II'), ou = S.unitThresh[u] || [];
-      var _ud = { g: '가속도', 'μm': '변위' }[u] || '';
+      var _ud = { g: T('가속도'), 'μm': T('변위') }[u] || '';
       base.threshRows.push({ label: u + ' (' + _ud + ')', unit: u,
         v0: rawOf(ou, 0, du[0]), v1: rawOf(ou, 1, du[1]), v2: rawOf(ou, 2, du[2]),
         on0: function (ev) { self._setUnitThresh(u, 0, ev.target.value); },
@@ -6310,7 +6286,7 @@ export class App extends Component {
     // 초기화도 저장해야 확정 — dirty 설정 필수(없으면 저장 안내 없이 옛 값 부활)
     base.onResetThresh = function () {
       self.setState({ classThresh: {}, unitThresh: {}, dirty: true });
-      self._toast('임계값을 기본값으로 되돌렸습니다 — 저장해야 적용됩니다', 'warn');
+      self._toast(T('임계값을 기본값으로 되돌렸습니다 — 저장해야 적용됩니다'), 'warn');
     };
     // 베이스라인(정상 상태 학습) — 판정기준 카드
     base.blWin = S.blWin; base.onBlWin = function (ev) { self.setState({ blWin: ev.target.value }); };
@@ -6327,34 +6303,22 @@ export class App extends Component {
       var revived = !!(S.revived || {})[key];
       var status, color, statusTip = '';
       if (revived) {
-        status = '학습값이 남아 있습니다 — 이전과 같은 설비인가요?';
+        status = T('학습값이 남아 있습니다 — 이전과 같은 설비인가요?');
         color = '#d99a2b';
-        statusTip = '방금 추가된 이 태그에 예전 학습값(μ·σ)이 그대로 남아 있습니다.'
-          + '\n\n같은 설비라면 그대로 쓰면 되지만, 다른 설비에 같은 이름을 붙인 것이라면 남의 기준으로 판정하게 됩니다.'
-          + '\n새 설비가 더 조용하면 이탈이 영영 안 잡히고, 더 시끄러우면 이탈이 계속 표시됩니다. 둘 다 화면에는 "학습됨"으로만 보입니다.'
-          + '\n\n확인할 때까지 베이스라인·대역 판정을 멈춥니다. ISO 존 등급은 절대 기준이라 계속 판정합니다.'
-          + (b && b.at ? '\n\n남아 있는 학습값: μ ' + b.mu.toFixed(3) + ' · ' + self.E.fmtDT(b.at) + ' 학습' : '');
+        statusTip = T('방금 추가된 이 태그에 예전 학습값(μ·σ)이 그대로 남아 있습니다.\n\n같은 설비라면 그대로 쓰면 되지만, 다른 설비에 같은 이름을 붙인 것이라면 남의 기준으로 판정하게 됩니다.\n새 설비가 더 조용하면 이탈이 영영 안 잡히고, 더 시끄러우면 이탈이 계속 표시됩니다. 둘 다 화면에는 "학습됨"으로만 보입니다.\n\n확인할 때까지 베이스라인·대역 판정을 멈춥니다. ISO 존 등급은 절대 기준이라 계속 판정합니다.{0}', b && b.at ? T('\n\n남아 있는 학습값: μ {0} · {1} 학습', b.mu.toFixed(3), self.E.fmtDT(b.at)) : '');
       }
-      else if (busy) { status = '학습 중…'; color = 'var(--primary-light)'; }
+      else if (busy) { status = T('학습 중…'); color = 'var(--primary-light)'; }
       else if (b) {
         var ex = (b.ex && (b.ex.idle || b.ex.ramp)) ? ((b.ex.idle || 0) + (b.ex.ramp || 0)) : 0;
-        status = '한계 ' + VC.baselineLimit(b).toFixed(2) + ' ' + eq.unit
-          + ' · μ ' + b.mu.toFixed(2) + ' σ ' + b.sigma.toFixed(2) + ' (k=' + b.k + ')'
-          + (weak ? ' · 참고용' : '');
-        statusTip = '한계 = μ + kσ (최소 μ의 1.2배). 이 값을 넘으면 카드와 근거표에 베이스라인 이탈로 표시됩니다(등급·알림 없음).'
-          + '\n\n중심 μ ' + b.mu.toFixed(3) + ' · 평소 변동 σ ' + b.sigma.toFixed(3) + ' · k ' + b.k
-          + (b.n != null ? '\n학습 표본 ' + b.n + '개' : '') + (b.spanMin != null ? ' · 구간 ' + b.spanMin + '분' : '')
-          + (ex ? '\n제외 ' + ex + '개 — 정지 ' + (b.ex.idle || 0) + ' · 기동/정지 과도 ' + (b.ex.ramp || 0) : '')
-          + (weak ? '\n\n⚠구간이 10분 미만이라 대표성이 낮습니다. 더 긴 정상 운전 구간으로 다시 학습하는 것이 좋습니다.' : '');
-        statusTip += (b.at ? '\n\n학습 시점 ' + self.E.fmtDT(b.at)
-          + (b.evalWin ? ' · ' + b.evalWin + '초 구간 기준' : '')
-          + (agoStale(b.at) ? '\n⚠한 달이 넘었습니다 — 그 사이 정비나 운전 조건 변경이 있었다면 다시 학습하십시오.' : '') : '');
+        status = T('한계 {0} {1} · μ {2} σ {3} (k={4}){5}', VC.baselineLimit(b).toFixed(2), eq.unit, b.mu.toFixed(2), b.sigma.toFixed(2), b.k, weak ? T(' · 참고용') : '');
+        statusTip = T('한계 = μ + kσ (최소 μ의 1.2배). 이 값을 넘으면 카드와 근거표에 베이스라인 이탈로 표시됩니다(등급·알림 없음).\n\n중심 μ {0} · 평소 변동 σ {1} · k {2}{3}{4}{5}{6}', b.mu.toFixed(3), b.sigma.toFixed(3), b.k, b.n != null ? T('\n학습 표본 {0}개', b.n) : '', b.spanMin != null ? T(' · 구간 {0}분', b.spanMin) : '', ex ? T('\n제외 {0}개 — 정지 {1} · 기동/정지 과도 {2}', ex, b.ex.idle || 0, b.ex.ramp || 0) : '', weak ? T('\n\n⚠구간이 10분 미만이라 대표성이 낮습니다. 더 긴 정상 운전 구간으로 다시 학습하는 것이 좋습니다.') : '');
+        statusTip += (b.at ? T('\n\n학습 시점 {0}{1}{2}', self.E.fmtDT(b.at), b.evalWin ? T(' · {0}초 구간 기준', b.evalWin) : '', agoStale(b.at) ? T('\n⚠한 달이 넘었습니다 — 그 사이 정비나 운전 조건 변경이 있었다면 다시 학습하십시오.') : '') : '');
         color = weak ? '#d99a2b' : 'var(--text-secondary)';
       } else if (!learnable) {
-        status = '학습 불가 · 데이터 ' + spanSec + '초';
-        statusTip = '학습에는 최소 ' + VC.BASELINE_MIN_N + '초(=' + VC.BASELINE_MIN_N + '개 버킷) 분량이 필요합니다. 데이터가 더 쌓인 뒤 다시 시도하세요.';
+        status = T('학습 불가 · 데이터 {0}초', spanSec);
+        statusTip = T('학습에는 최소 {0}초(={1}개 버킷) 분량이 필요합니다. 데이터가 더 쌓인 뒤 다시 시도하세요.', VC.BASELINE_MIN_N, VC.BASELINE_MIN_N);
         color = 'var(--text-muted)';
-      } else { status = '미학습'; statusTip = '학습하지 않아도 등급 판정은 정상 동작합니다. 학습하면 평소 대비 급증까지 표시합니다.'; color = 'var(--text-muted)'; }
+      } else { status = T('미학습'); statusTip = T('학습하지 않아도 등급 판정은 정상 동작합니다. 학습하면 평소 대비 급증까지 표시합니다.'); color = 'var(--text-muted)'; }
       // 되살아난 태그 처리 — 같은 설비면 유지, 다른 설비면 초기화(즉시 반영)
       var revActions = revived ? {
         keep: function () { self._keepLearned(key); },
@@ -6368,14 +6332,14 @@ export class App extends Component {
         hasBl: !!b && !busy,
         learnBtnStyle: 'height: 26px; padding: 0 12px; border-radius: 5px; border: none; font-size: 11px; font-weight: 600; color: #fff; background: var(--primary-base);'
           + (learnable && !busy ? ' cursor: pointer;' : ' opacity: .4; cursor: default;'),
-        onLearn: function () { if (!learnable) { self._toast('데이터 부족으로 학습 불가 — 데이터 구간 ' + spanSec + '초 (최소 ' + VC.BASELINE_MIN_N + '초)', 'warn'); return; } self._learnBaseline(eq); },
+        onLearn: function () { if (!learnable) { self._toast(T('데이터 부족으로 학습 불가 — 데이터 구간 {0}초 (최소 {1}초)', spanSec, VC.BASELINE_MIN_N), 'warn'); return; } self._learnBaseline(eq); },
         onDel: function () { self._delBaseline(key, eq); },
       };
     });
     // 대역 범례 — 클릭으로 계열 끄기(축 범위 재계산으로 작은 대역 가시화)
     var _bh = S.bandHide || {};
     base.bandLegend = (this._lastBandSeries || []).map(function (sr) {
-      return { label: sr.label, color: sr.color, dash: !!sr.dash, on: !_bh[sr.label],
+      return { label: tx(sr.label), color: sr.color, dash: !!sr.dash, on: !_bh[sr.label],
         onClick: function () { var h = Object.assign({}, self.state.bandHide || {}); if (h[sr.label]) delete h[sr.label]; else h[sr.label] = 1; self.setState({ bandHide: h }); } };
     });
     /* 배수 축 토글 — 무차원 비교, ×1 = 판정선
@@ -6387,19 +6351,18 @@ export class App extends Component {
     // 나누는 값 = 알람 기준(max(μ+kσ, μ×1.2)) — 1.0이 알람선, 0.88은 '알람 기준의 88%'
     base.bandNorm = !!S.bandNorm;
     base.bandNormReady = _nOk > 0;
-    base.bandNormLabel = base.bandNorm ? '원값으로 보기' : '알람 기준으로 보기';
+    base.bandNormLabel = base.bandNorm ? T('원값으로 보기') : T('알람 기준으로 보기');
     // 학습 없으면 토글 거부·안내 — 켜면 빈 차트(정상 또는 고장으로 오독)
     base.onBandNorm = function () {
       if (!self.state.bandNorm && !(_nOk > 0)) {
-        self._toast('대역 베이스라인 학습이 필요한 기능입니다 — 판정 기준에서 먼저 학습하세요', 'warn');
+        self._toast(T('대역 베이스라인 학습이 필요한 기능입니다 — 판정 기준에서 먼저 학습하세요'), 'warn');
         return;
       }
       self.setState({ bandNorm: !self.state.bandNorm });
     };
     // 일부만 학습됐으면 빠진 계열 수 안내
     base.bandNormNote = (base.bandNorm && _nOk)
-      ? '학습 한계(μ+kσ)를 1.0으로 놓고 본 비율 — 1.0을 넘으면 이탈'
-        + (_nOk < _nAll ? ' · 학습되지 않은 ' + (_nAll - _nOk) + '개 계열은 빠집니다' : '')
+      ? T('학습 한계(μ+kσ)를 1.0으로 놓고 본 비율 — 1.0을 넘으면 이탈{0}', _nOk < _nAll ? T(' · 학습되지 않은 {0}개 계열은 빠집니다', _nAll - _nOk) : '')
       : '';
     base.onBlLearnAll = function () { blEqs.forEach(function (eq) { if (self._blLearnable(eq)) self._learnBaseline(eq); }); };
     // 확인 대기 태그 수 — 학습 기반 판정 중단 중인 태그 수 표시
@@ -6410,15 +6373,15 @@ export class App extends Component {
     base.llmApiKey = (S.llmKeys || {})[S.llmProvider] || '';
     base.onLlmKey = function (ev) { var m = Object.assign({}, S.llmKeys); m[S.llmProvider] = ev.target.value; self.setState({ llmKeys: m, dirty: true, llmConfigured: false, llmTest: null }); };
     base.llmModel = (S.llmModels || {})[S.llmProvider] || '';
-    base.llmModelPh = '예: ' + ({ claude: 'claude-haiku-4-5-20251001', openai: 'gpt-5.5-2026-04-23', gemini: 'gemini-3.5-flash', ollama: 'ornith:9b' }[S.llmProvider] || '모델명 입력');
+    base.llmModelPh = T('예: {0}', { claude: 'claude-haiku-4-5-20251001', openai: 'gpt-5.5-2026-04-23', gemini: 'gemini-3.5-flash', ollama: 'ornith:9b' }[S.llmProvider] || T('모델명 입력'));
     base.onLlmModel = function (ev) { var m = Object.assign({}, S.llmModels); m[S.llmProvider] = ev.target.value; self.setState({ llmModels: m, dirty: true, llmConfigured: false, llmTest: null }); };
     base.ollamaUrl = S.ollamaUrl;
     base.onOllamaUrl = function (ev) { self.setState({ ollamaUrl: ev.target.value, dirty: true, llmConfigured: false, llmTest: null }); };
-    base.llmTesting = S.llmTesting; base.llmTestShow = !!S.llmTest; base.llmTestMsg = S.llmTest ? S.llmTest.msg : ''; base.llmTestColor = S.llmTest ? (S.llmTest.ok ? '#3aa76d' : '#e5484d') : ''; base.llmTestIcon = S.llmTest ? (S.llmTest.ok ? 'pass-filled' : 'error') : '';
+    base.llmTesting = S.llmTesting; base.llmTestShow = !!S.llmTest; base.llmTestMsg = S.llmTest ? tx(S.llmTest.msg) : ''; base.llmTestColor = S.llmTest ? (S.llmTest.ok ? '#3aa76d' : '#e5484d') : ''; base.llmTestIcon = S.llmTest ? (S.llmTest.ok ? 'pass-filled' : 'error') : '';
     base.onTestLLM = function () { self._testLLM(); };
     // 설정 화면 상태 표시 — 입력 중인 값 기준
     var llmReady2 = !!LLM.createLLM(this._llmCfg(S));
-    base.llmStatusText = (S.llmConfigured ? '연결됨' : (llmReady2 ? '설정됨 · 테스트 권장' : '미설정')) + (llmReady2 ? ' — ' + this._llmLabel(S) : '');
+    base.llmStatusText = (S.llmConfigured ? T('연결됨') : (llmReady2 ? T('설정됨 · 테스트 권장') : T('미설정'))) + (llmReady2 ? ' — ' + this._llmLabel(S) : '');
     base.llmStatusColor = S.llmConfigured ? '#3aa76d' : (llmReady2 ? '#d99a2b' : 'var(--text-muted)');
     base.monitorOn = S.monitorOn;
     base.monToggleStyle = SWITCH_TRACK(S.monitorOn);
@@ -6428,12 +6391,12 @@ export class App extends Component {
     var _ivMs = durMs(S.monitorInterval) || 3000;
     base.evalWindow = S.evalWindow;
     // 프리셋 + 직접 입력 — 현장마다 적정 RMS 구간 상이
-    var _PRE = [{ v: '3s', l: '3초' }, { v: '10s', l: '10초' }, { v: '30s', l: '30초' },
-      { v: '1m', l: '1분' }, { v: '5m', l: '5분' }, { v: '10m', l: '10분' }, { v: '30m', l: '30분' }, { v: '1h', l: '1시간' }];
+    var _PRE = [{ v: '3s', l: T('3초') }, { v: '10s', l: T('10초') }, { v: '30s', l: T('30초') },
+      { v: '1m', l: T('1분') }, { v: '5m', l: T('5분') }, { v: '10m', l: T('10분') }, { v: '30m', l: T('30분') }, { v: '1h', l: T('1시간') }];
     var _cur = S.evalWindow || '10s';
     var _isCustom = !_PRE.some(function (o) { return o.v === _cur; });
     base.evalWindowOptions = _PRE.map(function (o) { return { v: o.v, l: o.l, disabled: durMs(o.v) < _ivMs }; })
-      .concat([{ v: '__custom__', l: '직접 입력', disabled: false }]);
+      .concat([{ v: '__custom__', l: T('직접 입력'), disabled: false }]);
     base.evalWindowSel = _isCustom ? '__custom__' : _cur;
     base.evalWinCustom = _isCustom;
     base.evalWinCustomMin = _isCustom ? String(Math.round(durMs(_cur) / 60000 * 10) / 10) : '';
@@ -6455,8 +6418,8 @@ export class App extends Component {
     base.monMode = S.monMode;
     base.serverMon = S.monMode === 'server';
     base.monModeOptions = [
-      { v: 'app', label: '앱 감시', desc: '앱이 열려 있는 동안만 판정 (기본)' },
-      { v: 'server', label: '서버 상시 감시', desc: 'Neo 타이머로 앱을 닫아도 계속 감지' },
+      { v: 'app', label: T('앱 감시'), desc: T('앱이 열려 있는 동안만 판정 (기본)') },
+      { v: 'server', label: T('서버 상시 감시'), desc: T('Neo 타이머로 앱을 닫아도 계속 감지') },
     ].map(function (o) {
       var a = S.monMode === o.v;
       return {
@@ -6467,28 +6430,30 @@ export class App extends Component {
       };
     });
     // 지속 재알림 주기 선택지
-    var RENO_OPTS = [{ v: '0', l: '끔' }, { v: '30m', l: '30분' }, { v: '1h', l: '1시간' }, { v: '2h', l: '2시간' }, { v: '6h', l: '6시간' }];
+    var RENO_OPTS = [{ v: '0', l: T('끔') }, { v: '30m', l: T('30분') }, { v: '1h', l: T('1시간') }, { v: '2h', l: T('2시간') }, { v: '6h', l: T('6시간') }];
     base.renotifyOptions = RENO_OPTS;
     // 베이스라인 미학습 경고(판정기준 카드) — 학습 가능한데 미학습인 태그 수 (setNav의 _blUnCnt와 동일 기준)
     base.monBlUnlearned = _blUnCnt;
     base.monBlNotice = _blUnCnt > 0;
-    var _wl = durKo(durMs(S.evalWindow));
-    base.evalBasisText = _wl + ' 구간 RMS';
+    var _wl = tx(durKo(durMs(S.evalWindow)));
+    base.evalBasisText = T('{0} 구간 RMS', _wl);
     // 판정 주기별 조회 부하 표시 — 실측 소요(_tickCostMs) 우선, 첫 틱 전엔 태그 수 선형 추정
     var _nTbl = (S.srcSel || []).length || 1;
     var _nTag = this._activeEqs().length;
     var _measured = this._tickCostMs != null;
     var _cost = Math.round(_measured ? this._tickCostMs : _nTbl * 5 + _nTag * 0.35);
     var _duty = _ivMs > 0 ? _cost / _ivMs * 100 : 0;
-    base.evalLoadText = '조회에 회차당 ' + _cost + 'ms' + (_measured ? '(실측)' : '(예상)')
-      + '가 걸려 주기의 ' + _duty.toFixed(0) + '%를 씁니다'
-      + (_duty >= 100 ? ' — 다음 회차를 밀어냅니다. 주기를 늘리십시오.' : ' — 주기를 늘리는 것을 권합니다.');
+    base.evalLoadText = T('조회에 회차당 {0}ms{1}가 걸려 주기의 {2}%를 씁니다{3}', _cost, _measured ? T('(실측)') : T('(예상)'), _duty.toFixed(0), _duty >= 100 ? T(' — 다음 회차를 밀어냅니다. 주기를 늘리십시오.') : T(' — 주기를 늘리는 것을 권합니다.'));
     base.evalLoadWarn = _duty >= 50;
     // 구간 < 주기면 데이터 누락 — 저장 전 화면에서 차단
     base.evalWinBad = durMs(S.evalWindow) < _ivMs;
+    // 알림 언어 — 비었으면(저장 전) 화면 언어로 보이고 저장 때 확정(_cfgFromState)
+    base.notifLangSel = S.notifLang || getLang();
+    base.notifLangOptions = LANGS.map(function (l) { return { id: l.id, label: l.label }; });
+    base.onNotifLang = function (ev) { self.setState({ notifLang: ev.target.value, dirty: true, notifTest: null }); };
     // 채널은 웹훅 하나 — jsh에 SMTP 없음, HTTP API·자동화 도구 경유는 전부 웹훅 URL로 표현
     base.notifChannels = [
-      { key: 'webhook', label: '웹훅', hint: 'Slack · Discord · Google Chat · 자체 엔드포인트 — 이메일·문자는 n8n 등 자동화 도구를 이 URL로 받아 중계', ph: 'https://hooks.slack.com/services/…', ready: true }
+      { key: 'webhook', label: T('웹훅'), hint: T('Slack · Discord · Google Chat · 자체 엔드포인트 — 이메일·문자는 n8n 등 자동화 도구를 이 URL로 받아 중계'), ph: 'https://hooks.slack.com/services/…', ready: true }
     ].map(function (c) {
       var on = !!S.notifCh[c.key];
       var val = (S.notifTo || {})[c.key] || '';
@@ -6496,8 +6461,8 @@ export class App extends Component {
       var usable = c.ready && on && !!val;
       return {
         key: c.key, label: c.label, hint: c.hint, ph: c.ph, on: on, value: val,
-        testLabel: S.notifTesting === c.key ? '발송 중…' : '테스트 발송',
-        testShow: !!t, testMsg: t ? t.msg : '',
+        testLabel: S.notifTesting === c.key ? T('발송 중…') : T('테스트 발송'),
+        testShow: !!t, testMsg: t ? tx(t.msg) : '',
         testMsgStyle: 'font-size: 11px; margin-top: 4px; color: ' + (t && t.ok ? '#3aa76d' : '#e5484d') + ';',
         testBtnStyle: 'height: 32px; padding: 0 12px; border-radius: 6px; border: 1px solid var(--border-medium); background: var(--bg-elevated); color: var(--text-secondary); font-size: 12px; font-weight: 600; white-space: nowrap;' + (usable ? ' cursor: pointer;' : ' opacity: .4; pointer-events: none;'),
         toggleStyle: SWITCH_TRACK(on),
@@ -6532,20 +6497,20 @@ export class App extends Component {
     });
     // 확정 시간은 판정 기준의 추출 주기가 결정 — 여기선 결과만 표시(값 이중화 방지)
     var _cIv = durMs(S.bandInterval || '10m') || 600000;
-    base.confirmIvKo = durKo(_cIv);
+    base.confirmIvKo = tx(durKo(_cIv));
     // 웹훅 도착 시점 요약 — 2회 연속 확정이라 주기의 2배
-    base.confirmSumKo = durKo(_cIv * 2);
+    base.confirmSumKo = tx(durKo(_cIv * 2));
     // 회차별 동작 표 — 등급 표시 칸은 카드 실제 문구 그대로, 악화·복귀 대칭 두 묶음
     var _AMBER = self.E.STATUS[1].color, _GREEN = self.E.STATUS[0].color;
     base.confirmSteps = [
-      { head: '이상 진입', color: _AMBER },
-      { when: '1회차', what: '등급 표시 · 이력에 관찰로 남김', chip: '표시', sent: false, color: _AMBER, first: true },
-      { when: '2회차', what: '확정 — 여기서 알람이 시작됩니다', chip: '확정 표시', sent: true, dot: true, color: _AMBER },
+      { head: T('이상 진입'), color: _AMBER },
+      { when: T('1회차'), what: T('등급 표시 · 이력에 관찰로 남김'), chip: T('표시'), sent: false, color: _AMBER, first: true },
+      { when: T('2회차'), what: T('확정 — 여기서 알람이 시작됩니다'), chip: T('확정 표시'), sent: true, dot: true, color: _AMBER },
       // 발송 내용만 기재(재알림 주기 값은 아래 심각도별 표)
-      { when: '이후', what: '재알림 주기마다 다시 알림', chip: '유지', sent: true, color: _AMBER, last: true },
-      { head: '정상 복귀', color: _GREEN },
-      { when: '1회차', what: '복귀 관찰 — 확정은 아직 유지', chip: '유지', sent: false, color: _GREEN, first: true },
-      { when: '2회차', what: '정상 복귀 — 에피소드 종료', chip: '해제', sent: true, dot: true, color: _GREEN, last: true },
+      { when: T('이후'), what: T('재알림 주기마다 다시 알림'), chip: T('유지'), sent: true, color: _AMBER, last: true },
+      { head: T('정상 복귀'), color: _GREEN },
+      { when: T('1회차'), what: T('복귀 관찰 — 확정은 아직 유지'), chip: T('유지'), sent: false, color: _GREEN, first: true },
+      { when: T('2회차'), what: T('정상 복귀 — 에피소드 종료'), chip: T('해제'), sent: true, dot: true, color: _GREEN, last: true },
     ];
     // 설정 칸까지 이동·강조 — 렌더 후 찾아야 해 한 틱 지연
     base.onGoBandIv = function () {
@@ -6574,7 +6539,7 @@ export class App extends Component {
       var busy = (S.bandBusy || {})[base2];
       var learned = bls ? Object.keys(bls).length : 0;
       var status, color, tip = '', _bandAt = 0;
-      if (busy) { status = '학습 중…'; color = 'var(--primary-light)'; }
+      if (busy) { status = T('학습 중…'); color = 'var(--primary-light)'; }
       else if (learned) {
         var parts = VC.BAND_ORDER.filter(function (bn) { return bls[bn]; });
         var _d0 = (self._detailCache[eq.id] || {}).det;
@@ -6583,38 +6548,36 @@ export class App extends Component {
         var _mnt = ((S.equipMeta || {})[eq.id] || {}).mount || (eq.meta || {}).mount;
         var envAble = VC.demodBand(eq.fs, _mnt) ? (1 + (VC.faultCoeffs(self._bearingGeo(eq, S)) ? 3 : 0)) : 0;
         var able = VC.BAND_FREQ.filter(function (bn) { return VC.bandMeasurable(bn, _fr0, eq.fs); }).length + envAble;
-        status = learned + '/' + able + ' 계열 학습됨 · ' + parts.map(function (bn) { return VC.BAND_KO[bn]; }).join('·');
+        status = T('{0}/{1} 계열 학습됨 · {2}', learned, able, parts.map(function (bn) { return tx(VC.BAND_KO[bn]); }).join('·'));
         tip = parts.map(function (bn) {
           var b = bls[bn];
-          return VC.BAND_KO[bn] + '  μ ' + b.mu.toFixed(4) + ' · σ ' + b.sigma.toFixed(4) + ' → 한계 ' + VC.baselineLimit(b).toFixed(4) + '  (표본 ' + (b.n || '?') + ')';
+          return T('{0}  μ {1} · σ {2} → 한계 {3}  (표본 {4})', tx(VC.BAND_KO[bn]), b.mu.toFixed(4), b.sigma.toFixed(4), VC.baselineLimit(b).toFixed(4), b.n || '?');
         }).join('\n');
         // 빠진 대역과 사유 표시 — 측정 불가(하한 ≥ Nyquist)는 고칠 수 없음을 명시
         var miss = VC.BAND_ORDER.filter(function (bn) { return !bls[bn]; });
         if (miss.length) {
-          tip += '\n\n학습 안 됨\n' + miss.map(function (bn) {
+          tip += T('\n\n학습 안 됨\n{0}', miss.map(function (bn) {
             // 대역 경계는 주파수 대역(BAND_FREQ)만 — 포락선 계열은 경계 없음
             var fi = VC.BAND_FREQ.indexOf(bn);
             var e = (fi >= 0 && _fr0 > 0 && eq.fs > 0) ? VC.bandEdges(_fr0, eq.fs / 2)[fi] : null;
             if (e && !VC.bandMeasurable(bn, _fr0, eq.fs)) {
-              return VC.BAND_KO[bn] + '  측정 불가 — 하한 ' + Math.round(e[0]) + ' Hz > Nyquist '
-                + Math.round(eq.fs / 2) + ' Hz (샘플레이트 ' + eq.fs + ' Hz)';
+              return T('{0}  측정 불가 — 하한 {1} Hz > Nyquist {2} Hz (샘플레이트 {3} Hz)', tx(VC.BAND_KO[bn]), Math.round(e[0]), Math.round(eq.fs / 2), eq.fs);
             }
-            if (fi < 0 && !VC.demodBand(eq.fs, _mnt)) return VC.BAND_KO[bn] + '  복조 대역 불성립 — 샘플레이트가 낮거나 마운팅 상한이 낮습니다';
+            if (fi < 0 && !VC.demodBand(eq.fs, _mnt)) return T('{0}  복조 대역 불성립 — 샘플레이트가 낮거나 마운팅 상한이 낮습니다', tx(VC.BAND_KO[bn]));
             if ((bn === 'envBPFO' || bn === 'envBPFI' || bn === 'envBSF') && !VC.faultCoeffs(self._bearingGeo(eq, S)))
-              return VC.BAND_KO[bn] + '  베어링 품번 미지정 — 설비 정보에서 품번을 넣으면 쌓이기 시작합니다';
-            return VC.BAND_KO[bn] + '  표본 부족 또는 학습 실패';
-          }).join('\n');
+              return T('{0}  베어링 품번 미지정 — 설비 정보에서 품번을 넣으면 쌓이기 시작합니다', tx(VC.BAND_KO[bn]));
+            return T('{0}  표본 부족 또는 학습 실패', tx(VC.BAND_KO[bn]));
+          }).join('\n'));
         }
-        tip += '\n\n이 한계를 넘으면 카드와 근거표에 한계 대비 배수로 표시됩니다. 원인 대역을 좁히는 근거이며 등급·알림에는 쓰이지 않습니다.';
+        tip += T('\n\n이 한계를 넘으면 카드와 근거표에 한계 대비 배수로 표시됩니다. 원인 대역을 좁히는 근거이며 등급·알림에는 쓰이지 않습니다.');
         var _ats = parts.map(function (bn) { return bls[bn].at || 0; }).filter(Boolean);
         var _at = _ats.length ? Math.max.apply(null, _ats) : 0;
-        if (_at) tip += '\n\n학습 시점 ' + self.E.fmtDT(_at)
-          + (agoStale(_at) ? '\n⚠한 달이 넘었습니다 — 그 사이 정비나 운전 조건 변경이 있었다면 다시 학습하십시오.' : '');
+        if (_at) tip += T('\n\n학습 시점 {0}{1}', self.E.fmtDT(_at), agoStale(_at) ? T('\n⚠한 달이 넘었습니다 — 그 사이 정비나 운전 조건 변경이 있었다면 다시 학습하십시오.') : '');
         _bandAt = _at;
         color = learned < VC.BAND_ORDER.length ? '#d99a2b' : 'var(--text-secondary)';
       } else {
-        status = '미학습 — 대역 이탈 판정 안 함';
-        tip = '대역값이 최소 ' + VC.BASELINE_MIN_N + '개 쌓여야 학습됩니다. 추출 주기 10분이면 약 5시간, 30분이면 약 15시간이 걸립니다.';
+        status = T('미학습 — 대역 이탈 판정 안 함');
+        tip = T('대역값이 최소 {0}개 쌓여야 학습됩니다. 추출 주기 10분이면 약 5시간, 30분이면 약 15시간이 걸립니다.', VC.BASELINE_MIN_N);
         color = 'var(--text-muted)';
       }
       // 채움 칩 — 학습 창 채움 정도(학습 상태와 별개: 재료 부족 vs 기준 미설정)
@@ -6625,12 +6588,10 @@ export class App extends Component {
         // 분모 미표시 — 격자 경계상 100% 불가, 학습 충분 여부·개수만
         var near = cv.need > 0 && cv.have >= cv.need - 3;   // 경계 3칸은 정상 결손
         fill = {
-          text: (enough ? '표본 ' : '표본 부족 ') + cv.have + '개',
-          tip: '학습 기간 ' + cv.need + '칸 중 ' + cv.have + '칸에 대역값이 있습니다.'
-            + (near ? '\n비어 있는 칸은 구간 경계와 진행 중인 칸이라 정상입니다.'
-              : '\n채우기를 누르면 빈 칸만 계산합니다(이미 있는 칸은 건너뜁니다).')
-            + (enough ? '\n\n학습 최소 표본(' + VC.BASELINE_MIN_N + '개)을 넘었습니다.'
-              : '\n\n학습에는 최소 ' + VC.BASELINE_MIN_N + '개가 필요합니다.'),
+          text: T('{0}개', (enough ? T('표본 ') : T('표본 부족 ')) + cv.have),
+          tip: T('학습 기간 {0}칸 중 {1}칸에 대역값이 있습니다.{2}{3}', cv.need, cv.have, near ? T('\n비어 있는 칸은 구간 경계와 진행 중인 칸이라 정상입니다.')
+              : T('\n채우기를 누르면 빈 칸만 계산합니다(이미 있는 칸은 건너뜁니다).'), enough ? T('\n\n학습 최소 표본({0}개)을 넘었습니다.', VC.BASELINE_MIN_N)
+              : T('\n\n학습에는 최소 {0}개가 필요합니다.', VC.BASELINE_MIN_N)),
           style: 'font-size: 10px; font-weight: 600; padding: 2px 7px; border-radius: 4px; white-space: nowrap; cursor: help; '
             + (!enough ? 'color: var(--text-muted); background: var(--bg-elevated);'
               : near ? 'color: var(--ok-text); background: var(--ok-soft);'
@@ -6654,8 +6615,7 @@ export class App extends Component {
     var _bplan = self._bandPlan(), _skip = _bplan.skipped || [];
     base.bandFillTargets = _bplan.tags.length + '/' + (_bplan.tagTotal || _bplan.tags.length);
     base.bandFillSkipTip = _skip.length
-      ? '제외 ' + _skip.length + '개 — ' + _skip.map(function (x) { return x.label + ' (' + x.why + ')'; }).join(', ')
-        + '\n\n대역 경계가 회전주파수의 배수로 정의되므로(0.5× · 1.5× · 10×) RPM 없이는 대역을 나눌 수 없습니다. 설비 정보에서 RPM을 입력하십시오.'
+      ? T('제외 {0}개 — {1}\n\n대역 경계가 회전주파수의 배수로 정의되므로(0.5× · 1.5× · 10×) RPM 없이는 대역을 나눌 수 없습니다. 설비 정보에서 RPM을 입력하십시오.', _skip.length, _skip.map(function (x) { return x.label + ' (' + x.why + ')'; }).join(', '))
       : '';
     // 켜져 있는데 대상 0이면 타이머 미생성 — 토글·'대상 0/m' 칩만으론 불명이라 경고
     base.bandNoTargetWarn = (S.bandOn && !_bplan.tags.length)
@@ -6666,8 +6626,8 @@ export class App extends Component {
     var _bN = Math.floor(_bH * 3600000 / _bIv);
     var _bOk = _bN >= VC.BASELINE_MIN_N;
     base.bandWin = S.bandWin || '24h';
-    base.bandWinOptions = [{ v: '6h', l: '최근 6시간' }, { v: '24h', l: '최근 24시간' },
-      { v: '3d', l: '최근 3일' }, { v: '7d', l: '최근 7일' }];
+    base.bandWinOptions = [{ v: '6h', l: T('최근 6시간') }, { v: '24h', l: T('최근 24시간') },
+      { v: '3d', l: T('최근 3일') }, { v: '7d', l: T('최근 7일') }];
     // 기간 변경 시 현황 재조회 — setState 배치라 새 값을 직접 전달
     base.onBandWin = function (ev) {
       var v = ev.target.value;
@@ -6676,20 +6636,19 @@ export class App extends Component {
     };
     base.bandSampleWarn = !_bOk;
     // 표본 수 안내 — 추출 주기·학습 기간 함께 표시
-    base.bandSampleText = (IV_KO[S.bandInterval] || S.bandInterval) + '마다 추출하므로 표본 ' + _bN + '개'
-      + (_bOk ? '' : ' — 최소 ' + VC.BASELINE_MIN_N + '개가 필요해 학습되지 않습니다. 추출 주기를 줄이거나 학습 기간을 늘리십시오.');
+    base.bandSampleText = T('{0}마다 추출하므로 표본 {1}개{2}', tx(IV_KO[S.bandInterval]) || S.bandInterval, _bN, _bOk ? '' : T(' — 최소 {0}개가 필요해 학습되지 않습니다. 추출 주기를 줄이거나 학습 기간을 늘리십시오.', VC.BASELINE_MIN_N));
     // RMS 표본 수 — 판정 구간 단위 계수(구간 길수록 감소)
     var _rH = { '1h': 1, '6h': 6, '24h': 24 }[S.blWin] || 24;
     var _rW = Math.max(durMs(S.evalWindow) || 10000, durMs(S.monitorInterval) || 3000) / 1000;
-    base.blSampleText = '판정 구간 ' + _rW + '초 단위로 묶어 표본 ' + Math.floor(_rH * 3600 / _rW) + '개';
+    base.blSampleText = T('판정 구간 {0}초 단위로 묶어 표본 {1}개', _rW, Math.floor(_rH * 3600 / _rW));
     base.bandOn = !!S.bandOn;
     base.onBandToggle = function () { var on = !self.state.bandOn; self.setState({ bandOn: on, dirty: true }); if (on) self._refreshBandCov(); };
     base.bandInterval = S.bandInterval || '10m';
-    base.bandIntervalKo = IV_KO[base.bandInterval] || base.bandInterval;
+    base.bandIntervalKo = tx(IV_KO[base.bandInterval]) || base.bandInterval;
     // ── 과거 채우기 ──
     var plan = this._bandPlan();
     base.bandFill = S.bandFill || null;
-    var _bandWinKo = { '6h': '6시간', '24h': '24시간', '3d': '3일', '7d': '7일' }[S.bandWin] || '24시간';
+    var _bandWinKo = { '6h': T('6시간'), '24h': T('24시간'), '3d': T('3일'), '7d': T('7일') }[S.bandWin] || T('24시간');
     // 남은 칸 기준 안내 — 찬 칸은 재계산 안 함
     var covM = S.bandCov || null;
     var left = 0, fullTags = 0;
@@ -6701,20 +6660,17 @@ export class App extends Component {
         if (!miss) fullTags++;
       });
     } else left = plan.total;
-    base.bandFillDesc = !S.bandOn ? '대역 추출을 켜야 채울 수 있습니다.'
-      : !plan.tags.length ? '대역을 추출할 태그가 없습니다.'
+    base.bandFillDesc = !S.bandOn ? T('대역 추출을 켜야 채울 수 있습니다.')
+      : !plan.tags.length ? T('대역을 추출할 태그가 없습니다.')
         // 채우는 구간 = 대역 학습 기간(_bandPlan의 BAND_WIN_H)
-        : left === 0 ? '최근 ' + _bandWinKo + ' 구간이 모두 채워져 있습니다 · 태그 ' + fullTags + '개.'
-          : '이미 쌓인 원본에서 최근 ' + _bandWinKo + '을 ' + base.bandIntervalKo
-            + ' 간격으로 계산합니다 · 남은 ' + left + '개 · 약 ' + fmtDur(left * BAND_PER_MS)
-            + (fullTags ? ' (태그 ' + fullTags + '개는 이미 완료 — 건너뜁니다)' : '')
-            + '. 최신부터 채우므로 중간에 멈춰도 채운 만큼 학습에 씁니다.';
+        : left === 0 ? T('최근 {0} 구간이 모두 채워져 있습니다 · 태그 {1}개.', _bandWinKo, fullTags)
+          : T('이미 쌓인 원본에서 최근 {0}을 {1} 간격으로 계산합니다 · 남은 {2}개 · 약 {3}{4}. 최신부터 채우므로 중간에 멈춰도 채운 만큼 학습에 씁니다.', _bandWinKo, base.bandIntervalKo, left, fmtDur(left * BAND_PER_MS), fullTags ? T(' (태그 {0}개는 이미 완료 — 건너뜁니다)', fullTags) : '');
     base.bandFillNone = left === 0 && !!covM;
     // 행에는 결론만, 근거는 위 설명 툴팁
-    base.bandFillShort = !S.bandOn ? '추출을 켜야 채울 수 있습니다'
-      : !plan.tags.length ? '태그 없음'
-        : left === 0 ? '완료 · 태그 ' + fullTags + '개'
-          : '남은 ' + left + '개 · 약 ' + fmtDur(left * BAND_PER_MS);
+    base.bandFillShort = !S.bandOn ? T('추출을 켜야 채울 수 있습니다')
+      : !plan.tags.length ? T('태그 없음')
+        : left === 0 ? T('완료 · 태그 {0}개', fullTags)
+          : T('남은 {0}개 · 약 {1}', left, fmtDur(left * BAND_PER_MS));
     base.bandFillBtnStyle = 'height: 28px; padding: 0 12px; border-radius: 6px; border: 1px solid var(--border-medium); font-size: 11px; font-weight: 600; '
       + (S.bandOn && plan.tags.length && !base.bandFillNone ? 'background: var(--bg-elevated); color: var(--text-secondary); cursor: pointer;' : 'background: transparent; color: var(--text-muted); cursor: not-allowed; opacity: .5;');
     base.bandFillBarStyle = 'height: 100%; border-radius: 3px; background: var(--primary-base); transition: width .2s; width: '
@@ -6732,19 +6688,17 @@ export class App extends Component {
     var _passSec = Math.round(_bandN * BAND_TAG_SEC);
     base.bandPassSec = _passSec;
     base.bandIvOptions = [
-      { v: '10m', l: '10분', sec: 600 }, { v: '30m', l: '30분', sec: 1800 }, { v: '1h', l: '1시간', sec: 3600 },
+      { v: '10m', l: T('10분'), sec: 600 }, { v: '30m', l: T('30분'), sec: 1800 }, { v: '1h', l: T('1시간'), sec: 3600 },
     ].map(function (o) {
       // 여유 2배 — 태그 소폭 증가에도 겹침 방지
       var bad = _passSec > 0 && o.sec < _passSec * 2;
-      return { v: o.v, l: bad ? o.l + ' — 회차(' + _passSec + '초)보다 짧음' : o.l, disabled: bad };
+      return { v: o.v, l: bad ? T('{0} — 회차({1}초)보다 짧음', o.l, _passSec) : o.l, disabled: bad };
     });
     // 이 주기는 등급 확정 회차 길이도 결정 — 확정 흐름은 알람 설정 회차 표 참고
     base.bandIvHint = _passSec > 0
-      ? '감시 태그 ' + _bandN + '개 → 한 회차 약 ' + _passSec + '초. 회차보다 짧은 주기는 겹쳐서 아무것도 쌓이지 않습니다.'
-        + ' 이 주기가 등급 확정의 회차 길이도 정합니다(알람 설정 참고).'
+      ? T('감시 태그 {0}개 → 한 회차 약 {1}초. 회차보다 짧은 주기는 겹쳐서 아무것도 쌓이지 않습니다. 이 주기가 등급 확정의 회차 길이도 정합니다(알람 설정 참고).', _bandN, _passSec)
       // 10분 하한 사유 안내
-      : '추출 창이 샘플레이트에 따라 최대 4분대라 그보다 짧은 주기는 같은 구간을 겹쳐 잽니다.'
-        + ' 이 주기가 등급 확정의 회차 길이도 정합니다 — 정지·신호 두절·계측 이상은 판정 주기마다 따로 봅니다.';
+      : T('추출 창이 샘플레이트에 따라 최대 4분대라 그보다 짧은 주기는 같은 구간을 겹쳐 잽니다. 이 주기가 등급 확정의 회차 길이도 정합니다 — 정지·신호 두절·계측 이상은 판정 주기마다 따로 봅니다.');
     // 드롭다운 선택 시 확인 절차 — 주기 변경은 이전 구간과 밀도 불일치(학습 편향·채운 값 간격 어긋남)
     base.onBandIvPickDirect = function (ev) {
       var v = ev.target.value;
@@ -6755,9 +6709,9 @@ export class App extends Component {
     base.onBandIvPick = function (ev) { self.setState({ bandIvNext: ev.target.value }); };
     base.bandIvFacts = this._bandIvFacts(base.bandIvNext, plan);
     base.bandIvChoices = ['keep', 'refill', 'reset'].map(function (a) {
-      var L = { keep: ['그대로 둠', '밀도가 섞이지만 학습 시 균일화로 보정됩니다. 추세 그래프의 해상도만 구간마다 달라집니다.'],
-        refill: ['새 주기로 다시 계산', '이전 구간을 새 간격으로 채웁니다 — ' + fmtDur(self._bandPlan().etaMs) + ' 예상. 밀도가 처음부터 균일해집니다.'],
-        reset: ['대역 베이스라인 초기화', '학습된 기준을 지우고 새 주기로 다시 모읍니다. 설비 상태가 바뀐 시점이면 이쪽이 맞습니다.'] }[a];
+      var L = { keep: [T('그대로 둠'), T('밀도가 섞이지만 학습 시 균일화로 보정됩니다. 추세 그래프의 해상도만 구간마다 달라집니다.')],
+        refill: [T('새 주기로 다시 계산'), T('이전 구간을 새 간격으로 채웁니다 — {0} 예상. 밀도가 처음부터 균일해집니다.', fmtDur(self._bandPlan().etaMs))],
+        reset: [T('대역 베이스라인 초기화'), T('학습된 기준을 지우고 새 주기로 다시 모읍니다. 설비 상태가 바뀐 시점이면 이쪽이 맞습니다.')] }[a];
       return { on: (S.bandIvAct || 'keep') === a, label: L[0], desc: L[1],
         onPick: function () { self.setState({ bandIvAct: a }); },
         style: 'display: flex; align-items: flex-start; gap: 10px; padding: 10px 12px; margin-bottom: 6px; border-radius: 7px; cursor: pointer; border: 1px solid '
@@ -6780,3 +6734,10 @@ export class App extends Component {
 
   render() { return view(this.renderVals()); }
 }
+
+/* 진단 엔진·리포트 조립은 항상 한국어 — 원인·결함명 문구를 정규식으로 다시 검사하고 리포트·LLM 프롬프트가 같은 결과를 씀
+   화면은 결과를 tx()로, 리포트는 report.js가 생성 언어(_i18nFor)로 번역 */
+['_dxLive', '_evidence', '_opinionPack', '_opinionPrompt', '_reportMeta', '_reportBuild'].forEach(function (m) {
+  var fn = App.prototype[m];
+  App.prototype[m] = function () { var self = this, args = arguments; return withLang('ko', function () { return fn.apply(self, args); }); };
+});

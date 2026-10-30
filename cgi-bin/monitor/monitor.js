@@ -10,7 +10,10 @@
   'use strict';
 
   // convSrc 미지정 시 폴백 — 단위 변환 없음, 대역 RMS는 isoRms로 대체
-  var CONV_FALLBACK = 'var convertDomain = function(v){ return v.slice(0); };'
+  // 알림 부분 사전 자리(조립 끝에 채움) · 데이터 줄 머리(부분 사전 고를 때 제외) · 직전 고른 결과
+  var NDICT_SLOT = '__NDICT__', CFG_LINE = 'var CFG=', TAGS_LINE = 'var TAGS=';
+  var PICK_MEMO = { code: null, json: '{}' };
+  var CONV_FALLBACK ='var convertDomain = function(v){ return v.slice(0); };'
     + ' var bandRmsAveraged = function(v, fs){ return { rms: isoRms(v, fs) }; };';
 
   // spec — 앱 _monSpec()이 만듦
@@ -49,6 +52,8 @@
       spec.notify && spec.notify.src ? spec.notify.src
         : 'function eventMessage(){return{}} function shouldNotify(){return true}'
           + ' function notifyCfgFrom(){return{}} function configFromRows(){return{obj:{},err:""}}',
+      spec.notify && spec.notify.i18n ? 'var makeTx = ' + spec.notify.i18n.src + ';'
+        : 'var makeTx = function(){ return { T: function(k){ return k; }, tx: function(s){ return s; } }; };',
     ];
     // 각 함수를 한 번씩 호출 — 선언만으론 몸통 안 자유 식별자가 안 드러남
     var probe = decls.concat([
@@ -65,6 +70,7 @@
       'judgeDetail({ etype: "recovery", epMs: 1000 }, { r: 4, key: "BPFO" }, { crest: 9, kurt: 5 });',
       'var _e = { etype: "threshold", tag: "T", grade: "위험", val: 1, lim: 1, ts: 0, tbl: "T" };',
       'eventMessage(_e); shouldNotify(_e, { channels: {}, routes: {} });',
+      'var _L = makeTx({ "{0}분 무수신": "no data for {0} min", "위험": "Danger" }, true); eventMessage(_e, _L); _L.tx("격자 3.2 · 5분 무수신"); _L.T("위험");',
       'notifyCfgFrom(configFromRows([["cfg:monitor#0", "%7B%7D"]], "monitor").obj, { order: ["x"], timing: { x: "y" } });',
     ]).join('\n');
     try { new Function(probe)(); return null; } catch (e) { return e.message || String(e); }
@@ -146,10 +152,18 @@
       '  }',
       '  return roll[tbl];',
       '}',
-      'var CFG=' + JSON.stringify(cfg) + ';',
-      'var TAGS=' + JSON.stringify(tags) + ';',
+      CFG_LINE + JSON.stringify(cfg) + ';',
+      TAGS_LINE + JSON.stringify(tags) + ';',
       // ── 알림 발송 (앱과 동일한 notify 소스를 인라인) ──
       nf ? nf.src : '',
+      /* 알림 언어 — 번역기(i18n/tx.js makeTx 소스) + 영·일 부분 사전(이 스크립트에 나오는 문구의 키만, 조립 끝에 채움)
+         언어는 발송 회차에 설정 표(notifLang)에서 — 설정만 바꿔도 다음 알림부터 반영. 번역 실패는 한국어로 발송 */
+      nf && nf.i18n ? 'var makeTx = ' + nf.i18n.src + ';' : '',
+      'var NDICT=' + (nf && nf.i18n ? NDICT_SLOT : 'null') + ', NLC={};',
+      'function notifyL(lang){',
+      '  if(!NDICT || !NDICT[lang]) return null;',
+      '  try{ return NLC[lang] || (NLC[lang]=makeTx(NDICT[lang], lang==="en")); }catch(e){ return null; }',
+      '}',
       /* 발송 설정은 보낼 알림이 생긴 회차에만 계정 설정 표에서 읽고 회차 내 재사용.
          dryRun은 주입 설정 사용 */
       'var NFON=' + (nf ? 'true' : 'false') + ';',
@@ -285,7 +299,7 @@
       '  NFOK=true;',
       '  var w=L.cfg.channels && L.cfg.channels.webhook, to=w ? w.to : "";',
       '  if(!to){ NQ=[]; return; }',
-      '  var msgs=planNotifications(NQ, L.cfg, "webhook", fmtShow(now)); NQ=[];',
+      '  var msgs=planNotifications(NQ, L.cfg, "webhook", fmtShow(now), notifyL(L.cfg.lang)); NQ=[];',
       dry
         ? '  msgs.forEach(function(m){ $.yield("notifyMsg", m.subject, (m.event&&m.event.n)||1); });'
         : '  msgs.forEach(function(m){ try{ $.request(to,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payloadFor(m,to))}).do(function(r){}); }catch(e){} });',
@@ -495,7 +509,16 @@
       '})',
       'CSV()',
     ];
-    return body.join('\n');
+    var text = body.join('\n');
+    if (!(nf && nf.i18n)) return text;
+    // 부분 사전 — 데이터 줄(TAGS·CFG) 뺀 코드에 나오는 문구의 키만. 코드가 같으면 직전 결과 재사용(굽기 판정이 수 초마다 부름)
+    var code = body.filter(function (l) { return l.indexOf(TAGS_LINE) !== 0 && l.indexOf(CFG_LINE) !== 0; }).join('\n');
+    if (PICK_MEMO.code !== code) {
+      var sub = {};
+      ['en', 'ja'].forEach(function (l) { sub[l] = nf.i18n.pick((nf.i18n.dicts || {})[l] || {}, code); });
+      PICK_MEMO = { code: code, json: JSON.stringify(sub).replace(/</g, '\\u003c') };
+    }
+    return text.replace(NDICT_SLOT, function () { return PICK_MEMO.json; });
   }
 
   return { buildMonitorTql: buildMonitorTql, validateSpec: validateSpec };

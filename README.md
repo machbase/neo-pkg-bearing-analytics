@@ -1,4 +1,4 @@
-# neo-pkg-bearing-analytics v1.0.0
+# neo-pkg-bearing-analytics v1.1.0
 
 [English](README.md) | [한국어](README.kr.md) | [日本語](README.ja.md)
 
@@ -29,7 +29,7 @@ The app connects to your Neo instance on launch, auto-detects TAG tables, and ru
 
 ## Key Features
 
-- **Real-time Monitoring** — equipment card grid with live sparklines, pattern-gated grades (Good / Warning / Danger / Critical; the UI is in Korean: 양호 / 주의 / 위험 / 심각), an **On hold** count for machines that cannot be graded right now (stopped, signal lost, instrumentation fault, missing RPM or bearing), a KPI summary bar that doubles as a filter, a table filter, drag-to-reorder cards, and a filterable event feed. A header toggle turns alarm judgment on or off.
+- **Real-time Monitoring** — equipment card grid with live sparklines, pattern-gated grades (Good / Warning / Danger / Critical), an **On hold** count for machines that cannot be graded right now (stopped, signal lost, instrumentation fault, missing RPM or bearing), a KPI summary bar that doubles as a filter, a table filter, drag-to-reorder cards, and a filterable event feed. A header toggle turns alarm judgment on or off.
 - **Detail Analysis** — a snapshot of the selected tag: raw waveform, RMS / Peak-to-Peak / Crest Factor / Kurtosis trends, defect-band energy trends, FFT spectrum with bearing fault-frequency markers (1× / 2× / 3×, BPFO / BPFI / BSF / FTF), envelope, cepstrum, spectrogram, and per-band impulsiveness (kurtogram) — with harmonic / sideband analysis. The envelope drives the bearing verdict; the kurtogram, cepstrum, and spectrogram are shown for context and deliberately kept out of the grade (see [what this tool does and does not do](https://machbase.github.io/neo-pkg-bearing-analytics/scope/)).
 - **Pattern-gated Grading** — the fault pattern (evidence standing at a bearing fault frequency) switches the grade on, and the ISO zone (absolute, band-limited to 10–1000 Hz as the standard defines) sets its height. A learned baseline (relative to its own normal) and per-band energy (relative, per frequency band) are tracked and shown as supporting evidence but never raise the grade, so a tag grades the same whether or not it has been trained. Neither gating axis needs training, so grading is complete as soon as RPM and the bearing are entered. Detail analysis and monitoring use the same rule ([how detection works](https://machbase.github.io/neo-pkg-bearing-analytics/detection/)).
 - **Rule-based Diagnosis** — automatic fault verdict (imbalance, misalignment, bearing inner/outer race, looseness, gear) with sourced supporting evidence, evidence scores, and what to do now plus action details (each with its reason). Faults the current measurement cannot resolve are marked "not observable" with the reason, rather than scored low.
@@ -39,6 +39,7 @@ The app connects to your Neo instance on launch, auto-detects TAG tables, and ru
 - **Band Energy Trend** — an optional server-side timer extracts per-band energy (sub-synchronous / 1× / fault / high / very high) and envelope series so degradation invisible to overall RMS still surfaces as evidence. Past intervals can be backfilled to start learning immediately.
 - **Reports** — one-click generation with a cancellable progress flow, one self-contained HTML file per selected tag, and a paged archive (created · report name · period · type). Report charts stay live — wheel zoom, drag, tooltips, theme-aware redraw — with a summary/full toggle and a judgment fingerprint that tells you whether a number changed because the data moved or because the judgment engine (package) changed.
 - **Flexible Settings** — multi-table selection with alias editing, per-equipment unit / class / RPM / bearing (catalog with auto-computed fault frequencies, or custom designation and geometry; sleeve bearings supported), belt drives with driven-side sensor support, ISO machine-class thresholds, baseline learning, webhook notification routing, and data management (usage and ranged / per-tag cleanup).
+- **Korean · English · Japanese UI** — switch the screen language from the header. Reports come out in the screen language at the time they are generated, event exports in the screen language at download time, and webhook notifications in their own notification language ([display language](https://machbase.github.io/neo-pkg-bearing-analytics/first-setup/#display-language)).
 - **Optional LLM Findings** — connect Claude / OpenAI / Gemini / Ollama to add a narrative expert opinion to detail analysis and reports; everything else works without it.
 
 ## Requirements

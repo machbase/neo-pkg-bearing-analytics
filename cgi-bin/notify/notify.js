@@ -28,33 +28,47 @@
     };
   }
 
+  /* 알림 언어 — L: { T(키, …인자), tx(문구) }(i18n/tx.js makeTx), 없으면 한국어 원문 그대로
+     · 저장·판정 값(gradeKo·typeKo·detail)은 한국어로 들어오고 문구를 만들 때만 번역
+     · 대역 이탈 DETAIL은 기계용 형식('sub=0.050/0.025 · vh4=…(잠정)') — 잠정 표식만 번역
+     ⚠ 서버 TQL 임베드 — 바깥 이름 참조 금지 */
+  function nl(L) {
+    var T = (L && L.T) || function (k) {
+      var a = arguments;
+      return k.replace(/\{(\d+)\}/g, function (m, i) { return +i + 1 < a.length ? String(a[+i + 1]) : m; });
+    };
+    var tx = (L && L.tx) || function (s) { return s; };
+    return { T: T, tx: tx, band: function (s) { return String(s || '').replace(/\(잠정\)/g, function () { return '(' + T('잠정') + ')'; }); } };
+  }
+
   /* 이벤트 → 사람이 읽는 문구. ev: {alias, tag, table, typeKo, gradeKo, val, lim, unit, etype, detail, timeText}
-     제목 = 등급·설비·유형, 본문 = 값 줄·시각. 값 줄은 유형별(지표값 없는 유형은 사유만) */
-  function eventMessage(ev) {
+     제목 = 등급·설비·유형, 본문 = 값 줄·시각. 값 줄은 유형별(지표값 없는 유형은 사유만) · L: 알림 언어(nl) */
+  function eventMessage(ev, L) {
+    var X = nl(L);
     var when = ev.timeText || '';
     var et = ev.etype || '';
     var name = (ev.alias || ev.tag) + (ev.tag && ev.alias && ev.alias !== ev.tag ? ' (' + ev.tag + ')' : '');
-    var subject = '[' + (ev.gradeKo || '알람') + '] ' + name + ' · ' + (ev.typeKo || '');
+    var subject = '[' + (ev.gradeKo ? X.tx(ev.gradeKo) : X.T('알람')) + '] ' + name + ' · ' + X.tx(ev.typeKo || '');
     var vline;
     if (et === 'sensor_fault' || et === 'sensor_ok' || et === 'signal_lost') {
-      vline = ev.detail || '';   // 지표값이 없는 유형 — 사유만
+      vline = X.tx(ev.detail || '');   // 지표값이 없는 유형 — 사유만
     } else if (et === 'band' || et === 'bandrec') {
       // 대역은 val이 알람 기준 대비 비율(lim=1)
-      vline = '알람 기준 대비 ×' + Number(ev.val || 0).toFixed(2) + (ev.detail ? '\n' + ev.detail : '');
+      vline = X.T('알람 기준 대비 ×{0}', Number(ev.val || 0).toFixed(2)) + (ev.detail ? '\n' + X.band(ev.detail) : '');
     } else {
       var val = (ev.val == null ? '-' : Number(ev.val).toFixed(3)) + (ev.unit ? ' ' + ev.unit : '');
       var lim = (ev.lim == null ? '' : Number(ev.lim).toFixed(3));
-      var ratio = (ev.val > 0 && ev.lim > 0) ? '  (기준의 ×' + (ev.val / ev.lim).toFixed(2) + ')' : '';
-      // 기준 숫자 없는 행(원본 단위 표기)은 등급 근거를 문구로
+      var ratio = (ev.val > 0 && ev.lim > 0) ? X.T('  (기준의 ×{0})', (ev.val / ev.lim).toFixed(2)) : '';
+      // 기준 숫자 없는 행(원본 단위 표기)은 등급 근거를 문구로 — 근거 추출은 한국어 원문에서
       var basis = ev.lim == null ? basisText(ev.detail) : '';
-      vline = val + (lim ? ' / 기준 ' + lim : '') + ratio + (basis ? ' · ' + basis : '');
+      vline = val + (lim ? X.T(' / 기준 {0}', lim) : '') + ratio + (basis ? ' · ' + X.tx(basis) : '');
     }
     var text = subject + (vline ? '\n' + vline : '') + '\n' + when;
     var html = '<div style="font-family:sans-serif">'
       + '<h3 style="margin:0 0 8px">' + esc(subject) + '</h3>'
       + '<table cellpadding="4" style="border-collapse:collapse;font-size:14px">'
-      + (vline ? row(et === 'band' || et === 'bandrec' ? '판정' : (et === 'sensor_fault' || et === 'sensor_ok' || et === 'signal_lost') ? '사유' : '측정값', vline.replace(/\n/g, ' · ')) : '')
-      + row('발생', when)
+      + (vline ? row(et === 'band' || et === 'bandrec' ? X.T('판정') : (et === 'sensor_fault' || et === 'sensor_ok' || et === 'signal_lost') ? X.T('사유') : X.T('측정값'), vline.replace(/\n/g, ' · ')) : '')
+      + row(X.T('발생'), when)
       + '</table></div>';
     return { subject: subject, text: text, html: html, event: ev };
   }
@@ -95,7 +109,7 @@
      · 동시 다발 이벤트를 개별 발송하면 채널 한도(Slack 초당 1건·Discord 2초 5건)에 걸려 일부만 도착
      · BUNDLE_MIN 미만은 개별
      · ⚠ 묶음은 발송 형태일 뿐, 이력은 항상 개별 저장 */
-  function planNotifications(evs, cfg, ch, timeText) {
+  function planNotifications(evs, cfg, ch, timeText, L) {
     // ⚠ 함수 안에 둠 — 임베드 소스라 바깥 이름은 서버에서만 ReferenceError
     var BUNDLE_MIN = 5;
     var out = [], groups = {}, order = [], i;
@@ -109,17 +123,18 @@
     for (i = 0; i < order.length; i++) {
       var g = groups[order[i]];
       if (g.length < BUNDLE_MIN) {
-        for (var j = 0; j < g.length; j++) out.push(eventMessage(g[j]));
-      } else out.push(bundleMessage(g, timeText));
+        for (var j = 0; j < g.length; j++) out.push(eventMessage(g[j], L));
+      } else out.push(bundleMessage(g, timeText, L));
     }
     return out;
   }
 
   // 묶음 메시지 — 규모(몇 대)·분포(테이블별 상위 3 + 나머지), 태그 이름은 나열 안 함(잘리면 규모 오독)
-  function bundleMessage(g, timeText) {
+  function bundleMessage(g, timeText, L) {
+    var X = nl(L);
     var byTbl = {}, tbls = [], i;
     for (i = 0; i < g.length; i++) {
-      var t = g[i].table || '(미상)';
+      var t = g[i].table || X.T('(미상)');
       if (byTbl[t] == null) { byTbl[t] = 0; tbls.push(t); }
       byTbl[t]++;
     }
@@ -127,17 +142,19 @@
     var head = tbls.slice(0, 3).map(function (t) { return t + ' ' + byTbl[t]; });
     var rest = 0;
     for (i = 3; i < tbls.length; i++) rest += byTbl[tbls[i]];
-    if (rest) head.push('외 ' + rest);
-    var ko = g[0].typeKo || g[0].etype || '';
-    var subject = '[' + (g[0].gradeKo || '알람') + '] ' + ko + ' ' + g.length + '대';
+    if (rest) head.push(X.T('외 {0}', rest));
+    var ko = X.tx(g[0].typeKo || g[0].etype || '');
+    var subject = '[' + (g[0].gradeKo ? X.tx(g[0].gradeKo) : X.T('알람')) + '] ' + ko + ' ' + X.T('{0}대', g.length);
     var lines = [subject, head.join(' · ')];
-    if (g[0].detail) lines.push(g[0].detail);      // 같은 유형이라 사유 공통(예: "6분 무수신")
+    // 같은 유형이라 사유 공통(예: "6분 무수신")
+    if (g[0].detail) lines.push(g[0].etype === 'band' || g[0].etype === 'bandrec' ? X.band(g[0].detail) : X.tx(g[0].detail));
     if (timeText) lines.push(timeText);
     return { subject: subject, text: lines.join('\n'), event: { etype: g[0].etype, gradeKo: g[0].gradeKo, n: g.length } };
   }
 
-  /* 저장된 알림 설정(monitor 영역: notifCh·notifTo·routes) → 발송 판정용 cfg. 앱·서버 공용
-     defs: { order:[행 이름…], timing:{행: 기본 timing} } — 미설정 행은 기본값 */
+  /* 저장된 알림 설정(monitor 영역: notifCh·notifTo·routes·notifLang) → 발송 판정용 cfg. 앱·서버 공용
+     defs: { order:[행 이름…], timing:{행: 기본 timing} } — 미설정 행은 기본값
+     lang: 알림 문구 언어(ko·en·ja), 저장 전(옛 설정)은 '' = 한국어 */
   function notifyCfgFrom(raw, defs) {
     raw = raw || {}; defs = defs || {};
     var ch = raw.notifCh || {}, to = raw.notifTo || {}, routes = raw.routes || {};
@@ -146,7 +163,8 @@
       var k = order[i];
       out[k] = routes[k] ? routes[k] : { timing: timing[k] };
     }
-    return { channels: { webhook: { on: !!ch.webhook, to: to.webhook || '' } }, routes: out };
+    var lang = raw.notifLang === 'en' || raw.notifLang === 'ja' || raw.notifLang === 'ko' ? raw.notifLang : '';
+    return { channels: { webhook: { on: !!ch.webhook, to: to.webhook || '' } }, routes: out, lang: lang };
   }
 
   /* 설정 표(CONFIG) 조각 행 → 한 영역의 객체, rows: [[K, VAL], …]
@@ -187,7 +205,7 @@
   //  · IIFE — 내부 esc와 호출측(monitor의 SQL용 esc) 이름 충돌 방지
   //  · f.name으로 재노출 — 미니파이로 함수명이 바뀌어도 고정 이름에 바인딩
   function serverSrc() {
-    var decls = [basisText, esc, row, eventMessage, payloadFor, shouldNotify, bundleMessage, planNotifications,
+    var decls = [nl, basisText, esc, row, eventMessage, payloadFor, shouldNotify, bundleMessage, planNotifications,
       notifyCfgFrom, configFromRows]
       .map(function (f) { return f.toString(); }).join('\n');
     return 'var __NF=(function(){\n' + decls + '\n'

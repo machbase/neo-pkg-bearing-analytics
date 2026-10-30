@@ -1106,8 +1106,8 @@
   function bandParse(detail) {
     if (!detail) return [];
     return String(detail).split('·').map(function (s) {
-      // 대역 이름에 숫자 포함(vh1~vh4)
-      var m = /^\s*([a-z][a-z0-9]*)\s*=\s*([\d.]+)\s*\/\s*([\d.]+)/.exec(s);
+      // 대역 이름에 숫자(vh1~vh4)·대문자(envBPFO 등 포락선 계열) 포함
+      var m = /^\s*([a-zA-Z][a-zA-Z0-9]*)\s*=\s*([\d.]+)\s*\/\s*([\d.]+)/.exec(s);
       if (!m) return null;
       var v = parseFloat(m[2]), lim = parseFloat(m[3]);
       // 저장된 이벤트에서도 잠정 표식 복원

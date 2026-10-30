@@ -96,7 +96,7 @@ const B = () => mkEq('T:B', 'B', { minMs: D0, maxMs: D1 });
     '표본 0건이면 리포트를 만들지 않는다 — 겹침 검사만으론 내부 공백을 못 잡는다');
   chk(/if \(e && e\.__nodata\) \{ self\._genSkips\.push/.test(src),
     '데이터 없음은 실패가 아니라 건너뜀으로 센다 — 고장으로 읽히면 원인을 엉뚱한 데서 찾는다');
-  chk(/_sk\.length \+ '건 건너뜀/.test(src), '건너뛴 건수를 사용자에게 알린다');
+  chk(/_sk\.length \+ '건 건너뜀|T\('[^']*\{1\}건 건너뜀[^']*', self\._genSaved, _sk\.length/.test(src), '건너뛴 건수를 사용자에게 알린다');
 }
 
 console.log(fail ? `\n=== ${fail}건 실패 ===` : '\n=== 전부 통과 ===');

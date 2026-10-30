@@ -22,6 +22,9 @@
     for (var i = 0; i < STATUS.length; i++) { STATUS[i].color = t[i][0]; STATUS[i].soft = t[i][1]; }
   }
   setGradeTheme(false);
+  // 캔버스 안내 문구 — 화면이 언어를 바꾸면 setLabels로 교체(리포트 내장본은 한국어 그대로)
+  var LBL = { noData: '데이터 없음', past: '과거', now: '현재' };
+  function setLabels(o) { for (var k in o) if (Object.prototype.hasOwnProperty.call(LBL, k)) LBL[k] = o[k]; }
 
 
   /* ---------------- number/time format ---------------- */
@@ -141,7 +144,7 @@
     var pad = { t: 14, r: o.padR != null ? o.padR : 16, b: 34, l: 58 };
     var cw = W - pad.l - pad.r, ch = H - pad.t - pad.b;
     var vals = o.values, n = vals.length; ctx.clearRect(0, 0, W, H);
-    if (n < 2) { ctx.fillStyle = CC.hint; ctx.font = '13px ' + FONT; ctx.textAlign = 'center'; ctx.fillText('데이터 없음', W / 2, H / 2); return; }
+    if (n < 2) { ctx.fillStyle = CC.hint; ctx.font = '13px ' + FONT; ctx.textAlign = 'center'; ctx.fillText(LBL.noData, W / 2, H / 2); return; }
     var mn = Math.min.apply(null, vals), mx = Math.max.apply(null, vals);
     if (o.refLines) o.refLines.forEach(function (r) { mx = Math.max(mx, r.val); });
     var m = (mx - mn) * 0.12 || 1; mn = o.zeroBase ? 0 : mn - m; mx += m; var range = mx - mn || 1, step = cw / (n - 1);
@@ -288,7 +291,7 @@
     for (var t2 = 0; t2 < rows; t2++) for (var c2 = 0; c2 < cols; c2++) { var v = o.grid[t2][c2] / (max || 1); ctx.fillStyle = heatColor(v); ctx.fillRect(pad.l + c2 * cellW, pad.t + (rows - 1 - t2) * cellH, cellW + 0.6, cellH + 0.6); }
     ctx.fillStyle = CC.axis; ctx.font = '9px ' + MONO; ctx.textAlign = 'left';
     ctx.fillText('0', pad.l, H - 7); ctx.textAlign = 'right'; ctx.fillText(Math.round(o.fmax) + ' Hz', W - pad.r, H - 7);
-    ctx.textAlign = 'right'; ctx.fillStyle = CC.axis; ctx.fillText('now', pad.l - 6, pad.t + 8); ctx.fillText('과거', pad.l - 6, pad.t + ch - 1);
+    ctx.textAlign = 'right'; ctx.fillStyle = CC.axis; ctx.fillText('now', pad.l - 6, pad.t + 8); ctx.fillText(LBL.past, pad.l - 6, pad.t + ch - 1);
     return { geom: { pad: pad, cw: cw, ch: ch, W: W, H: H } };
   }
   function heatColor(v) {
@@ -353,7 +356,7 @@
     if (o.crossMs) { var cx = xOf(o.crossMs), cyy = yOf(o.crossV); ctx.fillStyle = '#e5484d'; ctx.beginPath(); ctx.arc(cx, cyy, 4.5, 0, 7); ctx.fill(); ctx.strokeStyle = CC.text; ctx.lineWidth = 1.5; ctx.stroke(); }
     // "now" 구분선
     var nowX = xOf(o.actual[o.actual.length - 1].ms); ctx.strokeStyle = CC.axisLine; ctx.setLineDash([2, 3]); ctx.beginPath(); ctx.moveTo(nowX, pad.t); ctx.lineTo(nowX, pad.t + ch); ctx.stroke(); ctx.setLineDash([]);
-    ctx.fillStyle = CC.hint; ctx.font = '9px ' + FONT; ctx.textAlign = 'center'; ctx.fillText('현재', nowX, pad.t - 4);
+    ctx.fillStyle = CC.hint; ctx.font = '9px ' + FONT; ctx.textAlign = 'center'; ctx.fillText(LBL.now, nowX, pad.t - 4);
     // x labels
     ctx.fillStyle = CC.axis; ctx.font = '9px ' + MONO; ctx.textAlign = 'center';
     for (var t = 0; t <= 5; t++) { var ms = msMin + (msMax - msMin) * t / 5; ctx.fillText(fmtMD(ms), pad.l + cw * t / 5, H - pad.b + 16); }
@@ -407,7 +410,7 @@
   }
 
   return {
-    STATUS: STATUS, SERIES: SERIES, setGradeTheme: setGradeTheme,
+    STATUS: STATUS, SERIES: SERIES, setGradeTheme: setGradeTheme, setLabels: setLabels,
     fmt: fmt, fmtClock: fmtClock, fmtMD: fmtMD, fmtDT: fmtDT, fmtFull: fmtFull, ago: ago,
     setZone: setZone, getZone: getZone, zoneName: zoneName, zoneOk: zoneOk, parts: parts, offsetMs: offsetMs, offsetLabel: offsetLabel,
     makeTime: makeTime, parseDT: parseDT, startOfDay: startOfDay, fmtTick: fmtTick,

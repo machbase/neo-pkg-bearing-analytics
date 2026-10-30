@@ -54,9 +54,9 @@ chk(/self\._scheduleDraw\(\); self\.forceUpdate\(\);/.test(app),
 chk(/c\.state = 'error'; self\.forceUpdate\(\);/.test(app), '실패해도 화면을 갱신한다');
 
 // ── 상태별 문구 구분 ─────────────────────────────────────────────────
-chk(/_trErr \? '계산에 실패했습니다/.test(app),
+chk(/_trErr \? (T\()?'계산에 실패했습니다/.test(app),
   '조회 실패를 표본 부족으로 적지 않는다 — 없는 데이터 문제를 찾게 된다');
-chk(/_trBusy \? '계산 중…'/.test(app), '계산 중에는 계산 중이라고 적는다');
+chk(/_trBusy \? (T\()?'계산 중…'/.test(app), '계산 중에는 계산 중이라고 적는다');
 chk(/base\.kurtNote = \(_tr && \(_tr\.kurt \|\| \[\]\)\.length\) \? ''/.test(app),
   '값이 있으면 문구를 띄우지 않는다 — 그래프와 문구가 모순되지 않아야 한다');
 

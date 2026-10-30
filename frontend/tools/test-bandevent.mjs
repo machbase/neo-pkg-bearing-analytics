@@ -95,6 +95,12 @@ chk(/GRADE, LIM, DETAIL/.test(SQL.eventsSelect(10)), 'SELECT가 DETAIL 포함');
     'DETAIL 왕복 값 보존');
   chk(p[0].ko === '결함 대역', '한글 라벨 복원', p.map((o) => o.ko).join(','));
   chk(VC.bandParse('').length === 0 && VC.bandParse(null).length === 0, '빈 DETAIL은 빈 배열(기존 4종 이벤트)');
+  // 포락선 계열(envBPFO 등 대문자 키)도 복원 — 예전 정규식([a-z]만)은 빠뜨려 이벤트 목록에서 누락
+  const envBls = { sub: { mu: 0.01, sigma: 0.005, k: 3 }, envBPFO: { mu: 0.05, sigma: 0.02, k: 3 }, envPkRel: { mu: 0.05, sigma: 0.02, k: 3 } };
+  const je = VC.bandJudge({ sub: 0.05, envBPFO: 0.3, envPkRel: 0.4 }, envBls, false);
+  const pe = VC.bandParse(je.detail);
+  chk(pe.length === je.over.length && pe.some((o) => o.k === 'envBPFO' && o.ko === VC.BAND_KO.envBPFO) && pe.some((o) => o.k === 'envPkRel'),
+    'DETAIL 왕복 — 포락선 계열 포함', je.detail + ' → ' + pe.map((o) => o.k).join(','));
 }
 
 // ── 판정 불가 ──────────────────────────────────────────────────────────────

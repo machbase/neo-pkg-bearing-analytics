@@ -5,7 +5,7 @@ weight: 20
 
 #
 
-> The app's screens are in Korean. This guide gives each screen label in English with the Korean label in parentheses where it helps you find it.
+> The app's screens can be shown in Korean, English, or Japanese ([Display language](#display-language)). This guide gives each screen label in English; a Korean label in parentheses is what the Korean screen shows.
 
 ## Entering the API token
 
@@ -29,11 +29,11 @@ Apart from the Neo console login, the app connects to the server with **an API t
 
 1. When you open the app, the settings screen shows only the **User info** (유저 정보) card. Until the token is verified, the other settings such as Data Source and the Monitoring, Detail Analysis and Report screens are not shown. Paste the copied token into the field **⑥** and press **Verify & save** (확인·저장) **⑦**.
 
-   ![Enter the API token in the app](../static/images/app-token-input.png)
+   ![Enter the API token in the app](../static/images/app-token-input.en.png)
 
 2. Once verified, the card shows the **signed-in account** (접속 계정) and the masked token, and the app runs as that account.
 
-   ![User info after the token is verified](../static/images/app-token-ok.png)
+   ![User info after the token is verified](../static/images/app-token-ok.en.png)
 
 - Only **a token of the account signed in to the console** is accepted. A token of another account is refused with "this is a token of account ○○" (○○ 계정의 토큰입니다) and not saved.
 - The token is stored **in this browser only**, per account. Enter it again in another browser or on another PC.
@@ -96,6 +96,25 @@ In **Settings → Data Source**, **Display time zone** sets which clock the scre
 - Data queries do not depend on any time zone — they always look at the same instant, even when the server and browser are in different zones.
 - To read times in the plant's local time, pick that region and save. Reports record the zone they were made in, and their charts use it too.
 
+## Display language
+
+Pick the screen language — Korean, English, or Japanese — with the **KO** · **EN** · **JA** button on the right side of the header.
+
+- Your choice is stored in the browser and kept when you reopen the app. On first open it follows the browser language, and starts in English if that language is not supported.
+- It is a per-browser setting, so other PCs and other people's screens are not affected.
+- Not only menus and messages but also assessment results, evidence, detailed actions, event reasons, and chart labels switch to the chosen language.
+
+Outputs that leave the screen follow these rules.
+
+| Output | Language |
+| :--- | :--- |
+| Reports | The screen language when generation starts. Existing reports stay as they are, so generate again if you need another language |
+| Event export (CSV · JSON) | The screen language at download time |
+| Webhook notifications | **Notification language** in **Settings → Alarm settings**, set separately from the screen language ([Notification language]({{< relref "alarms#notification-language" >}})) |
+| LLM findings | Requested in the screen language (for reports, the language when generation starts). Small local models may mix in Korean |
+
+Values you entered yourself, such as equipment aliases and tag names, are not translated. Event reasons recorded in the database are always stored in Korean, and appear in the chosen language on screen, in exports, and in notifications.
+
 ## Data Source
 
 First choose which data to analyze.
@@ -136,7 +155,7 @@ If a selected table or tag is removed from the DB or becomes empty, a change ban
 
 The app needs to know what each tag actually is before it can produce a grade. Tags with nothing set yet are marked with an amber dot.
 
-![Equipment settings screen](../static/images/settings-equipment.png)
+![Equipment settings screen](../static/images/settings-equipment.en.png)
 
 > **RPM and bearing model are required.** The fault pattern that switches the grade on is computed on a fault-frequency grid, and without shaft speed and bearing geometry that grid cannot be built. If either is missing, that tag's **grade never rises** — which is "cannot judge", not "normal". On screen:
 >
@@ -311,7 +330,7 @@ In **Per-channel training status**, the heading `trained X/Y` (학습됨 X/Y) co
 
 ## Alarms
 
-This section covers monitoring mode (app vs. server), evaluation interval and RMS window, and notifications (the webhook channel, per-severity delivery and re-notify). Alarm confirmation is not a minute-based setting; it is fixed at **two consecutive cycles**.
+This section covers monitoring mode (app vs. server), evaluation interval and RMS window, and notifications (the webhook channel, notification language, per-severity delivery and re-notify). Alarm confirmation is not a minute-based setting; it is fixed at **two consecutive cycles**.
 
 It has enough depth to warrant its own page → [Alarms & events]({{< relref "alarms" >}})
 

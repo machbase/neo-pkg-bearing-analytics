@@ -128,6 +128,14 @@ Enter the URL and press **Send test** (테스트 발송) to send one real messag
 
 If you need email or SMS, **relay the webhook through an automation tool**. Point the channel at the receiving URL of n8n, Node-RED, Zapier, or a Google Apps Script web app: the custom-endpoint payload carries an email subject (`subject`) and HTML body (`body`), so the receiver can turn it into mail or texts directly.
 
+### Notification language
+
+Choose the language of notification messages — Korean, English, or Japanese. It is set separately from the screen language, so you can use the screen in English while the site receives alerts in Korean.
+
+- At first, the current screen language is shown as selected. Press **Save** to apply it to server monitoring notifications. An account that has never saved it keeps sending in Korean, as before.
+- The subject (grade · type), the value line, and the event reason are all sent in that language. Equipment aliases and tag names stay as entered.
+- **Send test** uses the currently selected language even before you save, so you can check the wording first.
+
 ### Per-severity delivery
 
 For each severity, choose whether to notify, and how often to re-notify while an abnormal state continues.
@@ -264,7 +272,7 @@ Events appear in the list at the bottom of the **Monitoring** tab. Period chips 
 
 ## Checking that monitoring is alive
 
-"No events" has two meanings — the equipment is fine, or monitoring is not running. The app distinguishes these and reports at the top of the Monitoring screen. The messages appear in Korean; the English below is a translation.
+"No events" has two meanings — the equipment is fine, or monitoring is not running. The app distinguishes these and reports at the top of the Monitoring screen. The messages appear in the screen language.
 
 **Server monitoring**
 

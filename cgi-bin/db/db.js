@@ -341,7 +341,7 @@
     'source.json': ['srcSel', 'displayTz'], // 접속 토큰은 설정이 아닌 브라우저 토큰 칸에 둠
     'equipment.json': ['equipCls', 'equipRpm', 'equipBearing', 'equipGeo', 'equipUnit', 'equipMeta', 'lineHz', 'aliases', 'cardOrder', 'knownTags', 'revived'],
     'criteria.json': ['machineClass', 'classThresh', 'unitThresh'],
-    'monitor.json': ['monitorOn', 'evalWindow', 'notifCh', 'notifTo', 'routes', 'monitorInterval', 'monMode', 'renotify', 'bandOn', 'bandInterval', 'bandWin'],
+    'monitor.json': ['monitorOn', 'evalWindow', 'notifCh', 'notifTo', 'notifLang', 'routes', 'monitorInterval', 'monMode', 'renotify', 'bandOn', 'bandInterval', 'bandWin'],
     'llm.json': ['llmProvider', 'llmKeys', 'llmModels', 'ollamaUrl', 'genLLM'],
   };
   // 현재 계정 — whoami()로 서버 확인된 값만 받고 형식 재검사(표 이름·키 접두·경로에 쓰임)

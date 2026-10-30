@@ -5,7 +5,7 @@ weight: 60
 
 #
 
-The app's screens are in Korean; messages are quoted here in English with the Korean label where it helps.
+The app's screens can be shown in Korean, English, or Japanese; messages are quoted here in English, with the Korean wording where it helps.
 
 ## An "API 토큰이 없습니다" (no API token) or "token is not valid" notice appears
 

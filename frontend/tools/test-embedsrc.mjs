@@ -203,6 +203,32 @@ chk('isRunning의 정지 기준이 BL_IDLE_FRAC과 일치', () => {
     if (!r.envAlt) throw new Error('접전인데 종류를 단정했다 — envAmbig 가지를 안 탔다');
   });
 
+  // 알림 언어 — 서버 타이머처럼 notify serverSrc + 번역기(makeTx 소스)를 압축본으로 격리 실행, 개발 소스와 같은 문구
+  const minOf = async (rel, name) => {
+    const o = await esbuild.build({ entryPoints: [path.join(here, rel)], bundle: true, minify: true, format: 'esm', write: false });
+    const p = path.join(here, name);
+    await writeFile(p, o.outputFiles[0].text);
+    try { return (await import(pathToFileURL(p).href)).default; } finally { await rm(p, { force: true }); }
+  };
+  const MN = await minOf('../../cgi-bin/notify/notify.js', '_notify.min.test.mjs');
+  const MT = await minOf('../../cgi-bin/i18n/tx.js', '_tx.min.test.mjs');
+  const TxCore = (await import('../../cgi-bin/i18n/tx.js')).default;
+  const EN = (await import('../src/i18n/en.js')).default;
+  chk('압축본 알림 문구 + 번역기 격리 실행 — 영어 알림이 개발 소스와 같음', () => {
+    const base = { alias: 'A', tag: 'T', table: 'TB', unit: 'mm/s', timeText: 't' };
+    const evs = [
+      Object.assign({ etype: 'threshold', gradeKo: '위험', typeKo: '임계 초과', detail: '격자 3.2 · 외륜(BPFO) · 2회 연속 확정', val: 7.5, lim: 7.1 }, base),
+      Object.assign({ etype: 'signal_lost', gradeKo: '위험', typeKo: '신호 두절', detail: '1시간 30분 무수신', val: 0, lim: 0 }, base),
+      Object.assign({ etype: 'band', gradeKo: '주의', typeKo: '대역 이탈', detail: 'sub=0.050/0.025 · vh4=0.030/0.016(잠정)', val: 1.9, lim: 1 }, base),
+    ];
+    const send = new Function(MN.serverSrc() + '\nvar makeTx = ' + MT.makeTx.toString() + ';\nreturn function (ev, d) { return eventMessage(ev, makeTx(d, true)); };')();
+    evs.forEach((ev) => {
+      const r = send(ev, EN), want = Notify.eventMessage(ev, TxCore.makeTx(EN, true));
+      if (JSON.stringify(r) !== JSON.stringify(want)) throw new Error('압축본/개발 소스 불일치\n  서버: ' + r.text + '\n  앱  : ' + want.text);
+      if (/[가-힣]/.test(r.subject + r.text)) throw new Error('번역 안 됨: ' + r.text);
+    });
+  });
+
   await rm(minPath, { force: true });
 }
 

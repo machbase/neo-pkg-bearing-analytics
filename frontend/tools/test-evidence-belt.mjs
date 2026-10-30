@@ -86,7 +86,7 @@ const mkApp = () => {
 {
   const { readFile } = await import('node:fs/promises');
   const src = await readFile(new URL('../src/app.js', import.meta.url), 'utf8');
-  const line = (src.split('\n').find((l) => l.includes("mk('벨트·풀리(Belt)'")) || '');
+  const line = (src.split('\n').find((l) => /mk\((T\()?'벨트·풀리\(Belt\)'/.test(l)) || '');
   chk(/\(beltHit && hasBeltLen\)/.test(line), '벨트 근거문구는 beltHit을 함께 확인한다', line.trim().slice(0, 90));
 }
 

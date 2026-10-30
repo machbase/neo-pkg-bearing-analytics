@@ -8,6 +8,9 @@ import './styles/theme-light.css';
 import './styles/base.css';
 import './styles/hover.css';
 import { App } from './app.js';
+import { initLang } from './i18n.js';
+
+initLang();
 
 render(
   html`<${App} defaultTab="monitor" defaultTheme="dark" seed=${42} equipmentCount=${20} />`,

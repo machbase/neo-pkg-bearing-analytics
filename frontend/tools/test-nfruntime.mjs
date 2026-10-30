@@ -79,7 +79,8 @@ chk(/해독/.test(Notify.configFromRows([['cfg:monitor#0', '%E0%A4%A']], 'monito
   const old = (S) => {
     const out = {};
     DEFS.order.forEach((k) => { const r = (S.routes || {})[k]; out[k] = r ? r : { timing: DEFS.timing[k] }; });
-    return { channels: { webhook: { on: !!(S.notifCh || {}).webhook, to: (S.notifTo || {}).webhook || '' } }, routes: out };
+    // lang — 알림 언어(10-30 추가, 저장 전 옛 설정은 '' = 한국어)
+    return { channels: { webhook: { on: !!(S.notifCh || {}).webhook, to: (S.notifTo || {}).webhook || '' } }, routes: out, lang: '' };
   };
   const states = [
     {},
@@ -111,7 +112,7 @@ const line = (needle) => {
 };
 const SRV = [line('var NFON='), line('var NOTIFY='), line('var NFSRC='), line('var NFERR='), 'var NQ=[];',
   line('var GW='), line('var TYPEKO='), 'function fmtTs(ms){ return "T" + ms; }', 'function fmtShow(ms){ return "T" + ms; }', Notify.serverSrc(),
-  fnSrc('loadNotify'), fnSrc('notifyEvent'), fnSrc('flushNotify')].join('\n');
+  line('var NDICT='), fnSrc('notifyL'), fnSrc('loadNotify'), fnSrc('notifyEvent'), fnSrc('flushNotify')].join('\n');
 
 function round(rowsOrErr, nEvents) {
   const sent = [], queries = [];

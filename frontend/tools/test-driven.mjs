@@ -119,7 +119,7 @@ const F = app.data.equipment.find((e) => e.name === 'FAN'), M = app.data.equipme
   const liveSrc = (await import('node:fs')).readFileSync(new URL('../src/data/live.js', import.meta.url), 'utf8');
   const rptSrc = (await import('node:fs')).readFileSync(new URL('../../cgi-bin/report/report.js', import.meta.url), 'utf8');
   // 리포트의 회전수 기준은 FFT 머리의 summary.rpmTxt(위 '리포트 요약' 검사가 종동축 표기 확인)
-  chk(/eq\.rpmSrc === 'pulley' \? '종동축 1×\(풀리 환산\) 기준'/.test(liveSrc) && /'회전수 ' \+ sm\.rpmTxt/.test(rptSrc) && !/명판값을/.test(rptSrc),
+  chk(/eq\.rpmSrc === 'pulley' \? '종동축 1×\(풀리 환산\) 기준'/.test(liveSrc) && /'회전수 ' \+ sm\.rpmTxt|T\('회전수 \{0\}', sm\.rpmTxt\)/.test(rptSrc) && !/명판값을/.test(rptSrc),
     '켑스트럼 기준 1×·리포트 회전수 표기 — 종동측을 "명판"이라 하지 않음');
   Object.assign(app.state, { tab: 'settings' });
 }

@@ -5,13 +5,13 @@ weight: 30
 
 #
 
-Once setup is done, you work across three main tabs — Monitoring · Detail Analysis · Report. The app's screens are in Korean; Korean labels are given in parentheses where they help.
+Once setup is done, you work across three main tabs — Monitoring · Detail Analysis · Report. The screens can be shown in Korean, English, or Japanese; a Korean label in parentheses is what the Korean screen shows.
 
 ## Monitoring
 
 The at-a-glance view of every piece of equipment.
 
-![Monitoring screen](../static/images/monitoring.png)
+![Monitoring screen](../static/images/monitoring.en.png)
 
 ### Summary bar
 
@@ -74,7 +74,7 @@ This exists so you can tell whether "no events" means the equipment is fine or m
 
 The event list below shows recorded events with **time · tag · type · detail · grade**. Click any row to open detail analysis at the moment that event occurred.
 
-![Event list](../static/images/events.png)
+![Event list](../static/images/events.en.png)
 
 The **detail** cell shows, by type:
 
@@ -98,6 +98,8 @@ The fault pattern's grid score, site, and cycle (e.g. `격자 3.2 · 외륜(BPFO
 Press **Save** (저장) in the event list to open a dialog for choosing a period and file format (CSV · JSON), then download the events for that period. Unlike the list, the file includes events of deselected tables too.
 
 The CSV columns are time · table · tag · alias · type · grade · value · limit · detail.
+
+Column names and the type, grade, and detail values are written in the screen language at download time. JSON key names (`time`, `grade`, …) are always English.
 
 > How alarm evaluation decides when to create events is covered in [Alarms & events]({{< relref "alarms" >}}).
 
@@ -128,7 +130,7 @@ A single grey **DC component** (DC 성분) line without the warning box is not a
 
 The top of the card shows the overall grade (the bar under it marks which of the four steps it is), the verdict, and one line on how the two axes produced the grade (for example "fault pattern present + ISO zone A → Warning"). Below them come **what to do now** (지금 할 일) and the supporting facts (evidence score, plus the **judgment time** and how many of the period's segments gave the same verdict); without RPM or a bearing, "criteria n/N (… not applied)" is shown as well. A reason sentence is added only when that one line cannot explain the result, such as when the fault pattern could not be measured or the vibration is high with no pattern.
 
-![Severity assessment in Detail Analysis](../static/images/detail-severity.png)
+![Severity assessment in Detail Analysis](../static/images/detail-severity.en.png)
 
 Two boxes underneath show how the grade was set. **① Fault pattern** (① 결함 패턴) is the axis that switches the grade on (none / present), and **② Vibration magnitude** (② 진동 크기) is the axis that sets its height — the ISO zone A–D bar fills up to the current value, and the row below lists the grade each zone gives when a fault pattern is present (A·B → Warning, C → Danger, D → Critical). The zone bar uses no grade colors, and the zones are named by their ISO meaning (A new-machine level · B long-term operation OK · C restricted operation · D damage likely) rather than by grade words.
 
@@ -174,13 +176,13 @@ Falling kurtosis normally reads as "getting better", but this combination can me
 | Cepstrum | Periodic structure in harmonics and sidebands |
 | Diagnostic indicators (time domain) | Impulse and energy indicators computed from the raw waveform |
 
-![Envelope analysis chart — peaks at BPFO and 2×BPFO](../static/images/detail-envelope.png)
+![Envelope analysis chart — peaks at BPFO and 2×BPFO](../static/images/detail-envelope.en.png)
 
 ### Diagnosis and action details
 
 Press **Expand comprehensive analysis** (종합 분석 펼치기) to see the rule-based diagnosis. It calls out faults such as imbalance, misalignment, bearing inner/outer race, looseness, and gear issues, and presents **supporting evidence** (with the indicator each piece came from) alongside **action details** (how to carry out what to do now, and what would strengthen the verdict, each with its reason).
 
-![Comprehensive analysis — supporting evidence and action details](../static/images/detail-diagnosis.png)
+![Comprehensive analysis — supporting evidence and action details](../static/images/detail-diagnosis.en.png)
 
 Action details are not a fixed list: only the items that match the verdict (fault pattern · vibration magnitude · impulsiveness · trend · vibration of unknown origin · missing equipment information) are picked, up to five. When a measurement gate is active, only measurement checks appear and no machine inspection items.
 
@@ -194,13 +196,15 @@ The opinion is written for the equipment owner rather than a vibration specialis
 
 The verdict (grade · cause ranking · actions) has already been set by the engine; the LLM only explains what it means. It never recomputes values or reorders the ranking, closes on a provisional note when the measurement warning is up, never describes items that are undecidable in principle as "unlikely", and does not inflate the grade. Recommended actions cover only the on-screen what to do now and action details — the LLM does not invent new ones.
 
+Findings are requested in the screen language. For English and Japanese, an output-language instruction is added at the end of the prompt. Small local models may not follow it fully and can mix in Korean.
+
 Without an LLM connected, the rule-based diagnosis stands on its own.
 
 ## Report
 
 Where you turn analysis into a document.
 
-![Report generation and archive](../static/images/report-archive.png)
+![Report generation and archive](../static/images/report-archive.en.png)
 
 1. Select the **target tags** for the report. (nothing is selected by default; select-all is available)
 2. Choose a **period** — presets (1 hour · 6 hours · 24 hours · All) are anchored **per tag, to that tag's latest data**; a range set in the calendar applies as-is to every selected tag. If some tags have no data in a custom range, a warning shows where their data actually is.
@@ -209,13 +213,15 @@ Where you turn analysis into a document.
 
 **One report file is created for each selected tag.** The file name looks like `tagname_timestamp.html`.
 
+Reports are made in **the screen language when generation starts**. Changing the language during a batch does not affect that batch. Existing reports do not change, so generate again if you need another language.
+
 Generation runs in four steps — query data → compute indicators → generate opinion → save — with progress shown. If it takes too long, **Cancel generation** stops it. Finished reports are saved under the signed-in account's folder (`<account>/vibration-reports/`, with the account name in lowercase).
 
 ### Report structure
 
 The **Summary** (요약) · **Full analysis** (전체 분석) tabs at the top of the report switch the view. Summary is built for a quick read; Full analysis lays out every chart and all evidence in numbered sections (01 Severity through 05 Action details). The **View evidence** (근거 보기) and **View in-depth analysis** (심층 분석 보기) links in the summary jump to the matching section of the full analysis.
 
-![Report Summary tab](../static/images/report-summary.png)
+![Report Summary tab](../static/images/report-summary.en.png)
 
 | Tab | Contents |
 | :--- | :--- |

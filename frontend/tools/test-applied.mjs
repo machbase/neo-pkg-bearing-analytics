@@ -145,9 +145,11 @@ app.setState(Object.assign({ dirty: true }, EDIT));
     '대역 추출 주기 확정 → 그 값만 저장·적용(타이머 격자와 채운 값이 같은 주기)', b3.bandInterval);
 
   app._pickLlmProvider('openai');
+  // 저장 왕복 전 — 드롭다운 값이 적용본이라 바로 바뀌어야 한 번에 선택됨(늦으면 다시 그리기가 옛 값으로 되돌림)
+  const b4now = app._ac().llmProvider;
   await settle();
   const b4 = await DB.loadConfig();
-  chk(b4.llmProvider === 'openai' && JSON.stringify(b4.classThresh) === '{}', 'LLM 선택 → 그 값만 저장');
+  chk(b4now === 'openai' && b4.llmProvider === 'openai' && JSON.stringify(b4.classThresh) === '{}', 'LLM 선택 → 바로 적용(드롭다운 한 번에) · 그 값만 저장', b4now);
 }
 
 // ── 저장 안 함 = 되돌림 ────────────────────────────────────────────────

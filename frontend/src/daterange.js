@@ -3,11 +3,18 @@
 import { Component } from 'preact/compat';
 import { html } from './html.js';
 import CH from '../../cgi-bin/chart/chart.js';
+import { T, getLang } from './i18n.js';
 
 /* 열린 팝오버 수 — app.js 틱이 참조해 열려 있는 동안 자동 갱신 중지(고르는 중 값 되돌림 방지) */
 export var pickerOpen = { n: 0 };
 
-var WD = ['일', '월', '화', '수', '목', '금', '토'];
+// 요일·달 제목은 언어별 표기 — 낱자 키('일'·'월')는 '일(day)'·'월(month)'과 겹침
+var WD = { ko: ['일', '월', '화', '수', '목', '금', '토'], en: ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'], ja: ['日', '月', '火', '水', '木', '金', '土'] };
+var MON_EN = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+function monthTitle(y, m) {
+  var l = getLang();
+  return l === 'en' ? MON_EN[m - 1] + ' ' + y : l === 'ja' ? y + '年' + m + '月' : y + '년 ' + m + '월';
+}
 var CELL = 30;           // 날짜 칸 너비(px) — 달 하나 = 7칸
 var MONTH_W = CELL * 7;
 var PANEL_PAD = 14;
@@ -40,11 +47,11 @@ function viewFor(fromMs, toMs, months) {
 function spanText(ms) {
   if (!(ms > 0)) return '';
   var mi = Math.round(ms / 60000);
-  if (mi < 60) return mi + '분';
+  if (mi < 60) return T('{0}분', mi);
   var h = ms / 3600000;
-  if (h < 48) return (h < 10 ? h.toFixed(1) : String(Math.round(h))) + '시간';
+  if (h < 48) return T('{0}시간', h < 10 ? h.toFixed(1) : String(Math.round(h)));
   var d = h / 24;
-  return (d < 10 ? d.toFixed(1) : String(Math.round(d))) + '일';
+  return T('{0}일', d < 10 ? d.toFixed(1) : String(Math.round(d)));
 }
 /* 팝오버 시각 입력 여부 — mode='date'면 기본 날짜만, showTime으로 재지정
    (일 단위로 고르되 값은 날짜+시각 형식으로 내보내는 자리 있음) */
@@ -152,7 +159,7 @@ export class DateRange extends Component {
     var st = this.state, b = this._bounds();
     var edge = dir < 0 ? st.view : addMonths(st.view, st.months - 1);
     var off = dir < 0 ? !!(b.minD && edge <= monthStart(b.minD)) : !!(b.maxD && edge >= monthStart(b.maxD));
-    if (off) { this._notify((dir < 0 ? '이전' : '다음') + ' 달에는 데이터가 없습니다'); return; }
+    if (off) { this._notify(dir < 0 ? T('이전 달에는 데이터가 없습니다') : T('다음 달에는 데이터가 없습니다')); return; }
     clearTimeout(this._noticeT);
     this.setState({ view: addMonths(st.view, dir), notice: '' });
   }
@@ -160,7 +167,7 @@ export class DateRange extends Component {
   _pickDay(ms) {
     var st = this.state, b = this._bounds();
     // 데이터 없는 날은 선택 불가 — 무시하지 않고 이유 표시
-    if ((b.minD && ms < b.minD) || (b.maxD && ms > b.maxD)) { this._notify('그 날짜에는 데이터가 없습니다'); return; }
+    if ((b.minD && ms < b.minD) || (b.maxD && ms > b.maxD)) { this._notify(T('그 날짜에는 데이터가 없습니다')); return; }
     clearTimeout(this._noticeT);
     if (st.pick === 0) this.setState({ fromDay: ms, toDay: ms, pick: 1, hover: ms, notice: '' });
     else if (ms < st.fromDay) this.setState({ fromDay: ms, toDay: st.fromDay, pick: 0, hover: 0, notice: '' });
@@ -221,14 +228,14 @@ export class DateRange extends Component {
       if (tt != null) s.tt = tt;
       self.setState(s);
     };
-    var back = function (n) { return { label: '최근 ' + n + '일', on: function () { set(end - (n - 1) * 86400000, end, '00:00', endT()); } }; };
+    var back = function (n) { return { label: T('최근 {0}일', n), on: function () { set(end - (n - 1) * 86400000, end, '00:00', endT()); } }; };
     var prev = dayStart(end - 43200000);
     var list = [
-      { label: atEnd ? '마지막 날' : '오늘', on: function () { set(end, end, '00:00', endT()); } },
-      { label: atEnd ? '그 전날' : '어제', on: function () { set(prev, prev, '00:00', '23:59'); }, off: !!(b.minD && prev < b.minD) },
+      { label: atEnd ? T('마지막 날') : T('오늘'), on: function () { set(end, end, '00:00', endT()); } },
+      { label: atEnd ? T('그 전날') : T('어제'), on: function () { set(prev, prev, '00:00', '23:59'); }, off: !!(b.minD && prev < b.minD) },
       back(7), back(30),
     ];
-    if (ut) list.push({ label: '하루 전체', on: function () { self.setState({ ft: '00:00', tt: '23:59' }); } });
+    if (ut) list.push({ label: T('하루 전체'), on: function () { self.setState({ ft: '00:00', tt: '23:59' }); } });
     return list;
   }
   _month(anchor, key) {
@@ -260,16 +267,16 @@ export class DateRange extends Component {
           + ' background: ' + bg + '; color: ' + color + '; font-weight: ' + (edge ? '700' : '400') + ';'
           + (ms === today && !edge ? ' box-shadow: inset 0 0 0 1px var(--border-medium);' : '')
           + (outside ? ' opacity: .4; cursor: default;' : ' cursor: pointer;');
-        return html`<button type="button" title=${outside ? '이 날짜에는 데이터가 없습니다' : ''}
+        return html`<button type="button" title=${outside ? T('이 날짜에는 데이터가 없습니다') : ''}
           onClick=${function () { self._pickDay(ms); }}
           onMouseEnter=${outside ? null : function () { if (self.state.pick === 1) self.setState({ hover: ms }); }}
           style=${style}>${dayN}</button>`;
       })(n));
     }
     return html`<div key=${key} style="width: ${MONTH_W}px;">
-      <div style="text-align: center; font-size: 12px; font-weight: 600; color: var(--text-primary); margin-bottom: 6px;">${y}년 ${mo + 1}월</div>
+      <div style="text-align: center; font-size: 12px; font-weight: 600; color: var(--text-primary); margin-bottom: 6px;">${monthTitle(y, mo + 1)}</div>
       <div style="display: grid; grid-template-columns: repeat(7, ${CELL}px);">
-        ${WD.map((w, i) => html`<span style="height: 22px; display: inline-flex; align-items: center; justify-content: center; font-size: 11px; color: ${i === 0 ? 'var(--danger)' : i === 6 ? 'var(--cal-sat)' : 'var(--text-muted)'};">${w}</span>`)}
+        ${(WD[getLang()] || WD.ko).map((w, i) => html`<span style="height: 22px; display: inline-flex; align-items: center; justify-content: center; font-size: 11px; color: ${i === 0 ? 'var(--danger)' : i === 6 ? 'var(--cal-sat)' : 'var(--text-muted)'};">${w}</span>`)}
       </div>
       <div style="display: grid; grid-template-columns: repeat(7, ${CELL}px); row-gap: 2px;">${cells}</div>
     </div>`;
@@ -287,9 +294,9 @@ export class DateRange extends Component {
     for (var i = 0; i < st.months; i++) months.push(this._month(addMonths(st.view, i), 'm' + i));
     var bd = this._bounds();
     // 한쪽만 알 때(통계에 시작 시각 없음 등)는 아는 쪽만 표기
-    var hintTxt = p.hint || (bd.minD && bd.maxD ? '데이터 ' + fmtVal(bd.minD, false) + ' ~ ' + fmtVal(bd.maxD, false)
-      : bd.maxD ? '데이터 ' + fmtVal(bd.maxD, false) + '까지'
-        : bd.minD ? '데이터 ' + fmtVal(bd.minD, false) + '부터' : '');
+    var hintTxt = p.hint || (bd.minD && bd.maxD ? T('데이터 {0} ~ {1}', fmtVal(bd.minD, false), fmtVal(bd.maxD, false))
+      : bd.maxD ? T('데이터 {0}까지', fmtVal(bd.maxD, false))
+        : bd.minD ? T('데이터 {0}부터', fmtVal(bd.minD, false)) : '');
     var navBtn = function (dir, label, icon) {
       return html`<button type="button" title=${label} onClick=${function () { self._navMonth(dir); }}
         style=${navStyle + ' cursor: pointer;'}><span class="codicon codicon-${icon}" style="font-size: 14px;"></span></button>`;
@@ -299,20 +306,20 @@ export class DateRange extends Component {
       <div ref=${function (el) { self._panelEl = el; }} onMouseLeave=${function () { if (st.pick === 1) self.setState({ hover: 0 }); }}
         style="position: fixed; left: ${st.left}px; top: ${st.top}px; width: ${w}px; z-index: 901; box-sizing: border-box; padding: ${PANEL_PAD}px; border-radius: 10px; border: 1px solid var(--border-medium); background: var(--bg-elevated); box-shadow: 0 10px 34px rgba(0,0,0,.45);">
         <div style="display: flex; align-items: center; margin-bottom: 8px;">
-          ${navBtn(-1, '이전 달', 'chevron-left')}
+          ${navBtn(-1, T('이전 달'), 'chevron-left')}
           <div style="flex: 1; display: flex; flex-wrap: wrap; justify-content: center; gap: 5px;">
             ${this._quick().map((q) => html`<button type="button" disabled=${!!q.off} onClick=${q.off ? null : q.on}
               style=${chip + (q.off ? ' opacity: .35; cursor: default;' : ' cursor: pointer;')}>${q.label}</button>`)}
           </div>
-          ${navBtn(1, '다음 달', 'chevron-right')}
+          ${navBtn(1, T('다음 달'), 'chevron-right')}
         </div>
         <div style="display: flex; gap: ${MONTH_GAP}px; justify-content: center;">${months}</div>
         <div style="display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border-light);">
-          <span style="font-size: 11px; color: var(--text-muted);">시작</span>
+          <span style="font-size: 11px; color: var(--text-muted);">${T('시작')}</span>
           <span style="font-size: 12px; font-family: var(--font-mono); color: var(--text-secondary);">${fmtVal(st.fromDay, false)}</span>
           ${(ut) ? html`<input value=${st.ft} maxlength="5" onInput=${this._timeInput('ft')} onBlur=${this._timeFix('ft', '00:00')} onKeyDown=${this._timeKey('ft', '00:00')} style=${timeStyle} />` : null}
           <span style="color: var(--text-muted);">~</span>
-          <span style="font-size: 11px; color: var(--text-muted);">종료</span>
+          <span style="font-size: 11px; color: var(--text-muted);">${T('종료')}</span>
           <span style="font-size: 12px; font-family: var(--font-mono); color: var(--text-secondary);">${fmtVal(st.toDay, false)}</span>
           ${(ut) ? html`<input value=${st.tt} maxlength="5" onInput=${this._timeInput('tt')} onBlur=${this._timeFix('tt', '23:59')} onKeyDown=${this._timeKey('tt', '23:59')} style=${timeStyle} />` : null}
         </div>
@@ -322,13 +329,13 @@ export class DateRange extends Component {
               <span class="codicon codicon-info" style="font-size: 12px;"></span>${st.notice}
             </span>` : html`
             <span style="font-size: 11px; color: ${r.bad ? 'var(--danger)' : 'var(--text-muted)'};">
-              ${r.bad ? '종료가 시작보다 빠릅니다'
+              ${r.bad ? T('종료가 시작보다 빠릅니다')
         // 날짜만 고르는 자리는 일수로 표시 — 시간 단위(24.0시간)는 세어야 읽힘
-        : '선택 구간 ' + (ut ? spanText(r.t - r.f) : (Math.round((st.toDay - st.fromDay) / 86400000) + 1) + '일')}
+        : T('선택 구간 {0}', ut ? spanText(r.t - r.f) : T('{0}일', Math.round((st.toDay - st.fromDay) / 86400000) + 1))}
             </span>
             ${(!r.bad && hintTxt) ? html`<span style="font-size: 11px; color: var(--text-muted);">· ${hintTxt}</span>` : null}`}
-          <button type="button" onClick=${this._cancel} style="margin-left: auto; height: 30px; padding: 0 12px; border-radius: 6px; border: 1px solid var(--border-default); background: transparent; color: var(--text-secondary); font-size: 12px; cursor: pointer;">취소</button>
-          <button type="button" onClick=${this._apply} disabled=${r.bad} title="고른 기간을 반영합니다 (Enter)" style=${applyStyle}>적용</button>
+          <button type="button" onClick=${this._cancel} style="margin-left: auto; height: 30px; padding: 0 12px; border-radius: 6px; border: 1px solid var(--border-default); background: transparent; color: var(--text-secondary); font-size: 12px; cursor: pointer;">${T('취소')}</button>
+          <button type="button" onClick=${this._apply} disabled=${r.bad} title=${T('고른 기간을 반영합니다 (Enter)')} style=${applyStyle}>${T('적용')}</button>
         </div>
       </div>`;
   }
@@ -338,7 +345,7 @@ export class DateRange extends Component {
     /* 시각 입력 자리는 항상 시각 표기, 그 외(mode='date' 제외)는 하루 경계에 안 맞는 구간(프리셋·이벤트 클릭 등)만 */
     var withT = useTime(p) || (p.mode !== 'date' && !dayBounded(f, t));
     // label 있으면 구간 대신 표기 — 태그마다 구간이 다른 프리셋 등 단일 구간 표기가 틀리는 자리용
-    var label = p.label || ((isNaN(f) || isNaN(t)) ? (p.placeholder || '기간 선택') : rangeLabel(f, t, withT));
+    var label = p.label || ((isNaN(f) || isNaN(t)) ? (p.placeholder || T('기간 선택')) : rangeLabel(f, t, withT));
     /* 직접 고른 구간 표시 색은 --info(--primary-*는 다크 표면에서 대비 부족)
        글자는 두 테마 모두 --text-primary, 강조는 옅은 배경·테두리 */
     var on = !!p.active;
@@ -350,7 +357,7 @@ export class DateRange extends Component {
       + (p.disabled ? ' opacity: .5; cursor: default;' : ' cursor: pointer;');
     return html`<span style=${'position: relative;' + (p.full ? ' display: block;' : ' display: inline-block;')}>
       <button type="button" ref=${function (el) { self._btnEl = el; }} onClick=${this._toggle} disabled=${!!p.disabled}
-        title=${p.title || '달력에서 기간을 고릅니다'} style=${btn}>
+        title=${p.title || T('달력에서 기간을 고릅니다')} style=${btn}>
         <span class="codicon codicon-calendar" style="font-size: 13px; color: var(--info);"></span>
         <span>${label}</span>
         <span class="codicon codicon-chevron-down" style="font-size: 12px; margin-left: auto; color: var(--text-muted);"></span>
